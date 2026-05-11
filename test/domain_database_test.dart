@@ -203,13 +203,28 @@ void main() {
 
         final candidates = domain.getRelatedSources(secondId);
         expect(candidates.any((link) => link.status == 'candidate'), isTrue);
+        final candidate = candidates.firstWhere(
+          (link) => link.comicId == secondId && link.status == 'candidate',
+        );
+        domain.acceptWorkSource(
+          workId: candidate.workId,
+          comicId: candidate.comicId,
+          timestamp: 22,
+        );
+        domain.ensureWorkForComic(comicId: secondId, timestamp: 23);
+        final acceptedLinks = domain.getRelatedSources(secondId);
+        expect(acceptedLinks, hasLength(2));
+        expect(
+          acceptedLinks.map((link) => link.comicId).toSet().length,
+          acceptedLinks.length,
+        );
 
         final workId = domain.linkSourceComics(
           sourcePlatform: picacg,
           sourceComicId: 'same-a',
           targetPlatform: ehentai,
           targetSourceComicId: 'same-b',
-          timestamp: 22,
+          timestamp: 24,
         );
         final links = domain.getRelatedSources(firstId);
         expect(workId, startsWith('work:'));

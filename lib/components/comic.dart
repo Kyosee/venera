@@ -340,7 +340,7 @@ class ComicTile extends StatelessWidget {
                           TextField(
                             controller: sourceKeyController,
                             decoration: InputDecoration(
-                              labelText: 'Source Key'.tl,
+                              labelText: 'Source identifier'.tl,
                               border: const OutlineInputBorder(),
                             ),
                           ),
@@ -348,7 +348,7 @@ class ComicTile extends StatelessWidget {
                           TextField(
                             controller: comicIdController,
                             decoration: InputDecoration(
-                              labelText: 'Comic ID'.tl,
+                              labelText: 'Comic identifier or URL'.tl,
                               border: const OutlineInputBorder(),
                             ),
                           ),
@@ -827,6 +827,8 @@ class _RelatedSourceRow extends StatelessWidget {
     final confidence = link.confidence == null
         ? ''
         : ' ${(link.confidence! * 100).round()}%';
+    final author = link.comicAuthor?.replaceAll('\n', ' ').trim();
+    final comicStatus = link.comicStatus?.replaceAll('\n', ' ').trim();
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -836,12 +838,30 @@ class _RelatedSourceRow extends StatelessWidget {
       ),
       child: Row(
         children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: SizedBox(
+              width: 38,
+              height: 52,
+              child: link.comicCoverUri == null || link.comicCoverUri!.isEmpty
+                  ? ColoredBox(color: context.colorScheme.surfaceContainerHigh)
+                  : AnimatedImage(
+                      image: CachedImageProvider(
+                        link.comicCoverUri!,
+                        sourceKey: _sourceKeyFromPlatformId(link.platformId),
+                        cid: link.sourceComicId,
+                      ),
+                      fit: BoxFit.cover,
+                    ),
+            ),
+          ),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${link.sourceName} / ${link.sourceComicId}',
+                  link.comicTitle.replaceAll('\n', ' '),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontWeight: FontWeight.w600),
@@ -849,6 +869,10 @@ class _RelatedSourceRow extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   [
+                    link.sourceName,
+                    if (author != null && author.isNotEmpty) author,
+                    if (comicStatus != null && comicStatus.isNotEmpty)
+                      comicStatus,
                     statusText,
                     sourceText,
                     if (confidence.isNotEmpty) confidence.trim(),
@@ -885,6 +909,14 @@ class _RelatedSourceRow extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  String _sourceKeyFromPlatformId(String platformId) {
+    const remotePrefix = 'remote:';
+    if (platformId.startsWith(remotePrefix)) {
+      return platformId.substring(remotePrefix.length);
+    }
+    return platformId;
   }
 }
 

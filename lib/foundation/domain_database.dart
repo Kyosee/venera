@@ -39,9 +39,13 @@ class DomainComicSourceLink {
   const DomainComicSourceLink({
     required this.workId,
     required this.comicId,
+    required this.comicTitle,
     required this.platformId,
     required this.sourceComicId,
     required this.sourceName,
+    required this.comicAuthor,
+    required this.comicStatus,
+    required this.comicCoverUri,
     required this.status,
     required this.linkSource,
     required this.confidence,
@@ -49,9 +53,13 @@ class DomainComicSourceLink {
 
   final String workId;
   final String comicId;
+  final String comicTitle;
   final String platformId;
   final String sourceComicId;
   final String sourceName;
+  final String? comicAuthor;
+  final String? comicStatus;
+  final String? comicCoverUri;
   final String status;
   final String linkSource;
   final double? confidence;
@@ -481,24 +489,63 @@ class DomainDatabase {
   List<DomainComicSourceLink> getRelatedSources(String comicId) {
     final rows = db.select(
       '''
+      WITH related AS (
+        SELECT
+          ws.work_id,
+          cs.comic_id,
+          c.title,
+          c.author,
+          c.status AS comic_status,
+          c.cover_uri,
+          cs.platform_id,
+          cs.source_comic_id,
+          sp.display_name,
+          ws.link_status,
+          ws.link_source,
+          ws.confidence,
+          ROW_NUMBER() OVER (
+            PARTITION BY cs.comic_id
+            ORDER BY
+              CASE ws.link_status
+                WHEN 'accepted' THEN 0
+                WHEN 'candidate' THEN 1
+                ELSE 2
+              END,
+              ws.confidence DESC,
+              CASE ws.link_source WHEN 'manual' THEN 0 ELSE 1 END
+          ) AS rank
+        FROM work_sources current
+        JOIN work_sources ws ON ws.work_id = current.work_id
+        JOIN comic_sources cs ON cs.comic_id = ws.comic_id
+        JOIN comics c ON c.comic_id = cs.comic_id
+        JOIN source_platforms sp ON sp.platform_id = cs.platform_id
+        WHERE current.comic_id = ?
+          AND current.link_status != 'rejected'
+          AND ws.link_status != 'rejected'
+      )
       SELECT
-        ws.work_id,
-        cs.comic_id,
-        cs.platform_id,
-        cs.source_comic_id,
-        sp.display_name,
-        ws.link_status,
-        ws.link_source,
-        ws.confidence
-      FROM work_sources current
-      JOIN work_sources ws ON ws.work_id = current.work_id
-      JOIN comic_sources cs ON cs.comic_id = ws.comic_id
-      JOIN source_platforms sp ON sp.platform_id = cs.platform_id
-      WHERE current.comic_id = ?
+        work_id,
+        comic_id,
+        title,
+        author,
+        comic_status,
+        cover_uri,
+        platform_id,
+        source_comic_id,
+        display_name,
+        link_status,
+        link_source,
+        confidence
+      FROM related
+      WHERE rank = 1
       ORDER BY
-        CASE ws.link_status WHEN 'accepted' THEN 0 WHEN 'candidate' THEN 1 ELSE 2 END,
-        ws.confidence DESC,
-        sp.display_name;
+        CASE link_status
+          WHEN 'accepted' THEN 0
+          WHEN 'candidate' THEN 1
+          ELSE 2
+        END,
+        confidence DESC,
+        display_name;
       ''',
       [comicId],
     );
@@ -510,6 +557,8 @@ class DomainDatabase {
     required String comicId,
     int? timestamp,
   }) {
+    final now = timestamp ?? DateTime.now().millisecondsSinceEpoch;
+    _removeCompetingWorkSources(workId: workId, comicId: comicId);
     db.execute(
       '''
       UPDATE work_sources
@@ -518,7 +567,7 @@ class DomainDatabase {
           updated_at = ?
       WHERE work_id = ? AND comic_id = ?;
       ''',
-      [timestamp ?? DateTime.now().millisecondsSinceEpoch, workId, comicId],
+      [now, workId, comicId],
     );
   }
 
@@ -718,6 +767,11 @@ class DomainDatabase {
     int? timestamp,
   }) {
     final now = timestamp ?? DateTime.now().millisecondsSinceEpoch;
+    if (status == 'accepted') {
+      _removeCompetingWorkSources(workId: workId, comicId: comicId);
+    } else if (status == 'candidate' && _hasAcceptedWorkSource(comicId)) {
+      return;
+    }
     db.execute(
       '''
       INSERT INTO work_sources (
@@ -736,6 +790,34 @@ class DomainDatabase {
         updated_at = excluded.updated_at;
       ''',
       [workId, comicId, status, linkSource, confidence, now, now],
+    );
+  }
+
+  bool _hasAcceptedWorkSource(String comicId) {
+    return db
+        .select(
+          '''
+          SELECT 1 FROM work_sources
+          WHERE comic_id = ? AND link_status = 'accepted'
+          LIMIT 1;
+          ''',
+          [comicId],
+        )
+        .isNotEmpty;
+  }
+
+  void _removeCompetingWorkSources({
+    required String workId,
+    required String comicId,
+  }) {
+    db.execute(
+      '''
+      DELETE FROM work_sources
+      WHERE comic_id = ?
+        AND work_id != ?
+        AND link_status IN ('candidate', 'accepted');
+      ''',
+      [comicId, workId],
     );
   }
 
@@ -760,10 +842,14 @@ class DomainDatabase {
     return DomainComicSourceLink(
       workId: row['work_id'] as String,
       comicId: row['comic_id'] as String,
+      comicTitle: row['title'] as String? ?? row['source_comic_id'] as String,
       platformId: row['platform_id'] as String,
       sourceComicId: row['source_comic_id'] as String,
       sourceName:
           row['display_name'] as String? ?? row['platform_id'] as String,
+      comicAuthor: row['author'] as String?,
+      comicStatus: row['comic_status'] as String?,
+      comicCoverUri: row['cover_uri'] as String?,
       status: row['link_status'] as String,
       linkSource: row['link_source'] as String,
       confidence: (row['confidence'] as num?)?.toDouble(),
