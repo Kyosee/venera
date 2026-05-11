@@ -134,8 +134,61 @@ class ComicTile extends StatelessWidget {
   void _showRelatedSourcesDialog(BuildContext context) {
     final sourceKeyController = TextEditingController();
     final comicIdController = TextEditingController();
+    final searchController = TextEditingController(text: comic.title);
     const repository = ComicStateRepository();
     final currentIdentity = repository.identityFor(comic.sourceKey, comic.id);
+    final searchableSources = ComicSource.all()
+        .where(
+          (source) =>
+              source.searchPageData?.loadPage != null ||
+              source.searchPageData?.loadNext != null,
+        )
+        .toList();
+    var selectedSourceKey =
+        searchableSources
+            .firstWhereOrNull((source) => source.key != comic.sourceKey)
+            ?.key ??
+        searchableSources.firstOrNull?.key;
+    var searchResults = <Comic>[];
+    var isSearching = false;
+    String? searchError;
+
+    Future<void> runSearch(StateSetter setState, BuildContext context) async {
+      final keyword = searchController.text.trim();
+      final source = selectedSourceKey == null
+          ? null
+          : ComicSource.find(selectedSourceKey!);
+      final searchData = source?.searchPageData;
+      if (keyword.isEmpty || source == null || searchData == null) {
+        context.showMessage(message: 'Invalid input'.tl);
+        return;
+      }
+      final options =
+          searchData.searchOptions
+              ?.map((option) => option.defaultValue)
+              .toList() ??
+          const <String>[];
+      setState(() {
+        isSearching = true;
+        searchError = null;
+      });
+      try {
+        final res = searchData.loadPage != null
+            ? await searchData.loadPage!(keyword, 1, options)
+            : await searchData.loadNext!(keyword, null, options);
+        setState(() {
+          isSearching = false;
+          searchResults = res.dataOrNull ?? const <Comic>[];
+          searchError = res.errorMessage;
+        });
+      } catch (e) {
+        setState(() {
+          isSearching = false;
+          searchResults = const <Comic>[];
+          searchError = e.toString();
+        });
+      }
+    }
 
     showDialog(
       context: App.rootContext,
@@ -156,7 +209,7 @@ class ComicTile extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        '${'Current'.tl}: ${comic.sourceKey} / ${comic.id}',
+                        '${'Current'.tl}: ${comic.title.replaceAll('\n', ' ')}',
                         style: TextStyle(
                           color: context.colorScheme.onSurfaceVariant,
                         ),
@@ -196,20 +249,143 @@ class ComicTile extends StatelessWidget {
                                 : null,
                           ),
                       const SizedBox(height: 16),
-                      TextField(
-                        controller: sourceKeyController,
-                        decoration: InputDecoration(
-                          labelText: 'Source Key'.tl,
-                          border: const OutlineInputBorder(),
+                      if (searchableSources.isEmpty)
+                        Text(
+                          'No searchable sources'.tl,
+                          style: TextStyle(
+                            color: context.colorScheme.onSurfaceVariant,
+                          ),
+                        )
+                      else ...[
+                        DropdownButtonFormField<String>(
+                          initialValue: selectedSourceKey,
+                          decoration: InputDecoration(
+                            labelText: 'Select Source'.tl,
+                            border: const OutlineInputBorder(),
+                          ),
+                          items: [
+                            for (final source in searchableSources)
+                              DropdownMenuItem(
+                                value: source.key,
+                                child: Text(source.name),
+                              ),
+                          ],
+                          onChanged: (value) {
+                            setState(() {
+                              selectedSourceKey = value;
+                              searchResults = const <Comic>[];
+                              searchError = null;
+                            });
+                          },
                         ),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: comicIdController,
-                        decoration: InputDecoration(
-                          labelText: 'Comic ID'.tl,
-                          border: const OutlineInputBorder(),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: searchController,
+                          decoration: InputDecoration(
+                            labelText: 'Search by title'.tl,
+                            border: const OutlineInputBorder(),
+                            suffixIcon: IconButton(
+                              icon: const Icon(Icons.search),
+                              onPressed: isSearching
+                                  ? null
+                                  : () => runSearch(setState, context),
+                            ),
+                          ),
+                          onSubmitted: (_) => runSearch(setState, context),
                         ),
+                        const SizedBox(height: 10),
+                        Button.filled(
+                          isLoading: isSearching,
+                          onPressed: () => runSearch(setState, context),
+                          child: Text('Search related comic'.tl),
+                        ),
+                        if (searchError != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            searchError!,
+                            style: TextStyle(color: context.colorScheme.error),
+                          ),
+                        ],
+                        if (searchResults.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            'Search Results'.tl,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(height: 8),
+                          for (final result in searchResults.take(12))
+                            _RelatedSearchResultRow(
+                              comic: result,
+                              onLink: () {
+                                repository.mirrorComic(result);
+                                repository.linkRelatedSource(
+                                  comic: comic,
+                                  targetSourceKey: result.sourceKey,
+                                  targetComicId: result.id,
+                                );
+                                setState(() {
+                                  searchResults = const <Comic>[];
+                                });
+                                context.showMessage(message: 'Linked'.tl);
+                              },
+                            ),
+                        ],
+                      ],
+                      const SizedBox(height: 12),
+                      ExpansionTile(
+                        tilePadding: EdgeInsets.zero,
+                        childrenPadding: EdgeInsets.zero,
+                        title: Text('Advanced precise link'.tl),
+                        children: [
+                          TextField(
+                            controller: sourceKeyController,
+                            decoration: InputDecoration(
+                              labelText: 'Source Key'.tl,
+                              border: const OutlineInputBorder(),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          TextField(
+                            controller: comicIdController,
+                            decoration: InputDecoration(
+                              labelText: 'Comic ID'.tl,
+                              border: const OutlineInputBorder(),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: Button.outlined(
+                              onPressed: () {
+                                final sourceKey = sourceKeyController.text
+                                    .trim();
+                                final targetComicId = comicIdController.text
+                                    .trim();
+                                if (sourceKey.isEmpty ||
+                                    targetComicId.isEmpty) {
+                                  context.showMessage(
+                                    message: 'Invalid input'.tl,
+                                  );
+                                  return;
+                                }
+                                try {
+                                  repository.linkRelatedSource(
+                                    comic: comic,
+                                    targetSourceKey: sourceKey,
+                                    targetComicId: targetComicId,
+                                  );
+                                  sourceKeyController.clear();
+                                  comicIdController.clear();
+                                  setState(() {});
+                                  context.showMessage(message: 'Linked'.tl);
+                                } catch (e) {
+                                  context.showMessage(message: e.toString());
+                                }
+                              },
+                              child: Text('Link'.tl),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ).paddingHorizontal(16),
@@ -220,30 +396,6 @@ class ComicTile extends StatelessWidget {
                   onPressed: () => context.pop(),
                   child: Text('Cancel'.tl),
                 ),
-                Button.filled(
-                  onPressed: () {
-                    final sourceKey = sourceKeyController.text.trim();
-                    final targetComicId = comicIdController.text.trim();
-                    if (sourceKey.isEmpty || targetComicId.isEmpty) {
-                      context.showMessage(message: 'Invalid input'.tl);
-                      return;
-                    }
-                    try {
-                      repository.linkRelatedSource(
-                        comic: comic,
-                        targetSourceKey: sourceKey,
-                        targetComicId: targetComicId,
-                      );
-                      sourceKeyController.clear();
-                      comicIdController.clear();
-                      setState(() {});
-                      context.showMessage(message: 'Linked'.tl);
-                    } catch (e) {
-                      context.showMessage(message: e.toString());
-                    }
-                  },
-                  child: Text('Link'.tl),
-                ),
               ],
             );
           },
@@ -252,6 +404,7 @@ class ComicTile extends StatelessWidget {
     ).whenComplete(() {
       sourceKeyController.dispose();
       comicIdController.dispose();
+      searchController.dispose();
     });
   }
 
@@ -729,6 +882,79 @@ class _RelatedSourceRow extends StatelessWidget {
               tooltip: 'Unlink'.tl,
               onPressed: onUnlink!,
             ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RelatedSearchResultRow extends StatelessWidget {
+  const _RelatedSearchResultRow({required this.comic, required this.onLink});
+
+  final Comic comic;
+  final VoidCallback onLink;
+
+  @override
+  Widget build(BuildContext context) {
+    final sourceName =
+        ComicSource.find(comic.sourceKey)?.name ?? comic.sourceKey;
+    final subtitle = comic.subtitle?.replaceAll('\n', ' ').trim();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: context.colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: SizedBox(
+              width: 38,
+              height: 52,
+              child: AnimatedImage(
+                image: CachedImageProvider(
+                  comic.cover,
+                  sourceKey: comic.sourceKey,
+                  cid: comic.id,
+                ),
+                fit: BoxFit.cover,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  comic.title.replaceAll('\n', ' '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  [
+                    sourceName,
+                    if (subtitle != null && subtitle.isNotEmpty) subtitle,
+                  ].join(' · '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: context.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Button.icon(
+            icon: const Icon(Icons.link, size: 18),
+            tooltip: 'Link this comic'.tl,
+            onPressed: onLink,
+          ),
         ],
       ),
     );
