@@ -10,7 +10,6 @@ import 'package:venera/foundation/follow_update_tasks.dart';
 import 'package:venera/utils/data_sync.dart';
 import 'package:venera/utils/translations.dart';
 import '../foundation/global_state.dart';
-import 'package:venera/foundation/follow_updates.dart';
 import 'package:venera/foundation/history.dart';
 
 class FollowUpdatesWidget extends StatefulWidget {
@@ -561,37 +560,78 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
 
     var count = LocalFavoritesManager().count(folder);
 
-    if (count > 0) {
-      bool isCanceled = false;
-      void onCancel() {
-        isCanceled = true;
+    void applyFolderSelection() {
+      if (!mounted) {
+        return;
       }
+      setState(() {
+        appdata.settings["followUpdatesFolder"] = folder;
+        updatedComics = [];
+        allComics = LocalFavoritesManager().getComicsWithUpdatesInfo(folder);
+        sortComics();
+      });
+      appdata.saveData();
+    }
+
+    if (count > 0) {
+      var task = FollowUpdateTaskManager.instance.startCheck(
+        folder,
+        manual: true,
+      );
+      if (task == null) {
+        return;
+      }
+      final activeTask = task;
+      var completer = Completer<void>();
+      var backgrounded = false;
+      var canceled = false;
 
       var loadingController = showLoadingDialog(
         App.rootContext,
         withProgress: true,
         cancelButtonText: "Cancel".tl,
-        onCancel: onCancel,
+        onCancel: () {
+          canceled = true;
+          FollowUpdateTaskManager.instance.cancel(activeTask.id);
+          if (!completer.isCompleted) {
+            completer.complete();
+          }
+        },
+        secondaryButtonText: "Background".tl,
+        onSecondary: () {
+          backgrounded = true;
+          applyFolderSelection();
+          context.showMessage(message: "Task started".tl);
+          if (!completer.isCompleted) {
+            completer.complete();
+          }
+        },
         message: "Updating comics...".tl,
       );
 
-      await for (var progress in updateFolder(folder, true)) {
-        if (isCanceled) {
-          return;
+      void onTaskChanged() {
+        loadingController.setProgress(activeTask.progress);
+        if (!activeTask.isRunning && !completer.isCompleted) {
+          completer.complete();
         }
-        loadingController.setProgress(progress.current / progress.total);
       }
 
-      loadingController.close();
+      FollowUpdateTaskManager.instance.addListener(onTaskChanged);
+      onTaskChanged();
+
+      try {
+        await completer.future;
+      } finally {
+        FollowUpdateTaskManager.instance.removeListener(onTaskChanged);
+        loadingController.close();
+      }
+
+      if (canceled || backgrounded) {
+        return;
+      }
     }
 
-    setState(() {
-      appdata.settings["followUpdatesFolder"] = folder;
-      updatedComics = [];
-      allComics = LocalFavoritesManager().getComicsWithUpdatesInfo(folder);
-      sortComics();
-    });
-    appdata.saveData();
+    applyFolderSelection();
   }
 
   void checkNow() async {

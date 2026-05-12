@@ -185,9 +185,7 @@ class LoadingDialogController {
       return;
     }
     closed = true;
-    if (_closeDialog == null) {
-      Future.microtask(_closeDialog!);
-    } else {
+    if (_closeDialog != null) {
       _closeDialog!();
     }
   }
@@ -210,10 +208,12 @@ class LoadingDialogController {
 LoadingDialogController showLoadingDialog(
   BuildContext context, {
   void Function()? onCancel,
+  void Function()? onSecondary,
   bool barrierDismissible = true,
   bool allowCancel = true,
   String? message,
   String cancelButtonText = "Cancel",
+  String? secondaryButtonText,
   bool withProgress = false,
 }) {
   var controller = LoadingDialogController();
@@ -227,36 +227,46 @@ LoadingDialogController showLoadingDialog(
     context: context,
     barrierDismissible: barrierDismissible,
     builder: (BuildContext context) {
-      return StatefulBuilder(builder: (context, setState) {
-        controller._serProgress = (value) {
-          setState(() {
-            controller._progress = value;
-          });
-        };
-        controller._setMessage = (message) {
-          setState(() {
-            controller._message = message;
-          });
-        };
-        return ContentDialog(
-          title: controller._message ?? 'Loading',
-          content: LinearProgressIndicator(
-            value: controller._progress,
-            backgroundColor: context.colorScheme.surfaceContainer,
-          ).paddingHorizontal(16).paddingVertical(16),
-          actions: [
-            FilledButton(
-              onPressed: allowCancel
-                  ? () {
-                      controller.close();
-                      onCancel?.call();
-                    }
-                  : null,
-              child: Text(cancelButtonText.tl),
-            )
-          ],
-        );
-      });
+      return StatefulBuilder(
+        builder: (context, setState) {
+          controller._serProgress = (value) {
+            setState(() {
+              controller._progress = value;
+            });
+          };
+          controller._setMessage = (message) {
+            setState(() {
+              controller._message = message;
+            });
+          };
+          return ContentDialog(
+            title: controller._message ?? 'Loading',
+            content: LinearProgressIndicator(
+              value: controller._progress,
+              backgroundColor: context.colorScheme.surfaceContainer,
+            ).paddingHorizontal(16).paddingVertical(16),
+            actions: [
+              if (secondaryButtonText != null && onSecondary != null)
+                TextButton(
+                  onPressed: () {
+                    controller.close();
+                    onSecondary();
+                  },
+                  child: Text(secondaryButtonText.tl),
+                ),
+              FilledButton(
+                onPressed: allowCancel
+                    ? () {
+                        controller.close();
+                        onCancel?.call();
+                      }
+                    : null,
+                child: Text(cancelButtonText.tl),
+              ),
+            ],
+          );
+        },
+      );
     },
   );
 
