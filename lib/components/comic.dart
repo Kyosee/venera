@@ -690,22 +690,24 @@ class ComicTile extends StatelessWidget {
   Widget build(BuildContext context) {
     var type = appdata.settings['comicDisplayMode'];
 
-    Widget child = type == 'detailed'
-        ? _buildDetailedMode(context)
-        : _buildBriefMode(context);
-
     final comicType = ComicType.fromKey(comic.sourceKey);
     var isFavorite = appdata.settings['showFavoriteStatusOnTile']
         ? LocalFavoritesManager().isExist(comic.id, comicType)
         : false;
-    var history = appdata.settings['showHistoryStatusOnTile']
+    final showHistoryOnTile = appdata.settings['showHistoryStatusOnTile'];
+    final history = showHistoryOnTile || type == 'detailed'
         ? HistoryManager().find(comic.id, comicType)
         : null;
-    if (history?.page == 0) {
-      history!.page = 1;
+    final tileHistory = showHistoryOnTile ? history : null;
+    if (tileHistory?.page == 0) {
+      tileHistory!.page = 1;
     }
 
-    if (!isFavorite && history == null) {
+    Widget child = type == 'detailed'
+        ? _buildDetailedMode(context, history, tileHistory)
+        : _buildBriefMode(context, tileHistory);
+
+    if (!isFavorite && tileHistory == null) {
       return child;
     }
 
@@ -732,7 +734,7 @@ class ComicTile extends StatelessWidget {
                       color: Colors.white,
                     ),
                   ),
-                if (history != null)
+                if (tileHistory != null)
                   Container(
                     height: 24,
                     color: Colors.blue.toOpacity(0.9),
@@ -740,8 +742,8 @@ class ComicTile extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 4),
                     child: CustomPaint(
                       painter: _ReadingHistoryPainter(
-                        history.page,
-                        history.maxPage,
+                        tileHistory.page,
+                        tileHistory.maxPage,
                       ),
                     ),
                   ),
@@ -750,6 +752,120 @@ class ComicTile extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+
+  String? _historyEpisodeText(History? history) {
+    if (history == null || history.ep < 1) {
+      return null;
+    }
+    final episode = 'Episode @ep'.tlParams({'ep': history.ep});
+    if (history.group == null) {
+      return episode;
+    }
+    return '${'Group @group'.tlParams({'group': history.group!})} - $episode';
+  }
+
+  String? _latestEpisodeText() {
+    final text = comic.description.isNotEmpty
+        ? comic.description
+        : comic.subtitle;
+    if (text == null || text.trim().isEmpty) {
+      return null;
+    }
+    final lines = text
+        .replaceAll('|', '\n')
+        .split('\n')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty);
+    for (final line in lines) {
+      final episode = _extractEpisodeText(line);
+      if (episode != null) {
+        return episode;
+      }
+    }
+    return null;
+  }
+
+  String? _extractEpisodeText(String text) {
+    final normalized = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (normalized.isEmpty ||
+        RegExp(r'^\d{4}[-/]\d{1,2}[-/]\d{1,2}').hasMatch(normalized)) {
+      return null;
+    }
+    final episodeMatch = RegExp(
+      r'(?:第\s*)?\d+(?:\.\d+)?\s*(?:话|話|章|回|卷|集|ch(?:apter)?\.?|ep(?:isode)?\.?)',
+      caseSensitive: false,
+    ).firstMatch(normalized);
+    if (episodeMatch != null) {
+      return episodeMatch.group(0)?.trim();
+    }
+    final prefixedMatch = RegExp(
+      r'(?:ch(?:apter)?\.?|ep(?:isode)?\.?)\s*\d+(?:\.\d+)?',
+      caseSensitive: false,
+    ).firstMatch(normalized);
+    if (prefixedMatch != null) {
+      return prefixedMatch.group(0)?.trim();
+    }
+    if (RegExp(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}').hasMatch(normalized)) {
+      return null;
+    }
+    final numberMatch = RegExp(
+      r'(?:更新至|最新|latest|last|up to)\s*[:：]?\s*(\d+(?:\.\d+)?)',
+      caseSensitive: false,
+    ).firstMatch(normalized);
+    final number = numberMatch?.group(1);
+    if (number == null) {
+      return null;
+    }
+    return 'Episode @ep'.tlParams({'ep': number});
+  }
+
+  Widget _buildEpisodeBadge(
+    BuildContext context,
+    History? history,
+    double maxWidth,
+  ) {
+    final current = _historyEpisodeText(history);
+    if (current == null) {
+      return const SizedBox();
+    }
+    final latest = _latestEpisodeText();
+    final fontSize = maxWidth < 80
+        ? 8.0
+        : maxWidth < 150
+        ? 10.0
+        : 12.0;
+    final lines = [
+      '${'Current'.tl}: $current',
+      if (latest != null) '${'Latest'.tl}: $latest',
+    ];
+    return Container(
+      constraints: BoxConstraints(maxWidth: maxWidth),
+      margin: const EdgeInsets.fromLTRB(2, 0, 2, 2),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.blue.toOpacity(0.72),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final line in lines)
+            Text(
+              line,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: fontSize,
+                fontWeight: FontWeight.w600,
+                height: 1.2,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+        ],
+      ),
     );
   }
 
@@ -766,17 +882,22 @@ class ComicTile extends StatelessWidget {
     );
   }
 
-  Widget _buildDetailedMode(BuildContext context) {
+  Widget _buildDetailedMode(
+    BuildContext context,
+    History? history,
+    History? tileHistory,
+  ) {
     return LayoutBuilder(
       builder: (context, constrains) {
         final height = math.max(0.0, constrains.maxHeight - 28);
+        final coverWidth = height * 0.68;
         final displayInfo = const ComicStateRepository().displayInfoFor(
           comic,
           badge: badge,
         );
 
         Widget image = Container(
-          width: height * 0.68,
+          width: coverWidth,
           height: double.infinity,
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.secondaryContainer,
@@ -790,7 +911,16 @@ class ComicTile extends StatelessWidget {
             ],
           ),
           clipBehavior: Clip.antiAlias,
-          child: buildImage(context),
+          child: Stack(
+            children: [
+              Positioned.fill(child: buildImage(context)),
+              Positioned(
+                left: 2,
+                bottom: 2,
+                child: _buildEpisodeBadge(context, tileHistory, coverWidth - 4),
+              ),
+            ],
+          ),
         );
 
         if (heroID != null) {
@@ -833,7 +963,7 @@ class ComicTile extends StatelessWidget {
                         rating: displayInfo.rating,
                         updateText: displayInfo.updateTime,
                         statusText: displayInfo.status,
-                        progressText: displayInfo.progressText,
+                        progressText: _historyEpisodeText(history),
                         pagesText: displayInfo.pagesText,
                       ),
                     ),
@@ -847,7 +977,7 @@ class ComicTile extends StatelessWidget {
     );
   }
 
-  Widget _buildBriefMode(BuildContext context) {
+  Widget _buildBriefMode(BuildContext context, History? history) {
     return LayoutBuilder(
       builder: (context, constraints) {
         Widget image = Container(
@@ -942,6 +1072,15 @@ class ComicTile extends StatelessWidget {
                           children: children,
                         );
                       })(),
+                    ),
+                    Positioned(
+                      left: 2,
+                      bottom: 2,
+                      child: _buildEpisodeBadge(
+                        context,
+                        history,
+                        constraints.maxWidth * 0.72,
+                      ),
                     ),
                   ],
                 ),
@@ -1536,7 +1675,7 @@ class ComicDescription extends StatelessWidget {
         _infoRow(context, "Tags".tl, tagText, Colors.pinkAccent),
       if (status != null) _infoRow(context, "Status".tl, status, Colors.purple),
       if (progress != null)
-        _infoRow(context, "Reading Progress".tl, progress, Colors.green),
+        _infoRow(context, "Progress".tl, progress, Colors.green),
       if (pages != null)
         _infoRow(context, "Pages".tl, pages, Colors.deepOrange),
       if (fallbackDescription != null)
