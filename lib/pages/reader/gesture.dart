@@ -9,7 +9,8 @@ class _ReaderGestureDetector extends StatefulWidget {
   State<_ReaderGestureDetector> createState() => _ReaderGestureDetectorState();
 }
 
-class _ReaderGestureDetectorState extends AutomaticGlobalState<_ReaderGestureDetector> {
+class _ReaderGestureDetectorState
+    extends AutomaticGlobalState<_ReaderGestureDetector> {
   late TapGestureRecognizer _tapGestureRecognizer;
 
   static const _kDoubleTapMaxTime = Duration(milliseconds: 200);
@@ -49,6 +50,16 @@ class _ReaderGestureDetectorState extends AutomaticGlobalState<_ReaderGestureDet
   }
 
   @override
+  void dispose() {
+    _tapGestureRecognizer.dispose();
+    _dragListeners.clear();
+    _previousEvent = null;
+    _lastTapPointer = null;
+    _lastTapMoveDistance = null;
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Listener(
       behavior: HitTestBehavior.translucent,
@@ -57,7 +68,7 @@ class _ReaderGestureDetectorState extends AutomaticGlobalState<_ReaderGestureDet
           _previousEvent = null;
           return;
         }
-        fingers++;
+        _increaseFingers();
         if (ignoreNextTag) {
           ignoreNextTag = false;
           return;
@@ -72,22 +83,26 @@ class _ReaderGestureDetectorState extends AutomaticGlobalState<_ReaderGestureDet
           _dragInProgress = false;
         }
         Future.delayed(_kLongPressMinTime, () {
-          if (_lastTapPointer == event.pointer && fingers == 1) {
-            if (_lastTapMoveDistance!.distanceSquared < 20.0 * 20.0) {
+          if (!mounted || _lastTapPointer != event.pointer || fingers != 1) {
+            return;
+          }
+          final moveDistance = _lastTapMoveDistance;
+          if (moveDistance != null) {
+            if (moveDistance.distanceSquared < 20.0 * 20.0) {
               onLongPressedDown(event.position);
               _longPressInProgress = true;
             } else {
               _dragInProgress = true;
               for (var dragListener in _dragListeners) {
                 dragListener.onStart?.call(event.position);
-                dragListener.onMove?.call(_lastTapMoveDistance!);
+                dragListener.onMove?.call(moveDistance);
               }
             }
           }
         });
       },
       onPointerMove: (event) {
-        if (event.pointer == _lastTapPointer) {
+        if (event.pointer == _lastTapPointer && _lastTapMoveDistance != null) {
           _lastTapMoveDistance = event.delta + _lastTapMoveDistance!;
         }
         if (_dragInProgress) {
@@ -97,32 +112,12 @@ class _ReaderGestureDetectorState extends AutomaticGlobalState<_ReaderGestureDet
         }
       },
       onPointerUp: (event) {
-        fingers--;
-        if (_longPressInProgress) {
-          onLongPressedUp(event.position);
-        }
-        if (_dragInProgress) {
-          for (var dragListener in _dragListeners) {
-            dragListener.onEnd?.call();
-          }
-          _dragInProgress = false;
-        }
-        _lastTapPointer = null;
-        _lastTapMoveDistance = null;
+        _decreaseFingers();
+        _finishActivePointer(event.position);
       },
       onPointerCancel: (event) {
-        fingers--;
-        if (_longPressInProgress) {
-          onLongPressedUp(event.position);
-        }
-        if (_dragInProgress) {
-          for (var dragListener in _dragListeners) {
-            dragListener.onEnd?.call();
-          }
-          _dragInProgress = false;
-        }
-        _lastTapPointer = null;
-        _lastTapMoveDistance = null;
+        _decreaseFingers();
+        _finishActivePointer(event.position, canceled: true);
       },
       onPointerSignal: (event) {
         if (event is PointerScrollEvent) {
@@ -133,17 +128,51 @@ class _ReaderGestureDetectorState extends AutomaticGlobalState<_ReaderGestureDet
     );
   }
 
+  void _increaseFingers() {
+    fingers++;
+  }
+
+  void _decreaseFingers() {
+    if (fingers > 0) {
+      fingers--;
+    } else {
+      fingers = 0;
+    }
+  }
+
+  void _finishActivePointer(Offset position, {bool canceled = false}) {
+    if (_longPressInProgress) {
+      onLongPressedUp(position);
+      _longPressInProgress = false;
+      _suppressNextTapUp = !canceled;
+    }
+    if (_dragInProgress) {
+      for (var dragListener in _dragListeners) {
+        dragListener.onEnd?.call();
+      }
+      _dragInProgress = false;
+    }
+    _lastTapPointer = null;
+    _lastTapMoveDistance = null;
+    if (canceled) {
+      _previousEvent = null;
+      _suppressNextTapUp = false;
+    }
+  }
+
   void onMouseWheel(bool forward) {
     if (HardwareKeyboard.instance.isControlPressed) {
       return;
     }
     if (context.reader.mode.key.startsWith('gallery')) {
       if (forward) {
-        if (!context.reader.toNextPage() && !context.reader.isLastChapterOfGroup) {
+        if (!context.reader.toNextPage() &&
+            !context.reader.isLastChapterOfGroup) {
           context.reader.toNextChapter();
         }
       } else {
-        if (!context.reader.toPrevPage() && !context.reader.isFirstChapterOfGroup) {
+        if (!context.reader.toPrevPage() &&
+            !context.reader.isFirstChapterOfGroup) {
           context.reader.toPrevChapter(toLastPage: true);
         }
       }
@@ -158,10 +187,15 @@ class _ReaderGestureDetectorState extends AutomaticGlobalState<_ReaderGestureDet
 
   bool _longPressInProgress = false;
 
+  bool _suppressNextTapUp = false;
+
   bool _dragInProgress = false;
 
-  bool get _enableDoubleTapToZoom =>
-      appdata.settings.getReaderSetting(reader.cid, reader.type.sourceKey, 'enableDoubleTapToZoom');
+  bool get _enableDoubleTapToZoom => appdata.settings.getReaderSetting(
+    reader.cid,
+    reader.type.sourceKey,
+    'enableDoubleTapToZoom',
+  );
 
   void onTapUp(TapUpDetails event) {
     if (event.globalPosition == Offset.zero &&
@@ -169,8 +203,10 @@ class _ReaderGestureDetectorState extends AutomaticGlobalState<_ReaderGestureDet
       _previousEvent = null;
       return;
     }
-    if (_longPressInProgress) {
+    if (_suppressNextTapUp || _longPressInProgress) {
+      _suppressNextTapUp = false;
       _longPressInProgress = false;
+      _previousEvent = null;
       return;
     }
     final location = event.globalPosition;
@@ -191,7 +227,7 @@ class _ReaderGestureDetectorState extends AutomaticGlobalState<_ReaderGestureDet
     }
     _previousEvent = event;
     Future.delayed(_kDoubleTapMaxTime, () {
-      if (_previousEvent == event) {
+      if (mounted && _previousEvent == event) {
         onTap(location);
         _previousEvent = null;
       }
@@ -209,7 +245,10 @@ class _ReaderGestureDetectorState extends AutomaticGlobalState<_ReaderGestureDet
         return;
       }
       if (appdata.settings.getReaderSetting(
-          reader.cid, reader.type.sourceKey, 'enableTapToTurnPages')) {
+        reader.cid,
+        reader.type.sourceKey,
+        'enableTapToTurnPages',
+      )) {
         bool isLeft = false, isRight = false, isTop = false, isBottom = false;
         final width = context.width;
         final height = context.height;
@@ -229,7 +268,10 @@ class _ReaderGestureDetectorState extends AutomaticGlobalState<_ReaderGestureDet
         var prev = () => context.reader.toPrevPage();
         var next = () => context.reader.toNextPage();
         if (appdata.settings.getReaderSetting(
-            reader.cid, reader.type.sourceKey, 'reverseTapToTurnPages')) {
+          reader.cid,
+          reader.type.sourceKey,
+          'reverseTapToTurnPages',
+        )) {
           prev = () => context.reader.toNextPage();
           next = () => context.reader.toPrevPage();
         }
@@ -275,52 +317,48 @@ class _ReaderGestureDetectorState extends AutomaticGlobalState<_ReaderGestureDet
   }
 
   void onSecondaryTapUp(Offset location) {
-    showMenuX(
-      context,
-      location,
-      [
+    showMenuX(context, location, [
+      MenuEntry(
+        icon: Icons.settings,
+        text: "Settings".tl,
+        onClick: () {
+          context.readerScaffold.openSetting();
+        },
+      ),
+      MenuEntry(
+        icon: Icons.menu,
+        text: "Chapters".tl,
+        onClick: () {
+          context.readerScaffold.openChapterDrawer();
+        },
+      ),
+      MenuEntry(
+        icon: Icons.fullscreen,
+        text: "Fullscreen".tl,
+        onClick: () {
+          context.reader.fullscreen();
+        },
+      ),
+      MenuEntry(
+        icon: Icons.exit_to_app,
+        text: "Exit".tl,
+        onClick: () {
+          context.pop();
+        },
+      ),
+      if (App.isDesktop && !reader.isLoading)
         MenuEntry(
-          icon: Icons.settings,
-          text: "Settings".tl,
-          onClick: () {
-            context.readerScaffold.openSetting();
-          },
+          icon: Icons.copy,
+          text: "Copy Image".tl,
+          onClick: () => copyImage(location),
         ),
+      if (!reader.isLoading)
         MenuEntry(
-          icon: Icons.menu,
-          text: "Chapters".tl,
-          onClick: () {
-            context.readerScaffold.openChapterDrawer();
-          },
+          icon: Icons.download_outlined,
+          text: "Save Image".tl,
+          onClick: () => saveImage(location),
         ),
-        MenuEntry(
-          icon: Icons.fullscreen,
-          text: "Fullscreen".tl,
-          onClick: () {
-            context.reader.fullscreen();
-          },
-        ),
-        MenuEntry(
-          icon: Icons.exit_to_app,
-          text: "Exit".tl,
-          onClick: () {
-            context.pop();
-          },
-        ),
-        if (App.isDesktop && !reader.isLoading)
-          MenuEntry(
-            icon: Icons.copy,
-            text: "Copy Image".tl,
-            onClick: () => copyImage(location),
-          ),
-        if (!reader.isLoading)
-          MenuEntry(
-            icon: Icons.download_outlined,
-            text: "Save Image".tl,
-            onClick: () => saveImage(location),
-          ),
-      ],
-    );
+    ]);
   }
 
   void onLongPressedUp(Offset location) {

@@ -207,9 +207,34 @@ class _GalleryModeState extends State<_GalleryMode>
     controller = PageController(initialPage: reader.page);
     reader._imageViewController = this;
     Future.microtask(() {
+      if (!mounted) {
+        return;
+      }
       context.readerScaffold.setFloatingButton(0);
     });
     super.initState();
+  }
+
+  @override
+  void dispose() {
+    keyRepeatTimer?.cancel();
+    controller.dispose();
+    for (final controller in photoViewControllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  void _increaseFingers() {
+    fingers++;
+  }
+
+  void _decreaseFingers() {
+    if (fingers > 0) {
+      fingers--;
+    } else {
+      fingers = 0;
+    }
   }
 
   /// Get the range of images for the given page. [page] is 1-based.
@@ -286,13 +311,13 @@ class _GalleryModeState extends State<_GalleryMode>
   Widget build(BuildContext context) {
     return Listener(
       onPointerDown: (event) {
-        fingers++;
+        _increaseFingers();
       },
       onPointerUp: (event) {
-        fingers--;
+        _decreaseFingers();
       },
       onPointerCancel: (event) {
-        fingers--;
+        _decreaseFingers();
       },
       onPointerMove: (event) {
         if (isLongPressing) {
@@ -741,10 +766,12 @@ class _ContinuousModeState extends State<_ContinuousMode>
   late int _baseChapter;
 
   void delayedSetIsScrolling(bool value) {
-    Future.delayed(
-      const Duration(milliseconds: 300),
-      () => delayedIsScrolling = value,
-    );
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (!mounted) {
+        return;
+      }
+      delayedIsScrolling = value;
+    });
   }
 
   bool prepareToPrevChapter = false;
@@ -765,17 +792,32 @@ class _ContinuousModeState extends State<_ContinuousMode>
     }
     itemPositionsListener.itemPositions.addListener(onPositionChanged);
     cached = List.filled(reader.maxPage + 2, false);
-    Future.delayed(
-      const Duration(milliseconds: 100),
-      () => cacheImages(reader.page),
-    );
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (!mounted) {
+        return;
+      }
+      cacheImages(reader.page);
+    });
     super.initState();
   }
 
   @override
   void dispose() {
     itemPositionsListener.itemPositions.removeListener(onPositionChanged);
+    photoViewController.dispose();
     super.dispose();
+  }
+
+  void _increaseFingers() {
+    fingers++;
+  }
+
+  void _decreaseFingers() {
+    if (fingers > 0) {
+      fingers--;
+    } else {
+      fingers = 0;
+    }
   }
 
   bool get seamlessChapterReading =>
@@ -1252,7 +1294,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
 
     widget = Listener(
       onPointerDown: (event) {
-        fingers++;
+        _increaseFingers();
         if (fingers > 1 && !disableScroll) {
           setState(() {
             disableScroll = true;
@@ -1266,7 +1308,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
         }
       },
       onPointerUp: (event) {
-        fingers--;
+        _decreaseFingers();
         if (fingers <= 1 && disableScroll) {
           setState(() {
             disableScroll = false;
@@ -1283,7 +1325,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
         }
       },
       onPointerCancel: (event) {
-        fingers--;
+        _decreaseFingers();
         if (fingers <= 1 && disableScroll) {
           setState(() {
             disableScroll = false;
