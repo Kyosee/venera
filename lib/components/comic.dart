@@ -265,9 +265,7 @@ class ComicTile extends StatelessWidget {
           targetSourceKey: result.sourceKey,
           targetComicId: result.id,
         );
-        updateDialog(setState, () {
-          searchGroups = {};
-        });
+        updateDialog(setState, () {});
         context.showMessage(message: 'Linked'.tl);
       } catch (e) {
         context.showMessage(message: e.toString().tl);
@@ -375,8 +373,8 @@ class ComicTile extends StatelessWidget {
                 runSpacing: 8,
                 children: [
                   for (final source in searchableSources)
-                    FilterChip(
-                      label: Text(source.name),
+                    _StableSourceFilterChip(
+                      label: source.name,
                       selected: selectedSourceKeys.contains(source.key),
                       onSelected: (selected) {
                         setState(() {
@@ -1299,6 +1297,38 @@ String _sourceNameForKey(String sourceKey, String fallback) {
     return 'Local'.tl;
   }
   return ComicSource.find(sourceKey)?.name ?? fallback;
+}
+
+class _StableSourceFilterChip extends StatelessWidget {
+  const _StableSourceFilterChip({
+    required this.label,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final String label;
+  final bool selected;
+  final ValueChanged<bool> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return FilterChip(
+      showCheckmark: false,
+      labelPadding: const EdgeInsetsDirectional.only(start: 2, end: 8),
+      label: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 18,
+            child: selected ? const Icon(Icons.check, size: 16) : null,
+          ),
+          Text(label),
+        ],
+      ),
+      selected: selected,
+      onSelected: onSelected,
+    );
+  }
 }
 
 String? _relatedStatusFromTags(List<String>? tags) {
