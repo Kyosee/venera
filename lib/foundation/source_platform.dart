@@ -55,6 +55,8 @@ class SourcePlatformResolver {
     6: 'nhentai',
   };
 
+  static final _runtimeLegacySourceKeys = <int, String>{};
+
   static const local = SourcePlatformRef(
     platformId: localPlatformId,
     canonicalKey: localCanonicalKey,
@@ -66,8 +68,24 @@ class SourcePlatformResolver {
 
   static bool isLocalKey(String key) => key == localCanonicalKey;
 
+  static void registerLegacyIntSourceKey(int legacyIntType, String sourceKey) {
+    if (legacyIntType == 0 ||
+        sourceKey.isEmpty ||
+        sourceKey == localCanonicalKey) {
+      return;
+    }
+    _runtimeLegacySourceKeys[legacyIntType] = sourceKey;
+  }
+
+  static void registerLegacyIntSourceKeys(Map<int, String> sourceKeys) {
+    for (var entry in sourceKeys.entries) {
+      registerLegacyIntSourceKey(entry.key, entry.value);
+    }
+  }
+
   static String? sourceKeyFromLegacyInt(int legacyIntType) {
-    return _legacyRemoteSourceKeys[legacyIntType];
+    return _runtimeLegacySourceKeys[legacyIntType] ??
+        _legacyRemoteSourceKeys[legacyIntType];
   }
 
   static SourcePlatformRef? fromLegacyInt(int legacyIntType, {String? name}) {

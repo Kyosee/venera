@@ -284,7 +284,7 @@ class _BodyState extends State<_Body> {
 
   void help() {
     launchUrlString(
-      "https://github.com/venera-app/venera/blob/master/doc/comic_source.md",
+      "https://github.com/Kyosee/venera/blob/master/doc/comic_source.md",
     );
   }
 
@@ -443,7 +443,7 @@ class _ComicSourceListState extends State<_ComicSourceList> {
                     TextButton(
                       onPressed: () {
                         launchUrlString(
-                          "https://github.com/venera-app/venera/blob/master/doc/comic_source.md",
+                          "https://github.com/Kyosee/venera/blob/master/doc/comic_source.md",
                         );
                       },
                       child: Text("Help".tl),
@@ -899,7 +899,7 @@ class _SliverComicSourceState extends State<_SliverComicSource> {
   Iterable<Widget> buildSourceSettings() sync* {
     // Try to get dynamic settings first (for getters), fall back to cached settings
     var settingsMap = source.getSettingsDynamic() ?? source.settings;
-    
+
     if (settingsMap == null) {
       return;
     } else if (source.data['settings'] == null) {

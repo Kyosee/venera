@@ -729,8 +729,9 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
       ).paddingHorizontal(16).paddingBottom(8);
     }
 
+    final source = comicSource;
     bool enableTranslation =
-        App.locale.languageCode == 'zh' && comicSource.enableTagsTranslate;
+        App.locale.languageCode == 'zh' && source?.enableTagsTranslate == true;
 
     return SliverLazyToBoxAdapter(
       child: Column(
@@ -749,7 +750,10 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
             buildWrap(
               children: [
                 if (e.value.isNotEmpty)
-                  buildTag(text: e.key.ts(comicSource.key), isTitle: true),
+                  buildTag(
+                    text: source == null ? e.key : e.key.ts(source.key),
+                    isTitle: true,
+                  ),
                 for (var tag in e.value)
                   buildTag(
                     text: enableTranslation
@@ -835,7 +839,9 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
   }
 
   Widget buildThumbnails() {
-    if (comic.thumbnails == null && comicSource.loadComicThumbnail == null) {
+    final source = comicSource;
+    if (comic.thumbnails == null &&
+        (source == null || source.loadComicThumbnail == null)) {
       return const SliverPadding(padding: EdgeInsets.zero);
     }
     return const _ComicThumbnails();

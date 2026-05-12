@@ -50,3 +50,6 @@ add_translation.py
 .serena/
 DEVELOPMENT_RULES.local.md
 docs/
+data.venera
+/android/key.properties
+/android/keystore.jks

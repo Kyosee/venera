@@ -123,6 +123,7 @@ class ComicStateRepository {
   HistoryManager get _history => _historyManager ?? HistoryManager();
   LocalFavoritesManager get _favorites =>
       _favoritesManager ?? LocalFavoritesManager();
+  bool get _domainReady => (_domain ?? App.domain).isInitialized;
 
   ComicIdentity identityFor(String sourceKey, String sourceComicId) {
     return ComicIdentity.fromSource(
@@ -293,6 +294,9 @@ class ComicStateRepository {
 
   String mirrorComic(Comic comic) {
     final identity = identityFor(comic.sourceKey, comic.id);
+    if (!_domainReady) {
+      return identity.comicId;
+    }
     final metadata = _ComicMetadata.fromComic(comic);
     return _safeMirror(
       fallbackComicId: identity.comicId,
@@ -316,6 +320,9 @@ class ComicStateRepository {
 
   String mirrorComicDetails(ComicDetails comic) {
     final identity = identityFor(comic.sourceKey, comic.id);
+    if (!_domainReady) {
+      return identity.comicId;
+    }
     final metadata = _ComicMetadata.fromDetails(comic);
     return _safeMirror(
       fallbackComicId: identity.comicId,
@@ -340,6 +347,9 @@ class ComicStateRepository {
 
   String mirrorLocalComic(LocalComic comic) {
     final identity = identityFor(comic.sourceKey, comic.id);
+    if (!_domainReady) {
+      return identity.comicId;
+    }
     final metadata = _ComicMetadata.fromLocalComic(comic);
     return _safeMirror(
       fallbackComicId: identity.comicId,

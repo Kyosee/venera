@@ -22,6 +22,107 @@ int _legacyComicTypeValue(int legacyType) {
       legacyType;
 }
 
+Map<int, String> _loadLegacySourceTypeMap(
+  Directory cacheDir,
+  String? sourceTypeMapName,
+) {
+  if (sourceTypeMapName == null) {
+    return const {};
+  }
+  var mapFile = cacheDir.joinFile(sourceTypeMapName);
+  if (!mapFile.existsSync()) {
+    return const {};
+  }
+  try {
+    var data = jsonDecode(mapFile.readAsStringSync());
+    var types = data is Map ? data['types'] : null;
+    if (types is! Map) {
+      return const {};
+    }
+    var result = <int, String>{};
+    for (var entry in types.entries) {
+      var typeValue = int.tryParse(entry.key.toString());
+      var sourceKey = entry.value?.toString();
+      if (typeValue != null && sourceKey != null) {
+        result[typeValue] = sourceKey;
+      }
+    }
+    SourcePlatformResolver.registerLegacyIntSourceKeys(result);
+    return result;
+  } catch (e, s) {
+    Log.warning('Import Data', 'Failed to read legacy source type map: $e\n$s');
+    return const {};
+  }
+}
+
+void _rewriteLegacyTypeColumn(
+  Database db,
+  String table,
+  String typeColumn,
+  Map<int, String> typeMap,
+) {
+  if (typeMap.isEmpty) {
+    return;
+  }
+  var columns = db.select('PRAGMA table_info("$table");');
+  if (!columns.any((element) => element['name'] == typeColumn)) {
+    return;
+  }
+  for (var entry in typeMap.entries) {
+    if (entry.key == 0 ||
+        entry.value == SourcePlatformResolver.localCanonicalKey) {
+      continue;
+    }
+    db.execute(
+      'UPDATE "$table" SET "$typeColumn" = ? WHERE "$typeColumn" = ?;',
+      [entry.value.hashCode, entry.key],
+    );
+  }
+}
+
+void _rewriteLegacySourceTypes(Directory cacheDir, Map<int, String> typeMap) {
+  if (typeMap.isEmpty) {
+    return;
+  }
+
+  var historyFile = cacheDir.joinFile("history.db");
+  if (historyFile.existsSync()) {
+    var db = sqlite3.open(historyFile.path);
+    try {
+      _rewriteLegacyTypeColumn(db, 'history', 'type', typeMap);
+    } finally {
+      db.dispose();
+    }
+  }
+
+  var localFavoriteFile = cacheDir.joinFile("local_favorite.db");
+  if (localFavoriteFile.existsSync()) {
+    var db = sqlite3.open(localFavoriteFile.path);
+    try {
+      var tables = db
+          .select("SELECT name FROM sqlite_master WHERE type='table';")
+          .map((e) => e["name"] as String)
+          .where((e) => e != "folder_order" && e != "folder_sync")
+          .toList();
+      for (var table in tables) {
+        _rewriteLegacyTypeColumn(db, table, 'type', typeMap);
+      }
+    } finally {
+      db.dispose();
+    }
+  }
+
+  var localFile = cacheDir.joinFile("local.db");
+  if (localFile.existsSync()) {
+    var db = sqlite3.open(localFile.path);
+    try {
+      _rewriteLegacyTypeColumn(db, 'comics', 'comic_type', typeMap);
+    } finally {
+      db.dispose();
+    }
+  }
+}
+
 Future<File> exportAppData([bool sync = true]) async {
   var time = DateTime.now().millisecondsSinceEpoch ~/ 1000;
   var cacheFilePath = FilePath.join(App.cachePath, '$time.venera');
@@ -77,10 +178,16 @@ Future<void> importAppData(File file, [bool checkVersion = false]) async {
     await Isolate.run(() {
       ZipFile.openAndExtract(file.path, cacheDirPath);
     });
+    var legacySourceTypeMap = _loadLegacySourceTypeMap(
+      cacheDir,
+      "source_type_map.json",
+    );
+    _rewriteLegacySourceTypes(cacheDir, legacySourceTypeMap);
     var historyFile = cacheDir.joinFile("history.db");
     var localFavoriteFile = cacheDir.joinFile("local_favorite.db");
     var domainFile = File(FilePath.join(cacheDirPath, "data", "venera.db"));
     var appdataFile = cacheDir.joinFile("appdata.json");
+    var implicitDataFile = cacheDir.joinFile("implicitData.json");
     var cookieFile = cacheDir.joinFile("cookie.db");
     if (checkVersion && appdataFile.existsSync()) {
       var data = jsonDecode(await appdataFile.readAsString());
@@ -123,6 +230,21 @@ Future<void> importAppData(File file, [bool checkVersion = false]) async {
       var data = jsonDecode(content);
       appdata.syncData(data);
     }
+    if (await implicitDataFile.exists()) {
+      try {
+        var implicitData = jsonDecode(await implicitDataFile.readAsString());
+        if (implicitData is Map) {
+          await implicitDataFile.copy(
+            FilePath.join(App.dataPath, "implicitData.json"),
+          );
+          appdata.implicitData
+            ..clear()
+            ..addAll(Map<String, dynamic>.from(implicitData));
+        }
+      } catch (e, s) {
+        Log.warning('Import Data', 'Failed to import implicit data: $e\n$s');
+      }
+    }
     if (await cookieFile.exists()) {
       SingleInstanceCookieJar.instance?.dispose();
       File(FilePath.join(App.dataPath, "cookie.db")).deleteIfExistsSync();
@@ -139,12 +261,14 @@ Future<void> importAppData(File file, [bool checkVersion = false]) async {
       Directory(FilePath.join(App.dataPath, "comic_source")).createSync();
       for (var file in Directory(comicSourceDir).listSync()) {
         if (file is File) {
-          var targetFile = FilePath.join(
-            App.dataPath,
-            "comic_source",
-            file.name,
-          );
-          await file.copy(targetFile);
+          if (file.name.endsWith(".js") || file.name.endsWith(".data")) {
+            var targetFile = FilePath.join(
+              App.dataPath,
+              "comic_source",
+              file.name,
+            );
+            await file.copy(targetFile);
+          }
         }
       }
       await ComicSourceManager().reload();
@@ -165,6 +289,7 @@ Future<void> importPicaData(File file) async {
     await Isolate.run(() {
       ZipFile.openAndExtract(file.path, cacheDirPath);
     });
+    _loadLegacySourceTypeMap(cacheDir, "source_type_map.json");
     var localFavoriteFile = cacheDir.joinFile("local_favorite.db");
     if (localFavoriteFile.existsSync()) {
       var db = sqlite3.open(localFavoriteFile.path);
