@@ -389,6 +389,13 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                   ),
                 ),
               Tooltip(
+                message: "Auto link comic sources".tl,
+                child: IconButton(
+                  icon: const Icon(Icons.hub_outlined),
+                  onPressed: _showAutoLinkSourcesDialog,
+                ),
+              ),
+              Tooltip(
                 message: "Filter".tl,
                 child: IconButton(
                   icon: const Icon(Icons.filter_alt_outlined),
@@ -602,6 +609,20 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                     text: "Download".tl,
                     onClick: downloadSelected,
                   ),
+                  MenuEntry(
+                    icon: Icons.move_up_outlined,
+                    text: "Migrate Source".tl,
+                    onClick: () {
+                      showBatchSourceMigrationDialog(
+                        context,
+                        folder: isAllFolder ? "All Comics".tl : widget.folder,
+                        comics: selectedComics.keys
+                            .map((e) => e as FavoriteItem)
+                            .toList(),
+                        onStarted: _cancel,
+                      );
+                    },
+                  ),
                   if (selectedComics.length == 1)
                     MenuEntry(
                       icon: Icons.copy,
@@ -724,6 +745,13 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                     context.showMessage(message: "Download started".tl);
                   },
                 ),
+                MenuEntry(
+                  icon: Icons.move_up_outlined,
+                  text: "Migrate Source".tl,
+                  onClick: () {
+                    showSourceMigrationDialog(context, c as FavoriteItem);
+                  },
+                ),
                 if (appdata.settings["onClickFavorite"] == "viewDetail")
                   MenuEntry(
                     icon: Icons.menu_book_outlined,
@@ -826,6 +854,164 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
         }
       },
       child: body,
+    );
+  }
+
+  void _showAutoLinkSourcesDialog() {
+    final searchableSources = ComicSource.all()
+        .where(
+          (source) =>
+              source.searchPageData?.loadPage != null ||
+              source.searchPageData?.loadNext != null,
+        )
+        .toList();
+    final selectedSources = searchableSources
+        .map((source) => source.key)
+        .toSet();
+    final targetComics = filterComics(comics);
+    if (targetComics.isEmpty) {
+      context.showMessage(message: "No comics".tl);
+      return;
+    }
+    if (searchableSources.isEmpty) {
+      context.showMessage(message: "No searchable sources".tl);
+      return;
+    }
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return Dialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+                side: context.brightness == Brightness.dark
+                    ? BorderSide(color: context.colorScheme.outlineVariant)
+                    : BorderSide.none,
+              ),
+              insetPadding: context.width < 400
+                  ? const EdgeInsets.symmetric(horizontal: 4)
+                  : const EdgeInsets.symmetric(horizontal: 16),
+              child: SizedBox(
+                width: min(600, max(280, context.width - 64)),
+                height: min(560, max(320, context.height - 96)),
+                child: Column(
+                  children: [
+                    Appbar(
+                      leading: IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: context.pop,
+                      ),
+                      title: Text("Auto link comic sources".tl),
+                      backgroundColor: Colors.transparent,
+                    ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "Auto link sources warning".tlParams({
+                              "count": targetComics.length,
+                            }),
+                            style: TextStyle(
+                              color: context.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Text("Select Source".tl, style: ts.s16),
+                              const Spacer(),
+                              TextButton(
+                                onPressed: () {
+                                  setState(() {
+                                    selectedSources
+                                      ..clear()
+                                      ..addAll(
+                                        searchableSources.map(
+                                          (source) => source.key,
+                                        ),
+                                      );
+                                  });
+                                },
+                                child: Text("Select All".tl),
+                              ),
+                              TextButton(
+                                onPressed: () {
+                                  setState(selectedSources.clear);
+                                },
+                                child: Text("Deselect".tl),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Expanded(
+                            child: ListView.builder(
+                              itemCount: searchableSources.length,
+                              itemBuilder: (context, index) {
+                                final source = searchableSources[index];
+                                return CheckboxListTile(
+                                  dense: true,
+                                  value: selectedSources.contains(source.key),
+                                  title: Text(source.name),
+                                  onChanged: (value) {
+                                    setState(() {
+                                      if (value == true) {
+                                        selectedSources.add(source.key);
+                                      } else {
+                                        selectedSources.remove(source.key);
+                                      }
+                                    });
+                                  },
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                      ).paddingHorizontal(16),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Button.text(
+                            onPressed: () => context.pop(),
+                            child: Text("Cancel".tl),
+                          ),
+                          const SizedBox(width: 8),
+                          Button.filled(
+                            onPressed: () {
+                              if (selectedSources.isEmpty) {
+                                context.showMessage(
+                                  message: "Invalid input".tl,
+                                );
+                                return;
+                              }
+                              RelatedSourceTaskManager.instance.startAutoLink(
+                                folder: isAllFolder
+                                    ? "All Comics".tl
+                                    : widget.folder,
+                                favorites: targetComics,
+                                targetSourceKeys: selectedSources.toList(),
+                              );
+                              context.pop();
+                              App.rootContext.showMessage(
+                                message: "Task started".tl,
+                              );
+                            },
+                            child: Text("Start".tl),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 

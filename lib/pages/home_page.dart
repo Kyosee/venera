@@ -397,6 +397,8 @@ class _LocalState extends State<_Local> {
                       child: Text(count.toString(), style: ts.s12),
                     ),
                     const Spacer(),
+                    _LocalImportButton(onPressed: import),
+                    const SizedBox(width: 8),
                     const Icon(Icons.arrow_right),
                   ],
                 ),
@@ -427,9 +429,9 @@ class _LocalState extends State<_Local> {
                     },
                   ),
                 ).paddingHorizontal(8),
-              Row(
-                children: [
-                  if (LocalManager().downloadingTasks.isNotEmpty)
+              if (LocalManager().downloadingTasks.isNotEmpty)
+                Row(
+                  children: [
                     Button.outlined(
                       child: Row(
                         children: [
@@ -449,10 +451,8 @@ class _LocalState extends State<_Local> {
                         showPopUpWidget(context, const DownloadingPage());
                       },
                     ),
-                  const Spacer(),
-                  Button.filled(onPressed: import, child: Text("Import".tl)),
-                ],
-              ).paddingHorizontal(16).paddingVertical(8),
+                  ],
+                ).paddingHorizontal(16).paddingVertical(8),
             ],
           ),
         ),
@@ -467,6 +467,46 @@ class _LocalState extends State<_Local> {
       builder: (context) {
         return const _ImportComicsWidget();
       },
+    );
+  }
+}
+
+class _LocalImportButton extends StatelessWidget {
+  const _LocalImportButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: "Import".tl,
+      child: Material(
+        color: context.colorScheme.primary.toOpacity(0.08),
+        borderRadius: BorderRadius.circular(15),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(15),
+          onTap: onPressed,
+          child: Container(
+            height: 30,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(
+                color: context.colorScheme.primary.toOpacity(0.28),
+                width: 0.6,
+              ),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              "Import".tl,
+              style: TextStyle(
+                fontSize: 13,
+                color: context.colorScheme.primary,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -52,6 +52,13 @@ class _FollowUpdatesWidgetState
   void initState() {
     super.initState();
     getCount();
+    FollowUpdateTaskManager.instance.addListener(updateCount);
+  }
+
+  @override
+  void dispose() {
+    FollowUpdateTaskManager.instance.removeListener(updateCount);
+    super.dispose();
   }
 
   @override

@@ -354,21 +354,29 @@ class NaviPaneState extends State<NaviPane>
             SizedBox(height: MediaQuery.of(context).padding.top),
             SizedBox(
               height: 48,
-              child: value == 3
-                  ? Row(
-                      children: [
-                        buildAppLogo(),
-                        const SizedBox(width: 10),
-                        const Text(
-                          'Venera',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ],
-                    )
-                  : Center(child: buildAppLogo()),
+              child: Material(
+                color: Colors.transparent,
+                borderRadius: BorderRadius.circular(8),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: () => updatePage(0),
+                  child: value == 3
+                      ? Row(
+                          children: [
+                            buildAppLogo(),
+                            const SizedBox(width: 10),
+                            const Text(
+                              'Venera',
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        )
+                      : Center(child: buildAppLogo()),
+                ),
+              ),
             ),
             const SizedBox(height: 8),
             ...List<Widget>.generate(

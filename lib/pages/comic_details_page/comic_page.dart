@@ -80,6 +80,10 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
 
   bool showFAB = false;
 
+  String? detailsLoadError;
+
+  bool descriptionExpanded = false;
+
   final ComicStateRepository _comicStateRepository =
       const ComicStateRepository();
 
@@ -193,7 +197,6 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
           ...buildTitle(),
           buildActions(),
           buildDescription(),
-          buildInfo(),
           buildChapters(),
           buildComments(),
           buildThumbnails(),
@@ -242,14 +245,68 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
       await Future.delayed(const Duration(milliseconds: 200));
       return const Res.error('Local comic');
     }
-    var comicSource = ComicSource.find(widget.sourceKey);
-    if (comicSource == null) {
-      return const Res.error('Comic source not found');
-    }
     var state = _comicStateRepository.load(widget.sourceKey, widget.id);
     isAddToLocalFav = state.isLocalFavorite;
     history = state.history;
-    return comicSource.loadComicInfo!(widget.id);
+    detailsLoadError = null;
+    var comicSource = ComicSource.find(widget.sourceKey);
+    if (comicSource == null || comicSource.loadComicInfo == null) {
+      detailsLoadError = 'Comic source not found';
+      return Res(_fallbackDetails(state));
+    }
+    try {
+      final res = await comicSource.loadComicInfo!(widget.id);
+      if (res.success) {
+        return res;
+      }
+      detailsLoadError = res.errorMessage ?? 'Load failed';
+      return Res(_fallbackDetails(state));
+    } catch (e) {
+      detailsLoadError = e.toString();
+      return Res(_fallbackDetails(state));
+    }
+  }
+
+  ComicDetails _fallbackDetails(ComicState state) {
+    return ComicDetails.fromJson({
+      'title': state.title ?? widget.title ?? widget.id,
+      'subtitle': state.subtitle ?? '',
+      'cover': state.cover ?? widget.cover ?? '',
+      'description': state.description ?? '',
+      'tags': _tagsMapFromPlain(state.tags),
+      'chapters': null,
+      'sourceKey': widget.sourceKey,
+      'comicId': widget.id,
+      'thumbnails': null,
+      'recommend': null,
+      'isFavorite': state.isLocalFavorite,
+      'subId': null,
+      'likesCount': null,
+      'isLiked': null,
+      'commentCount': null,
+      'uploader': null,
+      'uploadTime': null,
+      'updateTime': null,
+      'url': null,
+      'stars': null,
+      'maxPage': null,
+      'comments': null,
+    });
+  }
+
+  Map<String, List<String>> _tagsMapFromPlain(List<String>? tags) {
+    final result = <String, List<String>>{};
+    for (final tag in tags ?? const <String>[]) {
+      final index = tag.indexOf(':');
+      if (index > 0) {
+        result
+            .putIfAbsent(tag.substring(0, index), () => <String>[])
+            .add(tag.substring(index + 1));
+      } else if (tag.trim().isNotEmpty) {
+        result.putIfAbsent('Tags', () => <String>[]).add(tag);
+      }
+    }
+    return result;
   }
 
   @override
@@ -259,8 +316,9 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
     isFavorite = comic.isFavorite ?? false;
     // For sources with multi-folder favorites, prefer querying folders to get accurate favorite status
     // Some sources may not set isFavorite reliably when multi-folder is enabled
-    if (comicSource.favoriteData?.loadFolders != null && comicSource.isLogged) {
-      var res = await comicSource.favoriteData!.loadFolders!(comic.id);
+    final source = ComicSource.find(comic.sourceKey);
+    if (source?.favoriteData?.loadFolders != null && source!.isLogged) {
+      var res = await source.favoriteData!.loadFolders!(comic.id);
       if (!res.error) {
         if (res.subData is List) {
           var list = List<String>.from(res.subData);
@@ -339,9 +397,31 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
                     comic.subTitle!,
                     style: ts.s14,
                   ).paddingVertical(4),
-                Text(
-                  (ComicSource.find(comic.sourceKey)?.name) ?? '',
-                  style: ts.s12,
+                const SizedBox(height: 6),
+                SizedBox(
+                  height: 116,
+                  child: ComicDescription(
+                    title: comic.title,
+                    subtitle:
+                        comic.findAuthor() ??
+                        comic.subTitle ??
+                        comic.uploader ??
+                        '',
+                    description: comic.description ?? '',
+                    badge: ComicSource.find(comic.sourceKey)?.name,
+                    tags: comic.plainTags,
+                    maxLines: 3,
+                    enableTranslate:
+                        ComicSource.find(
+                          comic.sourceKey,
+                        )?.enableTagsTranslate ??
+                        false,
+                    rating: comic.stars,
+                    updateText: comic.findUpdateTime() ?? comic.updateTime,
+                    progressText: history?.description,
+                    pagesText: comic.maxPage?.toString(),
+                    showTitle: false,
+                  ),
                 ),
               ],
             ),
@@ -354,6 +434,7 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
   Widget buildActions() {
     bool isMobile = context.width < changePoint;
     bool hasHistory = history != null && (history!.ep > 1 || history!.page > 1);
+    final source = ComicSource.find(comic.sourceKey);
     return SliverLazyToBoxAdapter(
       child: Column(
         children: [
@@ -405,7 +486,7 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
                 onLongPressed: quickFavorite,
                 iconColor: context.useTextColor(Colors.purple),
               ),
-              if (comicSource.commentsLoader != null)
+              if (source?.commentsLoader != null)
                 _ActionButton(
                   icon: const Icon(Icons.comment),
                   text: (comic.commentCount ?? 'Comments'.tl).toString(),
@@ -509,8 +590,27 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
           ListTile(title: Text("Description".tl)),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: SelectableText(comic.description!).fixWidth(double.infinity),
+            child: SelectableText(
+              comic.description!,
+              maxLines: descriptionExpanded ? null : 1,
+            ).fixWidth(double.infinity),
           ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              icon: Icon(
+                descriptionExpanded
+                    ? Icons.keyboard_arrow_up
+                    : Icons.keyboard_arrow_down,
+              ),
+              onPressed: () {
+                setState(() {
+                  descriptionExpanded = !descriptionExpanded;
+                });
+              },
+              label: Text(descriptionExpanded ? 'Collapse'.tl : 'Expand'.tl),
+            ),
+          ).paddingHorizontal(8),
           const SizedBox(height: 16),
           const Divider(),
         ],
@@ -694,6 +794,33 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
 
   Widget buildChapters() {
     if (comic.chapters == null) {
+      if (detailsLoadError != null) {
+        return SliverLazyToBoxAdapter(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ListTile(title: Text("Chapters".tl)),
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: context.colorScheme.errorContainer,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  "Chapter load failed: @message".tlParams({
+                    "message": detailsLoadError!,
+                  }),
+                  style: TextStyle(color: context.colorScheme.onErrorContainer),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Divider(),
+            ],
+          ),
+        );
+      }
       return const SliverPadding(padding: EdgeInsets.zero);
     }
     return _ComicChapters(

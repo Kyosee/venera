@@ -123,6 +123,12 @@ class ComicTile extends StatelessWidget {
         onClick: () => _showRelatedSourcesDialog(context),
       ),
       MenuEntry(
+        icon: Icons.move_up_outlined,
+        text: 'Migrate Source'.tl,
+        onClick: () =>
+            showSourceMigrationDialog(context, favoriteItemFromComic(comic)),
+      ),
+      MenuEntry(
         icon: Icons.block,
         text: 'Block'.tl,
         onClick: () => block(context),
@@ -144,50 +150,436 @@ class ComicTile extends StatelessWidget {
               source.searchPageData?.loadNext != null,
         )
         .toList();
-    var selectedSourceKey =
-        searchableSources
-            .firstWhereOrNull((source) => source.key != comic.sourceKey)
-            ?.key ??
-        searchableSources.firstOrNull?.key;
-    var searchResults = <Comic>[];
+    final selectedSourceKeys = <String>{};
+    final firstOtherSource = searchableSources.firstWhereOrNull(
+      (source) => source.key != comic.sourceKey,
+    );
+    if (firstOtherSource != null) {
+      selectedSourceKeys.add(firstOtherSource.key);
+    } else if (searchableSources.isNotEmpty) {
+      selectedSourceKeys.add(searchableSources.first.key);
+    }
+    var searchGroups = <String, _RelatedSearchGroup>{};
     var isSearching = false;
-    String? searchError;
+
+    void openDetail(
+      String sourceKey,
+      String id, {
+      String? cover,
+      String? title,
+    }) {
+      App.mainNavigatorKey?.currentContext?.to(
+        () =>
+            ComicPage(id: id, sourceKey: sourceKey, cover: cover, title: title),
+      );
+    }
+
+    void showLinkPreview(
+      DomainComicSourceLink link, {
+      VoidCallback? onAccept,
+      VoidCallback? onReject,
+      VoidCallback? onUnlink,
+    }) {
+      final sourceKey = _sourceKeyFromPlatformId(link.platformId);
+      _showRelatedComicPreview(
+        context: context,
+        title: link.comicTitle,
+        cover: link.comicCoverUri,
+        sourceKey: sourceKey,
+        sourceName: _sourceNameForKey(sourceKey, link.sourceName),
+        id: link.sourceComicId,
+        author: link.comicAuthor,
+        status: link.comicStatus,
+        actions: [
+          if (onAccept != null)
+            Button.filled(onPressed: onAccept, child: Text('Accept'.tl)),
+          if (onReject != null)
+            Button.text(onPressed: onReject, child: Text('Reject'.tl)),
+          if (onUnlink != null)
+            Button.text(onPressed: onUnlink, child: Text('Unlink'.tl)),
+          Button.outlined(
+            onPressed: () => openDetail(
+              sourceKey,
+              link.sourceComicId,
+              cover: link.comicCoverUri,
+              title: link.comicTitle,
+            ),
+            child: Text('Jump to Detail'.tl),
+          ),
+        ],
+      );
+    }
+
+    void showResultPreview(Comic result, VoidCallback onLink) {
+      _showRelatedComicPreview(
+        context: context,
+        title: result.title,
+        cover: result.cover,
+        sourceKey: result.sourceKey,
+        sourceName: _sourceNameForKey(result.sourceKey, result.sourceKey),
+        id: result.id,
+        author: result.subtitle,
+        status: _relatedStatusFromTags(result.tags),
+        tags: result.tags,
+        description: result.description,
+        actions: [
+          Button.filled(onPressed: onLink, child: Text('Link this comic'.tl)),
+          Button.outlined(
+            onPressed: () => openDetail(
+              result.sourceKey,
+              result.id,
+              cover: result.cover,
+              title: result.title,
+            ),
+            child: Text('Jump to Detail'.tl),
+          ),
+        ],
+      );
+    }
+
+    void linkSearchResult(
+      StateSetter setState,
+      BuildContext context,
+      Comic result,
+    ) {
+      repository.mirrorComic(result);
+      repository.linkRelatedSource(
+        comic: comic,
+        targetSourceKey: result.sourceKey,
+        targetComicId: result.id,
+      );
+      setState(() {
+        searchGroups = {};
+      });
+      context.showMessage(message: 'Linked'.tl);
+    }
 
     Future<void> runSearch(StateSetter setState, BuildContext context) async {
       final keyword = searchController.text.trim();
-      final source = selectedSourceKey == null
-          ? null
-          : ComicSource.find(selectedSourceKey!);
-      final searchData = source?.searchPageData;
-      if (keyword.isEmpty || source == null || searchData == null) {
+      if (keyword.isEmpty || selectedSourceKeys.isEmpty) {
         context.showMessage(message: 'Invalid input'.tl);
         return;
       }
-      final options =
-          searchData.searchOptions
-              ?.map((option) => option.defaultValue)
-              .toList() ??
-          const <String>[];
       setState(() {
         isSearching = true;
-        searchError = null;
+        searchGroups = {
+          for (final sourceKey in selectedSourceKeys)
+            sourceKey: _RelatedSearchGroup(
+              sourceKey: sourceKey,
+              sourceName: _sourceNameForKey(sourceKey, sourceKey),
+              isLoading: true,
+            ),
+        };
       });
-      try {
-        final res = searchData.loadPage != null
-            ? await searchData.loadPage!(keyword, 1, options)
-            : await searchData.loadNext!(keyword, null, options);
-        setState(() {
-          isSearching = false;
-          searchResults = res.dataOrNull ?? const <Comic>[];
-          searchError = res.errorMessage;
-        });
-      } catch (e) {
-        setState(() {
-          isSearching = false;
-          searchResults = const <Comic>[];
-          searchError = e.toString();
-        });
+      for (final sourceKey in selectedSourceKeys.toList()) {
+        final source = ComicSource.find(sourceKey);
+        final searchData = source?.searchPageData;
+        if (source == null || searchData == null) {
+          setState(() {
+            searchGroups[sourceKey] = _RelatedSearchGroup(
+              sourceKey: sourceKey,
+              sourceName: _sourceNameForKey(sourceKey, sourceKey),
+              error: 'No searchable sources'.tl,
+            );
+          });
+          continue;
+        }
+        final options =
+            searchData.searchOptions
+                ?.map((option) => option.defaultValue)
+                .toList() ??
+            const <String>[];
+        try {
+          final res = searchData.loadPage != null
+              ? await searchData.loadPage!(keyword, 1, options)
+              : await searchData.loadNext!(keyword, null, options);
+          setState(() {
+            searchGroups[sourceKey] = _RelatedSearchGroup(
+              sourceKey: sourceKey,
+              sourceName: source.name,
+              results: res.dataOrNull ?? const <Comic>[],
+              error: res.errorMessage,
+            );
+          });
+        } catch (e) {
+          setState(() {
+            searchGroups[sourceKey] = _RelatedSearchGroup(
+              sourceKey: sourceKey,
+              sourceName: source.name,
+              error: e.toString(),
+            );
+          });
+        }
       }
+      setState(() {
+        isSearching = false;
+      });
+    }
+
+    Widget buildSourceSelector(StateSetter setState) {
+      if (searchableSources.isEmpty) {
+        return Text(
+          'No searchable sources'.tl,
+          style: TextStyle(color: context.colorScheme.onSurfaceVariant),
+        );
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('Select Source'.tl, style: ts.s16),
+              const Spacer(),
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    selectedSourceKeys
+                      ..clear()
+                      ..addAll(searchableSources.map((source) => source.key));
+                  });
+                },
+                child: Text('Select All'.tl),
+              ),
+              TextButton(
+                onPressed: () => setState(selectedSourceKeys.clear),
+                child: Text('Deselect'.tl),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 116),
+            child: SingleChildScrollView(
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final source in searchableSources)
+                    FilterChip(
+                      label: Text(source.name),
+                      selected: selectedSourceKeys.contains(source.key),
+                      onSelected: (selected) {
+                        setState(() {
+                          if (selected) {
+                            selectedSourceKeys.add(source.key);
+                          } else {
+                            selectedSourceKeys.remove(source.key);
+                          }
+                        });
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    Widget buildLinkList(StateSetter setState) {
+      final links = repository.relatedSourcesFor(comic);
+      if (links.isEmpty) {
+        return Center(
+          child: Text(
+            'No related sources'.tl,
+            style: TextStyle(color: context.colorScheme.onSurfaceVariant),
+          ),
+        );
+      }
+      return ListView(
+        padding: EdgeInsets.zero,
+        children: [
+          for (final link in links)
+            _RelatedSourceRow(
+              link: link,
+              isCurrent: link.comicId == currentIdentity.comicId,
+              onTap: () => showLinkPreview(
+                link,
+                onAccept: link.status == 'candidate'
+                    ? () {
+                        repository.acceptRelatedSource(link);
+                        setState(() {});
+                        App.rootContext.pop();
+                      }
+                    : null,
+                onReject: link.status == 'candidate'
+                    ? () {
+                        repository.rejectRelatedSource(link);
+                        setState(() {});
+                        App.rootContext.pop();
+                      }
+                    : null,
+                onUnlink:
+                    link.status == 'accepted' &&
+                        link.comicId != currentIdentity.comicId
+                    ? () {
+                        repository.unlinkRelatedSource(link);
+                        setState(() {});
+                        App.rootContext.pop();
+                      }
+                    : null,
+              ),
+              onAccept: link.status == 'candidate'
+                  ? () {
+                      repository.acceptRelatedSource(link);
+                      setState(() {});
+                    }
+                  : null,
+              onReject: link.status == 'candidate'
+                  ? () {
+                      repository.rejectRelatedSource(link);
+                      setState(() {});
+                    }
+                  : null,
+              onUnlink:
+                  link.status == 'accepted' &&
+                      link.comicId != currentIdentity.comicId
+                  ? () {
+                      repository.unlinkRelatedSource(link);
+                      setState(() {});
+                    }
+                  : null,
+            ),
+        ],
+      );
+    }
+
+    Widget buildSearchList(StateSetter setState, BuildContext context) {
+      return ListView(
+        padding: EdgeInsets.zero,
+        children: [
+          buildSourceSelector(setState),
+          const SizedBox(height: 12),
+          TextField(
+            controller: searchController,
+            decoration: InputDecoration(
+              labelText: 'Search by title'.tl,
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.search),
+                onPressed: isSearching
+                    ? null
+                    : () => runSearch(setState, context),
+              ),
+            ),
+            onSubmitted: (_) => runSearch(setState, context),
+          ),
+          const SizedBox(height: 10),
+          Button.filled(
+            isLoading: isSearching,
+            onPressed: () => runSearch(setState, context),
+            child: Text('Search related comic'.tl),
+          ),
+          const SizedBox(height: 12),
+          if (searchGroups.isEmpty)
+            Text(
+              'Search Results'.tl,
+              style: TextStyle(color: context.colorScheme.onSurfaceVariant),
+            )
+          else
+            for (final group in searchGroups.values)
+              ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                initiallyExpanded: true,
+                title: Text(group.sourceName),
+                subtitle: group.isLoading
+                    ? Text('Running'.tl)
+                    : Text(
+                        group.error ??
+                            'Found @count comics'.tlParams({
+                              'count': group.results.length,
+                            }),
+                      ),
+                children: [
+                  if (group.isLoading)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 12),
+                      child: LinearProgressIndicator(),
+                    )
+                  else if (group.error != null)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        group.error!,
+                        style: TextStyle(color: context.colorScheme.error),
+                      ),
+                    )
+                  else if (group.results.isEmpty)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'No related sources'.tl,
+                        style: TextStyle(
+                          color: context.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    )
+                  else
+                    for (final result in group.results.take(12))
+                      _RelatedSearchResultRow(
+                        comic: result,
+                        onTap: () => showResultPreview(
+                          result,
+                          () => linkSearchResult(setState, context, result),
+                        ),
+                        onLink: () =>
+                            linkSearchResult(setState, context, result),
+                      ),
+                ],
+              ),
+          const SizedBox(height: 12),
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: EdgeInsets.zero,
+            title: Text('Advanced precise link'.tl),
+            children: [
+              TextField(
+                controller: sourceKeyController,
+                decoration: InputDecoration(
+                  labelText: 'Source identifier'.tl,
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: comicIdController,
+                decoration: InputDecoration(
+                  labelText: 'Comic identifier or URL'.tl,
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Button.outlined(
+                  onPressed: () {
+                    final sourceKey = sourceKeyController.text.trim();
+                    final targetComicId = comicIdController.text.trim();
+                    if (sourceKey.isEmpty || targetComicId.isEmpty) {
+                      context.showMessage(message: 'Invalid input'.tl);
+                      return;
+                    }
+                    try {
+                      repository.linkRelatedSource(
+                        comic: comic,
+                        targetSourceKey: sourceKey,
+                        targetComicId: targetComicId,
+                      );
+                      sourceKeyController.clear();
+                      comicIdController.clear();
+                      setState(() {});
+                      context.showMessage(message: 'Linked'.tl);
+                    } catch (e) {
+                      context.showMessage(message: e.toString());
+                    }
+                  },
+                  child: Text('Link'.tl),
+                ),
+              ),
+            ],
+          ),
+        ],
+      );
     }
 
     showDialog(
@@ -195,208 +587,82 @@ class ComicTile extends StatelessWidget {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setState) {
-            final links = repository.relatedSourcesFor(comic);
-            return ContentDialog(
-              title: 'Related Sources'.tl,
-              content: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: 520,
-                  maxHeight: math.min(520, context.height - 136),
-                ),
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '${'Current'.tl}: ${comic.title.replaceAll('\n', ' ')}',
-                        style: TextStyle(
-                          color: context.colorScheme.onSurfaceVariant,
-                        ),
+            return Dialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+                side: context.brightness == Brightness.dark
+                    ? BorderSide(color: context.colorScheme.outlineVariant)
+                    : BorderSide.none,
+              ),
+              insetPadding: context.width < 400
+                  ? const EdgeInsets.symmetric(horizontal: 4)
+                  : const EdgeInsets.symmetric(horizontal: 16),
+              child: SizedBox(
+                width: math.min(600, math.max(280, context.width - 64)),
+                height: math.min(640, math.max(360, context.height - 96)),
+                child: Column(
+                  children: [
+                    Appbar(
+                      leading: IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: context.pop,
                       ),
-                      const SizedBox(height: 12),
-                      if (links.isEmpty)
-                        Text(
-                          'No related sources'.tl,
-                          style: TextStyle(
-                            color: context.colorScheme.onSurfaceVariant,
-                          ),
-                        )
-                      else
-                        for (final link in links)
-                          _RelatedSourceRow(
-                            link: link,
-                            isCurrent: link.comicId == currentIdentity.comicId,
-                            onAccept: link.status == 'candidate'
-                                ? () {
-                                    repository.acceptRelatedSource(link);
-                                    setState(() {});
-                                  }
-                                : null,
-                            onReject: link.status == 'candidate'
-                                ? () {
-                                    repository.rejectRelatedSource(link);
-                                    setState(() {});
-                                  }
-                                : null,
-                            onUnlink:
-                                link.status == 'accepted' &&
-                                    link.comicId != currentIdentity.comicId
-                                ? () {
-                                    repository.unlinkRelatedSource(link);
-                                    setState(() {});
-                                  }
-                                : null,
-                          ),
-                      const SizedBox(height: 16),
-                      if (searchableSources.isEmpty)
-                        Text(
-                          'No searchable sources'.tl,
-                          style: TextStyle(
-                            color: context.colorScheme.onSurfaceVariant,
-                          ),
-                        )
-                      else ...[
-                        DropdownButtonFormField<String>(
-                          initialValue: selectedSourceKey,
-                          decoration: InputDecoration(
-                            labelText: 'Select Source'.tl,
-                            border: const OutlineInputBorder(),
-                          ),
-                          items: [
-                            for (final source in searchableSources)
-                              DropdownMenuItem(
-                                value: source.key,
-                                child: Text(source.name),
+                      title: Text('Related Sources'.tl),
+                      backgroundColor: Colors.transparent,
+                    ),
+                    Expanded(
+                      child: DefaultTabController(
+                        length: 2,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${'Current'.tl}: ${comic.title.replaceAll('\n', ' ')}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: context.colorScheme.onSurfaceVariant,
                               ),
+                            ).paddingHorizontal(16),
+                            const SizedBox(height: 8),
+                            Material(
+                              color: Colors.transparent,
+                              child: AppTabBar(
+                                tabs: [
+                                  Tab(text: 'Linked / Candidates'.tl),
+                                  Tab(text: 'Search'.tl),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Expanded(
+                              child: TabBarView(
+                                children: [
+                                  buildLinkList(setState).paddingHorizontal(16),
+                                  buildSearchList(
+                                    setState,
+                                    context,
+                                  ).paddingHorizontal(16),
+                                ],
+                              ),
+                            ),
                           ],
-                          onChanged: (value) {
-                            setState(() {
-                              selectedSourceKey = value;
-                              searchResults = const <Comic>[];
-                              searchError = null;
-                            });
-                          },
                         ),
-                        const SizedBox(height: 10),
-                        TextField(
-                          controller: searchController,
-                          decoration: InputDecoration(
-                            labelText: 'Search by title'.tl,
-                            border: const OutlineInputBorder(),
-                            suffixIcon: IconButton(
-                              icon: const Icon(Icons.search),
-                              onPressed: isSearching
-                                  ? null
-                                  : () => runSearch(setState, context),
-                            ),
-                          ),
-                          onSubmitted: (_) => runSearch(setState, context),
-                        ),
-                        const SizedBox(height: 10),
-                        Button.filled(
-                          isLoading: isSearching,
-                          onPressed: () => runSearch(setState, context),
-                          child: Text('Search related comic'.tl),
-                        ),
-                        if (searchError != null) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            searchError!,
-                            style: TextStyle(color: context.colorScheme.error),
-                          ),
-                        ],
-                        if (searchResults.isNotEmpty) ...[
-                          const SizedBox(height: 12),
-                          Text(
-                            'Search Results'.tl,
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          const SizedBox(height: 8),
-                          for (final result in searchResults.take(12))
-                            _RelatedSearchResultRow(
-                              comic: result,
-                              onLink: () {
-                                repository.mirrorComic(result);
-                                repository.linkRelatedSource(
-                                  comic: comic,
-                                  targetSourceKey: result.sourceKey,
-                                  targetComicId: result.id,
-                                );
-                                setState(() {
-                                  searchResults = const <Comic>[];
-                                });
-                                context.showMessage(message: 'Linked'.tl);
-                              },
-                            ),
-                        ],
-                      ],
-                      const SizedBox(height: 12),
-                      ExpansionTile(
-                        tilePadding: EdgeInsets.zero,
-                        childrenPadding: EdgeInsets.zero,
-                        title: Text('Advanced precise link'.tl),
-                        children: [
-                          TextField(
-                            controller: sourceKeyController,
-                            decoration: InputDecoration(
-                              labelText: 'Source identifier'.tl,
-                              border: const OutlineInputBorder(),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          TextField(
-                            controller: comicIdController,
-                            decoration: InputDecoration(
-                              labelText: 'Comic identifier or URL'.tl,
-                              border: const OutlineInputBorder(),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: Button.outlined(
-                              onPressed: () {
-                                final sourceKey = sourceKeyController.text
-                                    .trim();
-                                final targetComicId = comicIdController.text
-                                    .trim();
-                                if (sourceKey.isEmpty ||
-                                    targetComicId.isEmpty) {
-                                  context.showMessage(
-                                    message: 'Invalid input'.tl,
-                                  );
-                                  return;
-                                }
-                                try {
-                                  repository.linkRelatedSource(
-                                    comic: comic,
-                                    targetSourceKey: sourceKey,
-                                    targetComicId: targetComicId,
-                                  );
-                                  sourceKeyController.clear();
-                                  comicIdController.clear();
-                                  setState(() {});
-                                  context.showMessage(message: 'Linked'.tl);
-                                } catch (e) {
-                                  context.showMessage(message: e.toString());
-                                }
-                              },
-                              child: Text('Link'.tl),
-                            ),
-                          ),
-                        ],
                       ),
-                    ],
-                  ).paddingHorizontal(16),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: Button.text(
+                          onPressed: () => context.pop(),
+                          child: Text('Cancel'.tl),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              actions: [
-                Button.text(
-                  onPressed: () => context.pop(),
-                  child: Text('Cancel'.tl),
-                ),
-              ],
             );
           },
         );
@@ -522,10 +788,7 @@ class ComicTile extends StatelessWidget {
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           child: Material(
-            color: Color.alphaBlend(
-              context.colorScheme.primary.toOpacity(0.04),
-              context.colorScheme.surface,
-            ),
+            color: Colors.transparent,
             borderRadius: BorderRadius.circular(8),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
@@ -543,7 +806,7 @@ class ComicTile extends StatelessWidget {
                     image,
                     const SizedBox(width: 14),
                     Expanded(
-                      child: _ComicDescription(
+                      child: ComicDescription(
                         title: displayInfo.title.replaceAll("\n", ""),
                         subtitle: displayInfo.author ?? '',
                         description: displayInfo.description ?? '',
@@ -803,10 +1066,176 @@ class ComicTile extends StatelessWidget {
   }
 }
 
+class _RelatedSearchGroup {
+  const _RelatedSearchGroup({
+    required this.sourceKey,
+    required this.sourceName,
+    this.results = const <Comic>[],
+    this.error,
+    this.isLoading = false,
+  });
+
+  final String sourceKey;
+  final String sourceName;
+  final List<Comic> results;
+  final String? error;
+  final bool isLoading;
+}
+
+String _sourceKeyFromPlatformId(String platformId) {
+  const remotePrefix = 'remote:';
+  if (platformId.startsWith(remotePrefix)) {
+    return platformId.substring(remotePrefix.length);
+  }
+  return platformId;
+}
+
+String _sourceNameForKey(String sourceKey, String fallback) {
+  if (sourceKey == 'local') {
+    return 'Local'.tl;
+  }
+  return ComicSource.find(sourceKey)?.name ?? fallback;
+}
+
+String? _relatedStatusFromTags(List<String>? tags) {
+  if (tags == null) {
+    return null;
+  }
+  const names = {'status', '状态', '狀態', '連載狀態', '连载状态'};
+  for (final tag in tags) {
+    final parts = tag.split(RegExp(r'[:：]'));
+    if (parts.length < 2) {
+      continue;
+    }
+    if (names.contains(parts.first.trim().toLowerCase())) {
+      final value = parts.sublist(1).join(':').trim();
+      if (value.isNotEmpty) {
+        return value;
+      }
+    }
+  }
+  return null;
+}
+
+void _showRelatedComicPreview({
+  required BuildContext context,
+  required String title,
+  required String? cover,
+  required String sourceKey,
+  required String sourceName,
+  required String id,
+  String? author,
+  String? status,
+  String? description,
+  List<String>? tags,
+  List<Widget> actions = const [],
+}) {
+  showDialog(
+    context: context,
+    builder: (context) {
+      final cleanAuthor = author?.replaceAll('\n', ' ').trim();
+      final cleanStatus = status?.replaceAll('\n', ' ').trim();
+      final cleanDescription = description?.replaceAll('\n', ' ').trim();
+      return ContentDialog(
+        title: 'Details'.tl,
+        content: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: 520,
+            maxHeight: math.min(460, context.height - 152),
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: SizedBox(
+                    width: 86,
+                    height: 116,
+                    child: cover == null || cover.isEmpty
+                        ? ColoredBox(
+                            color: context.colorScheme.surfaceContainerHigh,
+                          )
+                        : AnimatedImage(
+                            image: CachedImageProvider(
+                              cover,
+                              sourceKey: sourceKey,
+                              cid: id,
+                            ),
+                            fit: BoxFit.cover,
+                          ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title.replaceAll('\n', ' '),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: ts.s18.bold,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        [
+                          sourceName,
+                          if (cleanAuthor != null && cleanAuthor.isNotEmpty)
+                            cleanAuthor,
+                          if (cleanStatus != null && cleanStatus.isNotEmpty)
+                            cleanStatus,
+                        ].join(' · '),
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: context.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      if (tags != null && tags.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            for (final tag in tags.take(8))
+                              Chip(
+                                label: Text(tag),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                          ],
+                        ),
+                      ],
+                      if (cleanDescription != null &&
+                          cleanDescription.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          cleanDescription,
+                          maxLines: 4,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          ...actions,
+          Button.text(onPressed: () => context.pop(), child: Text('Close'.tl)),
+        ],
+      );
+    },
+  );
+}
+
 class _RelatedSourceRow extends StatelessWidget {
   const _RelatedSourceRow({
     required this.link,
     required this.isCurrent,
+    this.onTap,
     this.onAccept,
     this.onReject,
     this.onUnlink,
@@ -814,6 +1243,7 @@ class _RelatedSourceRow extends StatelessWidget {
 
   final DomainComicSourceLink link;
   final bool isCurrent;
+  final VoidCallback? onTap;
   final VoidCallback? onAccept;
   final VoidCallback? onReject;
   final VoidCallback? onUnlink;
@@ -829,172 +1259,181 @@ class _RelatedSourceRow extends StatelessWidget {
         : ' ${(link.confidence! * 100).round()}%';
     final author = link.comicAuthor?.replaceAll('\n', ' ').trim();
     final comicStatus = link.comicStatus?.replaceAll('\n', ' ').trim();
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: context.colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: SizedBox(
-              width: 38,
-              height: 52,
-              child: link.comicCoverUri == null || link.comicCoverUri!.isEmpty
-                  ? ColoredBox(color: context.colorScheme.surfaceContainerHigh)
-                  : AnimatedImage(
-                      image: CachedImageProvider(
-                        link.comicCoverUri!,
-                        sourceKey: _sourceKeyFromPlatformId(link.platformId),
-                        cid: link.sourceComicId,
+    final sourceKey = _sourceKeyFromPlatformId(link.platformId);
+    final sourceName = _sourceNameForKey(sourceKey, link.sourceName);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: context.colorScheme.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: SizedBox(
+                width: 38,
+                height: 52,
+                child: link.comicCoverUri == null || link.comicCoverUri!.isEmpty
+                    ? ColoredBox(
+                        color: context.colorScheme.surfaceContainerHigh,
+                      )
+                    : AnimatedImage(
+                        image: CachedImageProvider(
+                          link.comicCoverUri!,
+                          sourceKey: sourceKey,
+                          cid: link.sourceComicId,
+                        ),
+                        fit: BoxFit.cover,
                       ),
-                      fit: BoxFit.cover,
-                    ),
+              ),
             ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  link.comicTitle.replaceAll('\n', ' '),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  [
-                    link.sourceName,
-                    if (author != null && author.isNotEmpty) author,
-                    if (comicStatus != null && comicStatus.isNotEmpty)
-                      comicStatus,
-                    statusText,
-                    sourceText,
-                    if (confidence.isNotEmpty) confidence.trim(),
-                    if (isCurrent) 'Current'.tl,
-                  ].join(' · '),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: context.colorScheme.onSurfaceVariant,
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    link.comicTitle.replaceAll('\n', ' '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 2),
+                  Text(
+                    [
+                      sourceName,
+                      if (author != null && author.isNotEmpty) author,
+                      if (comicStatus != null && comicStatus.isNotEmpty)
+                        comicStatus,
+                      statusText,
+                      sourceText,
+                      if (confidence.isNotEmpty) confidence.trim(),
+                      if (isCurrent) 'Current'.tl,
+                    ].join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          if (onAccept != null)
-            Button.icon(
-              icon: const Icon(Icons.check, size: 18),
-              tooltip: 'Accept'.tl,
-              onPressed: onAccept!,
-            ),
-          if (onReject != null)
-            Button.icon(
-              icon: const Icon(Icons.close, size: 18),
-              tooltip: 'Reject'.tl,
-              onPressed: onReject!,
-            ),
-          if (onUnlink != null)
-            Button.icon(
-              icon: const Icon(Icons.link_off, size: 18),
-              tooltip: 'Unlink'.tl,
-              onPressed: onUnlink!,
-            ),
-        ],
+            if (onAccept != null)
+              Button.icon(
+                icon: const Icon(Icons.check, size: 18),
+                tooltip: 'Accept'.tl,
+                onPressed: onAccept!,
+              ),
+            if (onReject != null)
+              Button.icon(
+                icon: const Icon(Icons.close, size: 18),
+                tooltip: 'Reject'.tl,
+                onPressed: onReject!,
+              ),
+            if (onUnlink != null)
+              Button.icon(
+                icon: const Icon(Icons.link_off, size: 18),
+                tooltip: 'Unlink'.tl,
+                onPressed: onUnlink!,
+              ),
+          ],
+        ),
       ),
     );
-  }
-
-  String _sourceKeyFromPlatformId(String platformId) {
-    const remotePrefix = 'remote:';
-    if (platformId.startsWith(remotePrefix)) {
-      return platformId.substring(remotePrefix.length);
-    }
-    return platformId;
   }
 }
 
 class _RelatedSearchResultRow extends StatelessWidget {
-  const _RelatedSearchResultRow({required this.comic, required this.onLink});
+  const _RelatedSearchResultRow({
+    required this.comic,
+    required this.onLink,
+    this.onTap,
+  });
 
   final Comic comic;
   final VoidCallback onLink;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    final sourceName =
-        ComicSource.find(comic.sourceKey)?.name ?? comic.sourceKey;
+    final sourceName = _sourceNameForKey(comic.sourceKey, comic.sourceKey);
     final subtitle = comic.subtitle?.replaceAll('\n', ' ').trim();
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: context.colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: SizedBox(
-              width: 38,
-              height: 52,
-              child: AnimatedImage(
-                image: CachedImageProvider(
-                  comic.cover,
-                  sourceKey: comic.sourceKey,
-                  cid: comic.id,
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: context.colorScheme.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: SizedBox(
+                width: 38,
+                height: 52,
+                child: AnimatedImage(
+                  image: CachedImageProvider(
+                    comic.cover,
+                    sourceKey: comic.sourceKey,
+                    cid: comic.id,
+                  ),
+                  fit: BoxFit.cover,
                 ),
-                fit: BoxFit.cover,
               ),
             ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  comic.title.replaceAll('\n', ' '),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  [
-                    sourceName,
-                    if (subtitle != null && subtitle.isNotEmpty) subtitle,
-                  ].join(' · '),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: context.colorScheme.onSurfaceVariant,
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    comic.title.replaceAll('\n', ' '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 2),
+                  Text(
+                    [
+                      sourceName,
+                      if (subtitle != null && subtitle.isNotEmpty) subtitle,
+                    ].join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          Button.icon(
-            icon: const Icon(Icons.link, size: 18),
-            tooltip: 'Link this comic'.tl,
-            onPressed: onLink,
-          ),
-        ],
+            Button.icon(
+              icon: const Icon(Icons.link, size: 18),
+              tooltip: 'Link this comic'.tl,
+              onPressed: onLink,
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _ComicDescription extends StatelessWidget {
-  const _ComicDescription({
+class ComicDescription extends StatelessWidget {
+  const ComicDescription({
+    super.key,
     required this.title,
     required this.subtitle,
     required this.description,
@@ -1007,6 +1446,7 @@ class _ComicDescription extends StatelessWidget {
     this.statusText,
     this.progressText,
     this.pagesText,
+    this.showTitle = true,
   });
 
   final String title;
@@ -1021,6 +1461,7 @@ class _ComicDescription extends StatelessWidget {
   final String? statusText;
   final String? progressText;
   final String? pagesText;
+  final bool showTitle;
 
   @override
   Widget build(BuildContext context) {
@@ -1064,14 +1505,19 @@ class _ComicDescription extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.start,
           children: [
-            Text(
-              title.trim(),
-              style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
-              maxLines: rows.isEmpty ? maxLines : 1,
-              overflow: TextOverflow.ellipsis,
-              softWrap: true,
-            ),
-            const SizedBox(height: 4),
+            if (showTitle) ...[
+              Text(
+                title.trim(),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w500,
+                  fontSize: 14,
+                ),
+                maxLines: rows.isEmpty ? maxLines : 1,
+                overflow: TextOverflow.ellipsis,
+                softWrap: true,
+              ),
+              const SizedBox(height: 4),
+            ],
             if (rating != null) ...[
               StarRating(value: rating!, size: 15),
               const SizedBox(height: 2),
@@ -1094,7 +1540,7 @@ class _ComicDescription extends StatelessWidget {
     if (maxHeight.isInfinite) {
       return hasRating ? 4 : 5;
     }
-    final reservedHeight = 24 + (hasRating ? 20 : 0);
+    final reservedHeight = (showTitle ? 24 : 0) + (hasRating ? 20 : 0);
     final count = ((maxHeight - reservedHeight) / 21).floor();
     return math.max(1, math.min(5, count));
   }
