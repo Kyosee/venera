@@ -382,7 +382,8 @@ class _GalleryModeState extends State<_GalleryMode>
         },
         onPageChanged: (i) {
           if (i == 0) {
-            if (reader.isFirstChapterOfGroup || !reader.toPrevChapter(toLastPage: true)) {
+            if (reader.isFirstChapterOfGroup ||
+                !reader.toPrevChapter(toLastPage: true)) {
               controller.jumpToPage(1);
             }
           } else if (i == totalPages + 1) {
@@ -606,13 +607,18 @@ class _GalleryModeState extends State<_GalleryMode>
 
   @override
   Future<Uint8List?> getImageByOffset(Offset offset) async {
-    var imageKey = getImageKeyByOffset(offset);
-    if (imageKey == null) return null;
-    if (imageKey.startsWith("file://")) {
-      return await File(imageKey.substring(7)).readAsBytes();
+    ReaderImageProvider? provider;
+    for (var imageState in imageStates) {
+      if ((imageState as _ComicImageState).containsPoint(offset)) {
+        provider = imageState.widget.image as ReaderImageProvider;
+      }
+    }
+    if (provider == null) return null;
+    if (provider.imageKey.startsWith("file://")) {
+      return await File(provider.imageKey.substring(7)).readAsBytes();
     } else {
       return (await CacheManager().findCache(
-        "$imageKey@${context.reader.type.sourceKey}@${context.reader.cid}@${context.reader.eid}",
+        "${provider.imageKey}@${provider.sourceKey}@${provider.cid}@${provider.eid}",
       ))!.readAsBytes();
     }
   }
@@ -661,6 +667,47 @@ class _ContinuousMode extends StatefulWidget {
   State<_ContinuousMode> createState() => _ContinuousModeState();
 }
 
+class _ContinuousReaderEntry {
+  const _ContinuousReaderEntry.spacer()
+    : chapter = 0,
+      page = 0,
+      imageKey = null,
+      nextChapter = null,
+      hasNext = false,
+      isLoading = false,
+      error = null;
+
+  const _ContinuousReaderEntry.image({
+    required this.chapter,
+    required this.page,
+    required this.imageKey,
+  }) : nextChapter = null,
+       hasNext = false,
+       isLoading = false,
+       error = null;
+
+  const _ContinuousReaderEntry.separator({
+    required this.chapter,
+    required this.hasNext,
+    this.nextChapter,
+    this.isLoading = false,
+    this.error,
+  }) : page = 0,
+       imageKey = null;
+
+  final int chapter;
+  final int page;
+  final String? imageKey;
+  final int? nextChapter;
+  final bool hasNext;
+  final bool isLoading;
+  final String? error;
+
+  bool get isImage => imageKey != null;
+  bool get isSpacer => chapter == 0;
+  bool get isSeparator => !isImage && !isSpacer;
+}
+
 class _ContinuousModeState extends State<_ContinuousMode>
     implements _ImageViewController {
   late _ReaderState reader;
@@ -687,6 +734,11 @@ class _ContinuousModeState extends State<_ContinuousMode>
   bool delayedIsScrolling = false;
 
   var imageStates = <State<ComicImage>>{};
+  final _continuousChapterImages = <int, List<String>>{};
+  final _continuousChapterLoads = <int, Future<void>>{};
+  final _continuousChapterErrors = <int, String>{};
+  final _continuousCachedImages = <String>{};
+  late int _baseChapter;
 
   void delayedSetIsScrolling(bool value) {
     Future.delayed(
@@ -707,6 +759,10 @@ class _ContinuousModeState extends State<_ContinuousMode>
   void initState() {
     reader = context.reader;
     reader._imageViewController = this;
+    _baseChapter = reader.chapter;
+    if (reader.images != null) {
+      _continuousChapterImages[reader.chapter] = reader.images!;
+    }
     itemPositionsListener.itemPositions.addListener(onPositionChanged);
     cached = List.filled(reader.maxPage + 2, false);
     Future.delayed(
@@ -722,8 +778,169 @@ class _ContinuousModeState extends State<_ContinuousMode>
     super.dispose();
   }
 
+  bool get seamlessChapterReading =>
+      reader.mode.isContinuous &&
+      reader.widget.chapters != null &&
+      reader.maxChapter > 1 &&
+      appdata.settings.getReaderSetting(
+            reader.cid,
+            reader.type.sourceKey,
+            'enableContinuousChapterReading',
+          ) ==
+          true;
+
+  String _chapterTitle(int chapter) {
+    return reader.widget.chapters?.titles.elementAtOrNull(chapter - 1) ??
+        'Chapter @ep'.tlParams({'ep': chapter});
+  }
+
+  List<_ContinuousReaderEntry> _continuousEntries() {
+    if (reader.images != null) {
+      _continuousChapterImages[reader.chapter] = reader.images!;
+    }
+    final entries = <_ContinuousReaderEntry>[
+      const _ContinuousReaderEntry.spacer(),
+    ];
+    for (var chapter = _baseChapter; chapter <= reader.maxChapter; chapter++) {
+      final images = _continuousChapterImages[chapter];
+      if (images == null) {
+        break;
+      }
+      for (var i = 0; i < images.length; i++) {
+        entries.add(
+          _ContinuousReaderEntry.image(
+            chapter: chapter,
+            page: i + 1,
+            imageKey: images[i],
+          ),
+        );
+      }
+      final hasNext = chapter < reader.maxChapter;
+      entries.add(
+        _ContinuousReaderEntry.separator(
+          chapter: chapter,
+          hasNext: hasNext,
+          nextChapter: hasNext ? chapter + 1 : null,
+          isLoading:
+              hasNext && _continuousChapterLoads.containsKey(chapter + 1),
+          error: hasNext ? _continuousChapterErrors[chapter + 1] : null,
+        ),
+      );
+      if (!hasNext || !_continuousChapterImages.containsKey(chapter + 1)) {
+        break;
+      }
+    }
+    return entries;
+  }
+
+  int _continuousIndexFor(int chapter, int page) {
+    final entries = _continuousEntries();
+    for (var i = 0; i < entries.length; i++) {
+      final entry = entries[i];
+      if (entry.isImage && entry.chapter == chapter && entry.page == page) {
+        return i;
+      }
+    }
+    return reader.page.clamp(1, entries.length - 1);
+  }
+
+  Future<void> _ensureContinuousChapterLoaded(int chapter) {
+    if (chapter < _baseChapter ||
+        chapter > reader.maxChapter ||
+        _continuousChapterImages.containsKey(chapter)) {
+      return Future.value();
+    }
+    final existing = _continuousChapterLoads[chapter];
+    if (existing != null) {
+      return existing;
+    }
+    final future = _loadContinuousChapterImages(chapter)
+        .then((images) {
+          if (!mounted) {
+            return;
+          }
+          setState(() {
+            _continuousChapterImages[chapter] = images;
+            _continuousChapterErrors.remove(chapter);
+          });
+        })
+        .catchError((e, s) {
+          Log.error('Continuous chapter reading', e, s);
+          if (!mounted) {
+            return;
+          }
+          setState(() {
+            _continuousChapterErrors[chapter] = e.toString();
+          });
+        })
+        .whenComplete(() {
+          _continuousChapterLoads.remove(chapter);
+        });
+    _continuousChapterLoads[chapter] = future;
+    return future;
+  }
+
+  Future<List<String>> _loadContinuousChapterImages(int chapter) async {
+    if (reader.type == ComicType.local ||
+        LocalManager().isDownloaded(
+          reader.cid,
+          reader.type,
+          chapter,
+          reader.widget.chapters,
+        )) {
+      return LocalManager().getImages(reader.cid, reader.type, chapter);
+    }
+    final chapterId = reader.widget.chapters?.ids.elementAtOrNull(chapter - 1);
+    final res = await reader.type.comicSource!.loadComicPages!(
+      reader.widget.cid,
+      chapterId,
+    );
+    if (res.error) {
+      throw res.errorMessage ?? 'Failed to load next chapter';
+    }
+    return res.data;
+  }
+
+  void _syncReaderLocation(_ContinuousReaderEntry entry) {
+    if (!entry.isImage) {
+      if (entry.hasNext && entry.nextChapter != null) {
+        _ensureContinuousChapterLoaded(entry.nextChapter!);
+      }
+      return;
+    }
+    final images = _continuousChapterImages[entry.chapter];
+    if (images == null) {
+      return;
+    }
+    if (reader.chapter != entry.chapter) {
+      reader.chapter = entry.chapter;
+      reader.images = images;
+      reader.page = entry.page;
+    } else if (entry.page != reader.page) {
+      reader.setPage(entry.page);
+    }
+    context.readerScaffold.update();
+  }
+
   void onPositionChanged() {
     if (itemPositionsListener.itemPositions.value.isEmpty) {
+      return;
+    }
+    if (seamlessChapterReading) {
+      final entries = _continuousEntries();
+      final positions = itemPositionsListener.itemPositions.value.toList()
+        ..sort((a, b) => a.index.compareTo(b.index));
+      for (final position in positions) {
+        if (position.index < 0 || position.index >= entries.length) {
+          continue;
+        }
+        final entry = entries[position.index];
+        if (entry.isImage || entry.isSeparator) {
+          _syncReaderLocation(entry);
+          cacheImages(position.index);
+          return;
+        }
+      }
       return;
     }
     var page = itemPositionsListener.itemPositions.value.first.index;
@@ -794,6 +1011,26 @@ class _ContinuousModeState extends State<_ContinuousMode>
   }
 
   void cacheImages(int current) {
+    if (seamlessChapterReading) {
+      final entries = _continuousEntries();
+      for (var i = current + 1; i <= current + preCacheCount; i++) {
+        if (i < 0 || i >= entries.length) {
+          break;
+        }
+        final entry = entries[i];
+        if (entry.hasNext && entry.nextChapter != null) {
+          _ensureContinuousChapterLoaded(entry.nextChapter!);
+        }
+        if (!entry.isImage) {
+          continue;
+        }
+        final cacheKey = '${entry.chapter}:${entry.page}:${entry.imageKey}';
+        if (_continuousCachedImages.add(cacheKey)) {
+          _preDownloadImageEntry(entry, context);
+        }
+      }
+      return;
+    }
     for (int i = current + 1; i <= current + preCacheCount; i++) {
       if (i <= reader.maxPage && !cached[i]) {
         _preDownloadImage(i, context);
@@ -833,10 +1070,85 @@ class _ContinuousModeState extends State<_ContinuousMode>
     return false;
   }
 
+  Widget _buildChapterJoinPage(
+    BuildContext context,
+    _ContinuousReaderEntry entry,
+  ) {
+    final title = entry.hasNext ? 'Next Chapter'.tl : 'No next chapter'.tl;
+    final subtitle = entry.hasNext && entry.nextChapter != null
+        ? _chapterTitle(entry.nextChapter!)
+        : reader.widget.name;
+    final status = entry.error != null
+        ? 'Tap to retry'.tl
+        : entry.isLoading
+        ? 'Loading'.tl
+        : null;
+    return ColoredBox(
+      color: context.colorScheme.surface,
+      child: SizedBox(
+        width: reader.size.width,
+        height: reader.size.height,
+        child: Center(
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: entry.hasNext && entry.nextChapter != null
+                ? () {
+                    setState(() {
+                      _continuousChapterErrors.remove(entry.nextChapter);
+                    });
+                    _ensureContinuousChapterLoaded(entry.nextChapter!);
+                  }
+                : null,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    entry.hasNext
+                        ? Icons.keyboard_arrow_down_rounded
+                        : Icons.done_all_rounded,
+                    size: 42,
+                    color: context.colorScheme.primary,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(title, style: ts.s18.bold, textAlign: TextAlign.center),
+                  const SizedBox(height: 8),
+                  Text(
+                    subtitle,
+                    style: ts.s14.withColor(context.colorScheme.outline),
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (status != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      status,
+                      style: ts.s12.withColor(
+                        entry.error != null
+                            ? context.colorScheme.error
+                            : context.colorScheme.outline,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final seamless = seamlessChapterReading;
+    final entries = seamless ? _continuousEntries() : null;
     Widget widget = ScrollablePositionedList.builder(
-      initialScrollIndex: reader.page,
+      initialScrollIndex: seamless
+          ? _continuousIndexFor(reader.chapter, reader.page)
+          : reader.page,
       itemScrollController: itemScrollController,
       itemPositionsListener: itemPositionsListener,
       scrollControllerCallback: (scrollController) {
@@ -846,7 +1158,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
         _scrollController = scrollController;
         _scrollController!.addListener(onScroll);
       },
-      itemCount: reader.maxPage + 2,
+      itemCount: seamless ? entries!.length : reader.maxPage + 2,
       addSemanticIndexes: false,
       scrollDirection: reader.mode == ReaderMode.continuousTopToBottom
           ? Axis.vertical
@@ -858,6 +1170,47 @@ class _ContinuousModeState extends State<_ContinuousMode>
           ? const ClampingScrollPhysics()
           : const BouncingScrollPhysics(),
       itemBuilder: (context, index) {
+        if (seamless) {
+          final entry = entries![index];
+          if (entry.isSpacer) {
+            return const SizedBox();
+          }
+          if (entry.isSeparator) {
+            if (entry.hasNext && entry.nextChapter != null) {
+              Future.microtask(
+                () => _ensureContinuousChapterLoaded(entry.nextChapter!),
+              );
+            }
+            return _buildChapterJoinPage(context, entry);
+          }
+          double? width, height;
+          if (reader.mode == ReaderMode.continuousLeftToRight ||
+              reader.mode == ReaderMode.continuousRightToLeft) {
+            height = double.infinity;
+          } else {
+            width = double.infinity;
+          }
+
+          final image = _createImageProviderFromKey(
+            entry.imageKey!,
+            context,
+            entry.page,
+            chapter: entry.chapter,
+          );
+
+          return ColoredBox(
+            color: context.colorScheme.surface,
+            child: ComicImage(
+              filterQuality: FilterQuality.medium,
+              image: image,
+              width: width,
+              height: height,
+              fit: BoxFit.contain,
+              onInit: (state) => imageStates.add(state),
+              onDispose: (state) => imageStates.remove(state),
+            ),
+          );
+        }
         if (index == 0 || index == reader.maxPage + 1) {
           return const SizedBox();
         }
@@ -919,7 +1272,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
             disableScroll = false;
           });
         }
-        if (fingers == 0) {
+        if (!seamless && fingers == 0) {
           if (jumpToPrevChapter) {
             context.readerScaffold.setFloatingButton(0);
             reader.toPrevChapter(toLastPage: true);
@@ -980,7 +1333,8 @@ class _ContinuousModeState extends State<_ContinuousMode>
 
         var scale = photoViewController.scale ?? 1.0;
 
-        if (notification is ScrollUpdateNotification &&
+        if (!seamless &&
+            notification is ScrollUpdateNotification &&
             (scale - 1).abs() < 0.05) {
           if (!scrollController.hasClients) return false;
           if (scrollController.position.pixels <=
@@ -1065,7 +1419,9 @@ class _ContinuousModeState extends State<_ContinuousMode>
   @override
   Future<void> animateToPage(int page) {
     return itemScrollController.scrollTo(
-      index: page,
+      index: seamlessChapterReading
+          ? _continuousIndexFor(reader.chapter, page)
+          : page,
       duration: const Duration(milliseconds: 200),
       curve: Curves.ease,
     );
@@ -1126,7 +1482,11 @@ class _ContinuousModeState extends State<_ContinuousMode>
 
   @override
   void toPage(int page) {
-    itemScrollController.jumpTo(index: page);
+    itemScrollController.jumpTo(
+      index: seamlessChapterReading
+          ? _continuousIndexFor(reader.chapter, page)
+          : page,
+    );
     _futurePosition = null;
   }
 
@@ -1216,16 +1576,22 @@ class _ContinuousModeState extends State<_ContinuousMode>
 ImageProvider _createImageProviderFromKey(
   String imageKey,
   BuildContext context,
-  int page,
-) {
+  int page, {
+  int? chapter,
+}) {
   var reader = context.reader;
+  final eid = chapter == null
+      ? reader.eid
+      : reader.widget.chapters?.ids.elementAtOrNull(chapter - 1) ?? '0';
   return ReaderImageProvider(
     imageKey,
     reader.type.comicSource?.key,
     reader.cid,
-    reader.eid,
-    reader.page,
-    enableResize: reader.mode.isContinuous, // For continuous mode, we need to resize the image to improve performance
+    eid,
+    page,
+    enableResize: reader
+        .mode
+        .isContinuous, // For continuous mode, we need to resize the image to improve performance
   );
 }
 
@@ -1260,6 +1626,25 @@ void _preDownloadImage(int page, BuildContext context) {
   var eid = reader.eid;
   var sourceKey = reader.type.comicSource?.key;
   ImageDownloader.loadComicImage(imageKey, sourceKey, cid, eid);
+}
+
+void _preDownloadImageEntry(
+  _ContinuousReaderEntry entry,
+  BuildContext context,
+) {
+  final imageKey = entry.imageKey;
+  if (imageKey == null || imageKey.startsWith("file://")) {
+    return;
+  }
+  final reader = context.reader;
+  final eid =
+      reader.widget.chapters?.ids.elementAtOrNull(entry.chapter - 1) ?? '0';
+  ImageDownloader.loadComicImage(
+    imageKey,
+    reader.type.comicSource?.key,
+    reader.cid,
+    eid,
+  );
 }
 
 class _SwipeChangeChapterProgress extends StatefulWidget {
