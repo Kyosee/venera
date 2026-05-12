@@ -23,6 +23,7 @@ import 'package:venera/network/download.dart';
 import 'package:venera/network/cache.dart';
 import 'package:venera/pages/favorites/favorites_page.dart';
 import 'package:venera/pages/reader/reader.dart';
+import 'package:venera/pages/search_result_page.dart';
 import 'package:venera/utils/file_type.dart';
 import 'package:venera/utils/io.dart';
 import 'package:venera/utils/tags_translation.dart';
@@ -421,6 +422,10 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
                     progressText: history?.description,
                     pagesText: comic.maxPage?.toString(),
                     showTitle: false,
+                    onTapAuthor: (author, namespace) {
+                      onTapTag(author, namespace ?? 'author');
+                    },
+                    onTapTag: onTapTag,
                   ),
                 ),
               ],

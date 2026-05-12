@@ -300,7 +300,11 @@ abstract mixin class _ComicPageActions {
   void onTapTag(String tag, String namespace) {
     var target = comicSource.handleClickTagEvent?.call(namespace, tag);
     var context = App.mainNavigatorKey!.currentContext!;
-    target?.jump(context);
+    if (target != null) {
+      target.jump(context);
+      return;
+    }
+    context.to(() => SearchResultPage(text: tag, sourceKey: comicSource.key));
   }
 
   void showMoreActions() {

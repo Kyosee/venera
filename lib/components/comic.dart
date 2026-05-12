@@ -1447,6 +1447,8 @@ class ComicDescription extends StatelessWidget {
     this.progressText,
     this.pagesText,
     this.showTitle = true,
+    this.onTapAuthor,
+    this.onTapTag,
   });
 
   final String title;
@@ -1462,6 +1464,8 @@ class ComicDescription extends StatelessWidget {
   final String? progressText;
   final String? pagesText;
   final bool showTitle;
+  final void Function(String author, String? namespace)? onTapAuthor;
+  final void Function(String tag, String namespace)? onTapTag;
 
   @override
   Widget build(BuildContext context) {
@@ -1470,8 +1474,12 @@ class ComicDescription extends StatelessWidget {
     final update = _clean(updateText) ?? _updateTextFromTags();
     final progress = _clean(progressText);
     final pages = _clean(pagesText) ?? _pagesTextFromTags();
-    final authors = _authorsText();
-    final tagText = _tagText();
+    final authorItems = _authorItems();
+    final authors = authorItems.isEmpty
+        ? null
+        : authorItems.map((e) => e.label).join(", ");
+    final tagItems = _tagItems();
+    final tagText = _tagText(tagItems);
     final status = _clean(statusText) ?? _statusText();
     final fallbackDescription = _fallbackDescription(
       update,
@@ -1480,11 +1488,39 @@ class ComicDescription extends StatelessWidget {
       descriptionParts,
     );
     final rows = <Widget>[
-      if (authors != null)
+      if (authors != null && onTapAuthor != null)
+        _actionRow(
+          context,
+          "Authors".tl,
+          authorItems
+              .map(
+                (item) => _InfoAction(
+                  text: item.label,
+                  onTap: () => onTapAuthor!(item.value, item.namespace),
+                ),
+              )
+              .toList(),
+          Colors.lightBlue,
+        )
+      else if (authors != null)
         _infoRow(context, "Authors".tl, authors, Colors.lightBlue),
       if (update != null) _infoRow(context, "Update".tl, update, Colors.cyan),
       if (source != null) _infoRow(context, "Source".tl, source, Colors.cyan),
-      if (tagText != null)
+      if (tagItems.isNotEmpty && onTapTag != null)
+        _actionRow(
+          context,
+          "Tags".tl,
+          tagItems
+              .map(
+                (item) => _InfoAction(
+                  text: item.label,
+                  onTap: () => onTapTag!(item.value, item.namespace ?? ''),
+                ),
+              )
+              .toList(),
+          Colors.pinkAccent,
+        )
+      else if (tagText != null)
         _infoRow(context, "Tags".tl, tagText, Colors.pinkAccent),
       if (status != null) _infoRow(context, "Status".tl, status, Colors.purple),
       if (progress != null)
@@ -1591,6 +1627,71 @@ class ComicDescription extends StatelessWidget {
     );
   }
 
+  Widget _actionRow(
+    BuildContext context,
+    String label,
+    List<_InfoAction> actions,
+    Color color,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            height: 18,
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            decoration: BoxDecoration(
+              color: color.toOpacity(0.18),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Center(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: context.colorScheme.onSurface,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (var i = 0; i < actions.length; i++) ...[
+                    InkWell(
+                      borderRadius: BorderRadius.circular(4),
+                      onTap: actions[i].onTap,
+                      child: Text(
+                        actions[i].text,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: context.colorScheme.primary,
+                        ),
+                      ).paddingHorizontal(2),
+                    ),
+                    if (i != actions.length - 1)
+                      Text(
+                        " / ",
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: context.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   String? _clean(String? value) {
     final result = value?.replaceAll("\n", " ").trim();
     return result == null ||
@@ -1601,7 +1702,14 @@ class ComicDescription extends StatelessWidget {
         : result;
   }
 
-  String? _tagText() {
+  String? _tagText(List<_DescriptionTag> rawTags) {
+    if (rawTags.isEmpty) {
+      return null;
+    }
+    return rawTags.map((tag) => tag.label).join(" / ");
+  }
+
+  List<_DescriptionTag> _tagItems() {
     final rawTags = tags
         ?.map((e) => e.replaceAll("\n", " ").trim())
         .where(
@@ -1610,29 +1718,43 @@ class ComicDescription extends StatelessWidget {
               !_isMetadataTag(e) &&
               _clean(e.split(':').last) != null,
         )
-        .take(4)
         .toList();
     if (rawTags == null || rawTags.isEmpty) {
-      return null;
+      return const [];
     }
     final enableTranslate =
         App.locale.languageCode == 'zh' && this.enableTranslate;
-    return rawTags
-        .map((tag) {
-          return enableTranslate
-              ? TagsTranslation.translateTag(tag)
-              : tag.split(':').last;
-        })
-        .join(" / ");
+    return rawTags.map((tag) {
+      final index = tag.indexOf(':');
+      final namespace = index == -1 ? null : tag.substring(0, index);
+      final value = index == -1 ? tag : tag.substring(index + 1);
+      return _DescriptionTag(
+        namespace: namespace,
+        value: value,
+        label: enableTranslate
+            ? TagsTranslation.translateTag(tag)
+            : tag.split(':').last,
+      );
+    }).toList();
   }
 
-  String? _authorsText() {
+  List<_DescriptionTag> _authorItems() {
     final author = _clean(subtitle);
     if (author != null) {
-      return author.replaceAll("|", ", ");
+      return author
+          .split(RegExp(r"[|,]"))
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .map(
+            (e) => _DescriptionTag(
+              namespace: _namespaceForValue(e, _authorNamespaces),
+              value: e,
+              label: e,
+            ),
+          )
+          .toList();
     }
-    final values = _tagsWithNamespace(_authorNamespaces);
-    return values.isEmpty ? null : values.join(", ");
+    return _tagItemsWithNamespace(_authorNamespaces);
   }
 
   String? _statusText() {
@@ -1652,6 +1774,10 @@ class ComicDescription extends StatelessWidget {
   }
 
   List<String> _tagsWithNamespace(Set<String> namespaces) {
+    return _tagItemsWithNamespace(namespaces).map((e) => e.label).toList();
+  }
+
+  List<_DescriptionTag> _tagItemsWithNamespace(Set<String> namespaces) {
     return tags
             ?.map((e) => e.replaceAll("\n", " ").trim())
             .where((e) => e.contains(':'))
@@ -1662,13 +1788,33 @@ class ComicDescription extends StatelessWidget {
               if (value == null || !namespaces.contains(namespace)) {
                 return null;
               }
-              return enableTranslate && App.locale.languageCode == 'zh'
-                  ? TagsTranslation.translateTag(e)
-                  : value;
+              return _DescriptionTag(
+                namespace: e.substring(0, index),
+                value: value,
+                label: enableTranslate && App.locale.languageCode == 'zh'
+                    ? TagsTranslation.translateTag(e)
+                    : value,
+              );
             })
-            .whereType<String>()
+            .whereType<_DescriptionTag>()
             .toList() ??
         const [];
+  }
+
+  String? _namespaceForValue(String value, Set<String> namespaces) {
+    for (final tag in tags ?? const <String>[]) {
+      final index = tag.indexOf(':');
+      if (index == -1) {
+        continue;
+      }
+      final namespace = tag.substring(0, index);
+      final tagValue = _clean(tag.substring(index + 1));
+      if (tagValue == value &&
+          namespaces.contains(_normalizeNamespace(namespace))) {
+        return namespace;
+      }
+    }
+    return null;
   }
 
   bool _isMetadataTag(String tag) {
@@ -1814,6 +1960,25 @@ class ComicDescription extends StatelessWidget {
         descriptionSource == null ||
         descriptionSource == source;
   }
+}
+
+class _DescriptionTag {
+  const _DescriptionTag({
+    required this.value,
+    required this.label,
+    this.namespace,
+  });
+
+  final String? namespace;
+  final String value;
+  final String label;
+}
+
+class _InfoAction {
+  const _InfoAction({required this.text, required this.onTap});
+
+  final String text;
+  final VoidCallback onTap;
 }
 
 class _ReadingHistoryPainter extends CustomPainter {
