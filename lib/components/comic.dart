@@ -242,16 +242,20 @@ class ComicTile extends StatelessWidget {
       BuildContext context,
       Comic result,
     ) {
-      repository.mirrorComic(result);
-      repository.linkRelatedSource(
-        comic: comic,
-        targetSourceKey: result.sourceKey,
-        targetComicId: result.id,
-      );
-      setState(() {
-        searchGroups = {};
-      });
-      context.showMessage(message: 'Linked'.tl);
+      try {
+        repository.mirrorComic(result);
+        repository.linkRelatedSource(
+          comic: comic,
+          targetSourceKey: result.sourceKey,
+          targetComicId: result.id,
+        );
+        setState(() {
+          searchGroups = {};
+        });
+        context.showMessage(message: 'Linked'.tl);
+      } catch (e) {
+        context.showMessage(message: e.toString().tl);
+      }
     }
 
     Future<void> runSearch(StateSetter setState, BuildContext context) async {
@@ -377,6 +381,14 @@ class ComicTile extends StatelessWidget {
     }
 
     Widget buildLinkList(StateSetter setState) {
+      if (!repository.isDomainReady) {
+        return Center(
+          child: Text(
+            'Related source database unavailable'.tl,
+            style: TextStyle(color: context.colorScheme.onSurfaceVariant),
+          ),
+        );
+      }
       final links = repository.relatedSourcesFor(comic);
       if (links.isEmpty) {
         return Center(
@@ -570,7 +582,7 @@ class ComicTile extends StatelessWidget {
                       setState(() {});
                       context.showMessage(message: 'Linked'.tl);
                     } catch (e) {
-                      context.showMessage(message: e.toString());
+                      context.showMessage(message: e.toString().tl);
                     }
                   },
                   child: Text('Link'.tl),

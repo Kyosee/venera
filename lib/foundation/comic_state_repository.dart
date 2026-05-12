@@ -124,6 +124,7 @@ class ComicStateRepository {
   LocalFavoritesManager get _favorites =>
       _favoritesManager ?? LocalFavoritesManager();
   bool get _domainReady => (_domain ?? App.domain).isInitialized;
+  bool get isDomainReady => _domainReady;
 
   ComicIdentity identityFor(String sourceKey, String sourceComicId) {
     return ComicIdentity.fromSource(
@@ -258,6 +259,9 @@ class ComicStateRepository {
   }
 
   List<DomainComicSourceLink> relatedSourcesFor(Comic comic) {
+    if (!_domainReady) {
+      return const <DomainComicSourceLink>[];
+    }
     final identity = identityFor(comic.sourceKey, comic.id);
     return _db.getRelatedSources(identity.comicId);
   }
@@ -267,6 +271,9 @@ class ComicStateRepository {
     required String targetSourceKey,
     required String targetComicId,
   }) {
+    if (!_domainReady) {
+      throw 'Related source database unavailable';
+    }
     mirrorComic(comic);
     final identity = identityFor(comic.sourceKey, comic.id);
     final targetPlatform = SourcePlatformResolver.fromSourceKey(
@@ -281,14 +288,23 @@ class ComicStateRepository {
   }
 
   void acceptRelatedSource(DomainComicSourceLink link) {
+    if (!_domainReady) {
+      throw 'Related source database unavailable';
+    }
     _db.acceptWorkSource(workId: link.workId, comicId: link.comicId);
   }
 
   void rejectRelatedSource(DomainComicSourceLink link) {
+    if (!_domainReady) {
+      throw 'Related source database unavailable';
+    }
     _db.rejectWorkSource(workId: link.workId, comicId: link.comicId);
   }
 
   void unlinkRelatedSource(DomainComicSourceLink link) {
+    if (!_domainReady) {
+      throw 'Related source database unavailable';
+    }
     _db.unlinkWorkSource(workId: link.workId, comicId: link.comicId);
   }
 
