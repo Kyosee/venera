@@ -333,61 +333,66 @@ void showBatchSourceMigrationDialog(
         builder: (context, setState) {
           return ContentDialog(
             title: 'Batch migrate source'.tl,
-            content: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 520),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Migrate @count comics'.tlParams({'count': comics.length}),
-                  ).toAlign(Alignment.centerLeft),
-                  const SizedBox(height: 12),
-                  _SourceSelector(
-                    sources: searchableSources,
-                    selectedSourceKeys: selectedSourceKeys,
-                    onChanged: (next) {
-                      setState(() {
-                        selectedSourceKeys
-                          ..clear()
-                          ..addAll(next);
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                  CheckboxListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    value: migrateHistory,
-                    title: Text('Migrate reading progress'.tl),
-                    onChanged: (value) {
-                      setState(() {
-                        migrateHistory = value ?? true;
-                      });
-                    },
-                  ),
-                  CheckboxListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    value: replaceFavorite,
-                    title: Text('Replace favorite'.tl),
-                    onChanged: (value) {
-                      setState(() {
-                        replaceFavorite = value ?? true;
-                      });
-                    },
-                  ),
-                  CheckboxListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    value: confirmEach,
-                    title: Text('Confirm each match'.tl),
-                    onChanged: (value) {
-                      setState(() {
-                        confirmEach = value ?? false;
-                      });
-                    },
-                  ),
-                ],
+            content: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 520),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Migrate @count comics'.tlParams({
+                        'count': comics.length,
+                      }),
+                    ).toAlign(Alignment.centerLeft),
+                    const SizedBox(height: 12),
+                    _SourceSelector(
+                      sources: searchableSources,
+                      selectedSourceKeys: selectedSourceKeys,
+                      onChanged: (next) {
+                        setState(() {
+                          selectedSourceKeys
+                            ..clear()
+                            ..addAll(next);
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    CheckboxListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      value: migrateHistory,
+                      title: Text('Migrate reading progress'.tl),
+                      onChanged: (value) {
+                        setState(() {
+                          migrateHistory = value ?? true;
+                        });
+                      },
+                    ),
+                    CheckboxListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      value: replaceFavorite,
+                      title: Text('Replace favorite'.tl),
+                      onChanged: (value) {
+                        setState(() {
+                          replaceFavorite = value ?? true;
+                        });
+                      },
+                    ),
+                    CheckboxListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      value: confirmEach,
+                      title: Text('Confirm each match'.tl),
+                      onChanged: (value) {
+                        setState(() {
+                          confirmEach = value ?? false;
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
             ),
             actions: [

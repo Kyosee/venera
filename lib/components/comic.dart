@@ -1902,7 +1902,9 @@ class SliverGridComics extends StatefulWidget {
     this.badgeBuilder,
     this.menuBuilder,
     this.onTap,
+    this.onTapWithIndex,
     this.onLongPressed,
+    this.onLongPressedWithIndex,
     this.selections,
   });
 
@@ -1918,7 +1920,11 @@ class SliverGridComics extends StatefulWidget {
 
   final void Function(Comic, int heroID)? onTap;
 
+  final void Function(Comic, int heroID, int index)? onTapWithIndex;
+
   final void Function(Comic, int heroID)? onLongPressed;
+
+  final void Function(Comic, int heroID, int index)? onLongPressedWithIndex;
 
   @override
   State<SliverGridComics> createState() => _SliverGridComicsState();
@@ -1990,7 +1996,9 @@ class _SliverGridComicsState extends State<SliverGridComics> {
       badgeBuilder: widget.badgeBuilder,
       menuBuilder: widget.menuBuilder,
       onTap: widget.onTap,
+      onTapWithIndex: widget.onTapWithIndex,
       onLongPressed: widget.onLongPressed,
+      onLongPressedWithIndex: widget.onLongPressedWithIndex,
     );
   }
 }
@@ -2003,7 +2011,9 @@ class _SliverGridComics extends StatelessWidget {
     this.badgeBuilder,
     this.menuBuilder,
     this.onTap,
+    this.onTapWithIndex,
     this.onLongPressed,
+    this.onLongPressedWithIndex,
     this.selection,
   });
 
@@ -2021,7 +2031,11 @@ class _SliverGridComics extends StatelessWidget {
 
   final void Function(Comic, int heroID)? onTap;
 
+  final void Function(Comic, int heroID, int index)? onTapWithIndex;
+
   final void Function(Comic, int heroID)? onLongPressed;
+
+  final void Function(Comic, int heroID, int index)? onLongPressedWithIndex;
 
   @override
   Widget build(BuildContext context) {
@@ -2038,10 +2052,18 @@ class _SliverGridComics extends StatelessWidget {
           comic: comics[index],
           badge: badge,
           menuOptions: menuBuilder?.call(comics[index]),
-          onTap: onTap != null
+          onTap: onTapWithIndex != null
+              ? () => onTapWithIndex!(comics[index], heroIDs[index], index)
+              : onTap != null
               ? () => onTap!(comics[index], heroIDs[index])
               : null,
-          onLongPressed: onLongPressed != null
+          onLongPressed: onLongPressedWithIndex != null
+              ? () => onLongPressedWithIndex!(
+                  comics[index],
+                  heroIDs[index],
+                  index,
+                )
+              : onLongPressed != null
               ? () => onLongPressed!(comics[index], heroIDs[index])
               : null,
           heroID: heroIDs[index],
