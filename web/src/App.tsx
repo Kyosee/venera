@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   BookOpen,
+  ChevronLeft,
   ChevronRight,
   ClipboardList,
   Compass,
@@ -81,6 +82,23 @@ type AppData = {
   followUpdates: FollowUpdatesResponse
 }
 
+type ReaderMode =
+  | 'galleryLeftToRight'
+  | 'galleryRightToLeft'
+  | 'galleryTopToBottom'
+  | 'continuousLeftToRight'
+  | 'continuousRightToLeft'
+  | 'continuousTopToBottom'
+
+const readerModeOptions = [
+  { key: 'galleryLeftToRight', label: '单页 左到右' },
+  { key: 'galleryRightToLeft', label: '单页 右到左' },
+  { key: 'galleryTopToBottom', label: '单页 上到下' },
+  { key: 'continuousTopToBottom', label: '连续 上到下' },
+  { key: 'continuousLeftToRight', label: '连续 左到右' },
+  { key: 'continuousRightToLeft', label: '连续 右到左' }
+] satisfies Array<{ key: ReaderMode; label: string }>
+
 const primaryNav = [
   { key: 'home', label: '首页', icon: Home },
   { key: 'history', label: '历史', icon: History },
@@ -130,6 +148,19 @@ function mergeLibraryItems(current: LibraryItem[], incoming: LibraryItem[]) {
   ]
 }
 
+function normalizeReaderMode(value: unknown): ReaderMode {
+  return readerModeOptions.some((option) => option.key === value)
+    ? (value as ReaderMode)
+    : 'galleryLeftToRight'
+}
+
+function readerModeClassName(mode: ReaderMode) {
+  const direction = mode.endsWith('RightToLeft') ? ' rtl' : ''
+  if (mode.startsWith('gallery')) return `reader-mode-gallery${direction}`
+  if (mode === 'continuousTopToBottom') return 'reader-mode-continuous-vertical'
+  return `reader-mode-continuous-horizontal${direction}`
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabKey>('home')
   const [data, setData] = useState<AppData>(emptyData)
@@ -168,6 +199,10 @@ export default function App() {
     const value = data.settings?.values.themeMode
     return typeof value === 'string' ? value : 'system'
   }, [data.settings])
+  const readerMode = useMemo(
+    () => normalizeReaderMode(data.settings?.values.readerMode),
+    [data.settings]
+  )
 
   useEffect(() => {
     document.documentElement.dataset.theme = themeMode === 'dark' ? 'dark' : 'light'
@@ -175,6 +210,11 @@ export default function App() {
 
   const setThemeMode = async (value: string) => {
     const next = await updateSettings({ themeMode: value })
+    setData((current) => ({ ...current, settings: next }))
+  }
+
+  const setReaderMode = async (value: ReaderMode) => {
+    const next = await updateSettings({ readerMode: value })
     setData((current) => ({ ...current, settings: next }))
   }
 
@@ -310,6 +350,7 @@ export default function App() {
             <HomeView
               data={data}
               error={error}
+              readerMode={readerMode}
               onOpenTab={setActiveTab}
               onRecordHistory={saveHistory}
             />
@@ -327,6 +368,7 @@ export default function App() {
                   ? () => loadMoreLibrary('history')
                   : undefined
               }
+              readerMode={readerMode}
               onRecordHistory={saveHistory}
             />
           ) : null}
@@ -345,18 +387,24 @@ export default function App() {
                   ? () => loadMoreLibrary('favorites')
                   : undefined
               }
+              readerMode={readerMode}
               onRecordHistory={saveHistory}
             />
           ) : null}
           {activeTab === 'explore' ? <CollectionView title="发现" icon={Compass} /> : null}
           {activeTab === 'categories' ? <CollectionView title="分类" icon={Tags} /> : null}
           {activeTab === 'updates' ? (
-            <UpdatesView data={data.followUpdates} onRecordHistory={saveHistory} />
+            <UpdatesView
+              data={data.followUpdates}
+              readerMode={readerMode}
+              onRecordHistory={saveHistory}
+            />
           ) : null}
           {activeTab === 'search' ? (
             <SearchView
               sources={data.sources}
               favorites={data.library.favorites}
+              readerMode={readerMode}
               onSourceUpload={upsertSource}
               onSourceDelete={removeSource}
               onRecordHistory={saveHistory}
@@ -368,7 +416,9 @@ export default function App() {
             <SettingsView
               settings={data.settings}
               themeMode={themeMode}
+              readerMode={readerMode}
               onThemeChange={setThemeMode}
+              onReaderModeChange={setReaderMode}
               onImportComplete={load}
             />
           ) : null}
@@ -486,11 +536,13 @@ function TopBar({
 function HomeView({
   data,
   error,
+  readerMode,
   onOpenTab,
   onRecordHistory
 }: {
   data: AppData
   error: string | null
+  readerMode: ReaderMode
   onOpenTab: (tab: TabKey) => void
   onRecordHistory: (payload: HistoryWriteRequest) => Promise<void>
 }) {
@@ -566,7 +618,11 @@ function HomeView({
       </section>
       {selectedItem ? (
         <Panel title="漫画详情">
-          <LibraryReader item={selectedItem} onRecordHistory={onRecordHistory} />
+          <LibraryReader
+            item={selectedItem}
+            readerMode={readerMode}
+            onRecordHistory={onRecordHistory}
+          />
         </Panel>
       ) : null}
     </div>
@@ -650,6 +706,7 @@ function SourceChips({ sources }: { sources: SourceSummary[] }) {
 function SearchView({
   sources,
   favorites,
+  readerMode,
   onSourceUpload,
   onSourceDelete,
   onRecordHistory,
@@ -657,6 +714,7 @@ function SearchView({
 }: {
   sources: SourceSummary[]
   favorites: LibraryItem[]
+  readerMode: ReaderMode
   onSourceUpload: (file: File) => Promise<void>
   onSourceDelete: (key: string) => Promise<void>
   onRecordHistory: (payload: HistoryWriteRequest) => Promise<void>
@@ -845,6 +903,7 @@ function SearchView({
           comic={selectedComic}
           images={images}
           activeEpisodeTitle={activeEpisodeTitle}
+          readerMode={readerMode}
           favorite={Boolean(
             selectedComic &&
               favorites.some(
@@ -904,6 +963,7 @@ function ComicDetails({
   comic,
   images,
   activeEpisodeTitle,
+  readerMode,
   favorite,
   loadingComic,
   loadingImages,
@@ -914,6 +974,7 @@ function ComicDetails({
   comic: ComicInfo | null
   images: string[]
   activeEpisodeTitle: string | null
+  readerMode: ReaderMode
   favorite: boolean
   loadingComic: boolean
   loadingImages: boolean
@@ -921,6 +982,19 @@ function ComicDetails({
   onLoadImages: (episode: ComicEpisode) => void
   onFavoriteChange?: (comic: ComicInfo, favorite: boolean) => void
 }) {
+  const [pageIndex, setPageIndex] = useState(0)
+  const orderedImages = images
+  const isGalleryMode = readerMode.startsWith('gallery')
+  const activePageIndex =
+    orderedImages.length === 0 ? 0 : Math.min(pageIndex, orderedImages.length - 1)
+  const visibleImages = isGalleryMode
+    ? orderedImages.slice(activePageIndex, activePageIndex + 1)
+    : orderedImages
+
+  useEffect(() => {
+    setPageIndex(0)
+  }, [activeEpisodeTitle, images.length, readerMode])
+
   if (loadingComic) {
     return <EmptyLine icon={Loader2} text="加载详情中" />
   }
@@ -964,17 +1038,46 @@ function ComicDetails({
       {message ? <EmptyLine icon={BookOpen} text={message} /> : null}
       {loadingImages ? <EmptyLine icon={Loader2} text="加载章节中" /> : null}
       {images.length > 0 ? (
-        <div className="reader-shell">
+        <div className={`reader-shell ${readerModeClassName(readerMode)}`}>
           <div className="reader-heading">
             <strong>{activeEpisodeTitle ?? '当前章节'}</strong>
-            <span>{images.length} 张</span>
+            <span>
+              {isGalleryMode
+                ? `${activePageIndex + 1}/${orderedImages.length}`
+                : `${orderedImages.length} 张`}
+            </span>
           </div>
+          {isGalleryMode ? (
+            <div className="reader-pager" aria-label="翻页">
+              <button
+                className="icon-button"
+                type="button"
+                disabled={activePageIndex === 0}
+                aria-label="上一页"
+                onClick={() => setPageIndex((current) => Math.max(0, current - 1))}
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <span>{readerModeOptions.find((option) => option.key === readerMode)?.label}</span>
+              <button
+                className="icon-button"
+                type="button"
+                disabled={activePageIndex >= orderedImages.length - 1}
+                aria-label="下一页"
+                onClick={() =>
+                  setPageIndex((current) => Math.min(orderedImages.length - 1, current + 1))
+                }
+              >
+                <ChevronRight size={18} />
+              </button>
+            </div>
+          ) : null}
           <div className="reader-image-list">
-            {images.map((image, index) => (
+            {visibleImages.map((image, index) => (
               <img
                 key={`${image}-${index}`}
                 src={imageProxyUrl(image)}
-                alt={`第 ${index + 1} 页`}
+                alt={`第 ${isGalleryMode ? activePageIndex + 1 : index + 1} 页`}
                 loading={index < 2 ? 'eager' : 'lazy'}
               />
             ))}
@@ -987,9 +1090,11 @@ function ComicDetails({
 
 function UpdatesView({
   data,
+  readerMode,
   onRecordHistory
 }: {
   data: FollowUpdatesResponse
+  readerMode: ReaderMode
   onRecordHistory: (payload: HistoryWriteRequest) => Promise<void>
 }) {
   const [selectedItem, setSelectedItem] = useState<LibraryItem | null>(null)
@@ -1046,7 +1151,11 @@ function UpdatesView({
       </Panel>
       {selectedItem ? (
         <Panel title="漫画详情">
-          <LibraryReader item={selectedItem} onRecordHistory={onRecordHistory} />
+          <LibraryReader
+            item={selectedItem}
+            readerMode={readerMode}
+            onRecordHistory={onRecordHistory}
+          />
         </Panel>
       ) : null}
     </div>
@@ -1061,6 +1170,7 @@ function FavoritesView({
   activeFolder,
   loadingFolder,
   loadingMore = false,
+  readerMode,
   onFolderSelect,
   onLoadMore,
   onRecordHistory
@@ -1072,6 +1182,7 @@ function FavoritesView({
   activeFolder: string | null
   loadingFolder?: boolean
   loadingMore?: boolean
+  readerMode: ReaderMode
   onFolderSelect: (folder: string | null) => Promise<void>
   onLoadMore?: () => void
   onRecordHistory: (payload: HistoryWriteRequest) => Promise<void>
@@ -1128,7 +1239,11 @@ function FavoritesView({
         </Panel>
         {selectedItem ? (
           <Panel title="漫画详情">
-            <LibraryReader item={selectedItem} onRecordHistory={onRecordHistory} />
+            <LibraryReader
+              item={selectedItem}
+              readerMode={readerMode}
+              onRecordHistory={onRecordHistory}
+            />
           </Panel>
         ) : null}
       </div>
@@ -1166,6 +1281,7 @@ function LibraryView({
   total,
   emptyText,
   loadingMore = false,
+  readerMode,
   onLoadMore,
   onRecordHistory
 }: {
@@ -1175,6 +1291,7 @@ function LibraryView({
   total: number
   emptyText: string
   loadingMore?: boolean
+  readerMode: ReaderMode
   onLoadMore?: () => void
   onRecordHistory: (payload: HistoryWriteRequest) => Promise<void>
 }) {
@@ -1198,7 +1315,11 @@ function LibraryView({
       </Panel>
       {selectedItem ? (
         <Panel title="漫画详情">
-          <LibraryReader item={selectedItem} onRecordHistory={onRecordHistory} />
+          <LibraryReader
+            item={selectedItem}
+            readerMode={readerMode}
+            onRecordHistory={onRecordHistory}
+          />
         </Panel>
       ) : null}
     </div>
@@ -1269,9 +1390,11 @@ function CoverImage({ url, iconSize }: { url: string | null; iconSize: number })
 
 function LibraryReader({
   item,
+  readerMode,
   onRecordHistory
 }: {
   item: LibraryItem
+  readerMode: ReaderMode
   onRecordHistory: (payload: HistoryWriteRequest) => Promise<void>
 }) {
   const [comic, setComic] = useState<ComicInfo | null>(null)
@@ -1342,6 +1465,7 @@ function LibraryReader({
       comic={comic}
       images={images}
       activeEpisodeTitle={activeEpisodeTitle}
+      readerMode={readerMode}
       favorite={false}
       loadingComic={loadingComic}
       loadingImages={loadingImages}
@@ -1374,12 +1498,16 @@ function TasksView() {
 function SettingsView({
   settings,
   themeMode,
+  readerMode,
   onThemeChange,
+  onReaderModeChange,
   onImportComplete
 }: {
   settings: SettingsResponse | null
   themeMode: string
+  readerMode: ReaderMode
   onThemeChange: (value: string) => Promise<void>
+  onReaderModeChange: (value: ReaderMode) => Promise<void>
   onImportComplete: () => void | Promise<void>
 }) {
   const hidden = settings?.hidden_features ?? []
@@ -1396,6 +1524,20 @@ function SettingsView({
               onClick={() => void onThemeChange(value)}
             >
               {value === 'system' ? '系统' : value === 'light' ? '浅色' : '深色'}
+            </button>
+          ))}
+        </div>
+      </Panel>
+      <Panel title="阅读方式">
+        <div className="reader-mode-control" role="group" aria-label="阅读方式">
+          {readerModeOptions.map((option) => (
+            <button
+              key={option.key}
+              className={readerMode === option.key ? 'selected' : ''}
+              type="button"
+              onClick={() => void onReaderModeChange(option.key)}
+            >
+              {option.label}
             </button>
           ))}
         </div>

@@ -843,6 +843,22 @@ button {
   white-space: nowrap;
 }
 
+.reader-pager {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 38px;
+  align-items: center;
+  gap: 8px;
+}
+
+.reader-pager span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .reader-image-list {
   display: grid;
   gap: 10px;
@@ -855,6 +871,43 @@ button {
   border-radius: 6px;
   background: var(--surface-soft);
   box-shadow: 0 1px 8px color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.reader-mode-gallery .reader-image-list {
+  min-height: min(78vh, 880px);
+  align-items: center;
+}
+
+.reader-mode-gallery .reader-image-list img {
+  width: auto;
+  max-width: 100%;
+  max-height: min(78vh, 880px);
+}
+
+.reader-mode-continuous-horizontal .reader-image-list {
+  grid-auto-columns: minmax(280px, min(82vw, 720px));
+  grid-auto-flow: column;
+  justify-content: start;
+  justify-items: stretch;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 8px;
+  scroll-snap-type: x proximity;
+}
+
+.reader-mode-continuous-horizontal.rtl .reader-image-list {
+  direction: rtl;
+}
+
+.reader-mode-continuous-horizontal .reader-image-list img {
+  width: auto;
+  max-width: none;
+  height: min(78vh, 880px);
+  scroll-snap-align: center;
+}
+
+.reader-mode-continuous-vertical .reader-image-list img {
+  width: min(100%, 720px);
 }
 
 .webdav-form {
@@ -990,6 +1043,27 @@ button {
   color: var(--text);
   background: var(--surface);
   box-shadow: 0 1px 4px rgba(31, 35, 52, 0.12);
+}
+
+.reader-mode-control {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.reader-mode-control button {
+  min-height: 38px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--surface-soft);
+  cursor: pointer;
+}
+
+.reader-mode-control button.selected {
+  color: var(--primary);
+  background: var(--primary-soft);
+  font-weight: 700;
 }
 
 .hidden-list {
@@ -1137,6 +1211,14 @@ button {
 
   .webdav-form {
     grid-template-columns: 1fr;
+  }
+
+  .reader-mode-control {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .reader-mode-continuous-horizontal .reader-image-list {
+    grid-auto-columns: minmax(240px, 86vw);
   }
 }
 

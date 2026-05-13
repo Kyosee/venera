@@ -78,5 +78,5 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 INSERT OR IGNORE INTO settings (key, value) VALUES
     ('themeMode', '"system"'),
-    ('readerMode', '"continuousTopToBottom"'),
+    ('readerMode', '"galleryLeftToRight"'),
     ('cacheLimitMb', '1024');
