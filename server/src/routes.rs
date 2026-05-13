@@ -13,6 +13,7 @@ use axum::{
 use regex::Regex;
 use rusqlite::params;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use tokio::fs;
 
 use crate::{
@@ -23,9 +24,12 @@ use crate::{
         ComicPagesResponse, DeleteResponse, FavoriteWriteRequest, HealthResponse,
         HistoryWriteRequest, ImageProxyQuery, LibraryItem, LibraryResponse, SearchRequest,
         SearchResponse, SettingsPatch, SettingsResponse, SourceSummary, SourceWriteRequest,
+        WebDavConfigRequest, WebDavConfigResponse, WebDavDownloadRequest, WebDavDownloadResponse,
+        WebDavListRequest, WebDavListResponse,
     },
     source_runtime,
     state::AppState,
+    webdav_runtime::{self, WebDavConfig},
 };
 
 pub fn api_router() -> Router<AppState> {
@@ -36,6 +40,14 @@ pub fn api_router() -> Router<AppState> {
         .route("/library", get(get_library))
         .route("/history", post(upsert_history))
         .route("/favorites", post(set_favorite))
+        .route(
+            "/webdav/config",
+            get(get_webdav_config)
+                .put(save_webdav_config)
+                .delete(clear_webdav_config),
+        )
+        .route("/webdav/list", post(list_webdav))
+        .route("/webdav/download", post(download_webdav))
         .route("/sources", get(list_sources).post(upsert_source))
         .route("/sources/{key}", delete(delete_source))
         .route("/search", post(search_comics))
@@ -233,6 +245,112 @@ async fn set_favorite(
     }
 
     Ok(Json(read_library(&state)?))
+}
+
+async fn get_webdav_config(State(state): State<AppState>) -> ApiResult<Json<WebDavConfigResponse>> {
+    Ok(Json(read_webdav_config_response(&state)?))
+}
+
+async fn save_webdav_config(
+    State(state): State<AppState>,
+    Json(payload): Json<WebDavConfigRequest>,
+) -> ApiResult<Json<WebDavConfigResponse>> {
+    let endpoint_url = payload.endpoint_url.trim();
+    if !endpoint_url.starts_with("http://") && !endpoint_url.starts_with("https://") {
+        return Err(ApiError::BadRequest(
+            "webdav url must use http or https".to_string(),
+        ));
+    }
+    let root_path = normalize_remote_path(payload.root_path.as_deref().unwrap_or("/"))?;
+    let root_path = if root_path.is_empty() {
+        "/".to_string()
+    } else {
+        root_path
+    };
+    let username = payload.username.and_then(|value| {
+        let value = value.trim().to_string();
+        (!value.is_empty()).then_some(value)
+    });
+    let next_password = payload.password.map(|value| value.trim().to_string());
+
+    {
+        let database = state
+            .database
+            .lock()
+            .map_err(|_| ApiError::State("database lock poisoned".to_string()))?;
+        let previous_password = database
+            .query_row(
+                "SELECT password FROM webdav_config WHERE id = 1",
+                [],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten();
+        let password = next_password
+            .filter(|value| !value.is_empty())
+            .or(previous_password);
+
+        database.execute(
+            r#"
+            INSERT INTO webdav_config (id, endpoint_url, username, password, root_path, updated_at)
+            VALUES (1, ?1, ?2, ?3, ?4, CURRENT_TIMESTAMP)
+            ON CONFLICT(id) DO UPDATE SET
+                endpoint_url = excluded.endpoint_url,
+                username = excluded.username,
+                password = excluded.password,
+                root_path = excluded.root_path,
+                updated_at = CURRENT_TIMESTAMP
+            "#,
+            params![endpoint_url, username, password, root_path],
+        )?;
+    }
+
+    Ok(Json(read_webdav_config_response(&state)?))
+}
+
+async fn clear_webdav_config(
+    State(state): State<AppState>,
+) -> ApiResult<Json<WebDavConfigResponse>> {
+    {
+        let database = state
+            .database
+            .lock()
+            .map_err(|_| ApiError::State("database lock poisoned".to_string()))?;
+        database.execute("DELETE FROM webdav_config WHERE id = 1", [])?;
+    }
+
+    Ok(Json(read_webdav_config_response(&state)?))
+}
+
+async fn list_webdav(
+    State(state): State<AppState>,
+    Json(payload): Json<WebDavListRequest>,
+) -> ApiResult<Json<WebDavListResponse>> {
+    let webdav_config = read_webdav_config(&state)?;
+    let path = normalize_remote_path(payload.path.as_deref().unwrap_or(""))?;
+    let response = webdav_runtime::list(&state.config, &webdav_config, &path).await?;
+    Ok(Json(response))
+}
+
+async fn download_webdav(
+    State(state): State<AppState>,
+    Json(payload): Json<WebDavDownloadRequest>,
+) -> ApiResult<Json<WebDavDownloadResponse>> {
+    let webdav_config = read_webdav_config(&state)?;
+    let path = normalize_remote_path(&payload.path)?;
+    if path.is_empty() || path.ends_with('/') {
+        return Err(ApiError::BadRequest(
+            "webdav download path must be a file".to_string(),
+        ));
+    }
+
+    let import_dir = state.config.imports_dir().join("webdav");
+    fs::create_dir_all(&import_dir).await?;
+    let file_name = local_import_file_name(&path);
+    let local_path = import_dir.join(&file_name);
+    let response =
+        webdav_runtime::download(&state.config, &webdav_config, &path, &local_path).await?;
+    Ok(Json(response))
 }
 
 async fn search_comics(
@@ -580,6 +698,109 @@ fn validate_library_key(source_key: &str, comic_id: &str) -> ApiResult<()> {
         return Err(ApiError::BadRequest("comic id cannot be empty".to_string()));
     }
     Ok(())
+}
+
+fn read_webdav_config_response(state: &AppState) -> ApiResult<WebDavConfigResponse> {
+    let database = state
+        .database
+        .lock()
+        .map_err(|_| ApiError::State("database lock poisoned".to_string()))?;
+    let row = database
+        .query_row(
+            "SELECT endpoint_url, username, password, root_path, updated_at FROM webdav_config WHERE id = 1",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            },
+        )
+        .ok();
+
+    if let Some((endpoint_url, username, password, root_path, updated_at)) = row {
+        return Ok(WebDavConfigResponse {
+            endpoint_url: Some(endpoint_url),
+            username,
+            root_path,
+            password_configured: password.is_some_and(|value| !value.is_empty()),
+            read_only: true,
+            updated_at,
+        });
+    }
+
+    Ok(WebDavConfigResponse {
+        endpoint_url: None,
+        username: None,
+        root_path: "/".to_string(),
+        password_configured: false,
+        read_only: true,
+        updated_at: None,
+    })
+}
+
+fn read_webdav_config(state: &AppState) -> ApiResult<WebDavConfig> {
+    let database = state
+        .database
+        .lock()
+        .map_err(|_| ApiError::State("database lock poisoned".to_string()))?;
+    database
+        .query_row(
+            "SELECT endpoint_url, username, password, root_path FROM webdav_config WHERE id = 1",
+            [],
+            |row| {
+                Ok(WebDavConfig {
+                    endpoint_url: row.get(0)?,
+                    username: row.get(1)?,
+                    password: row.get(2)?,
+                    root_path: row.get(3)?,
+                })
+            },
+        )
+        .map_err(|err| match err {
+            rusqlite::Error::QueryReturnedNoRows => {
+                ApiError::BadRequest("webdav config is missing".to_string())
+            }
+            other => ApiError::Database(other),
+        })
+}
+
+fn normalize_remote_path(value: &str) -> ApiResult<String> {
+    let normalized = value.trim().replace('\\', "/");
+    let parts = normalized
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .map(str::trim)
+        .collect::<Vec<_>>();
+    if parts.iter().any(|part| *part == "." || *part == "..") {
+        return Err(ApiError::BadRequest("invalid webdav path".to_string()));
+    }
+    Ok(parts.join("/"))
+}
+
+fn local_import_file_name(remote_path: &str) -> String {
+    let original = remote_path
+        .rsplit('/')
+        .find(|part| !part.is_empty())
+        .unwrap_or("webdav-file");
+    let sanitized = original
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '.' | '-' | '_' => ch,
+            _ => '_',
+        })
+        .collect::<String>();
+    let sanitized = sanitized.trim_matches('_');
+    let digest = Sha256::digest(remote_path.as_bytes());
+    let prefix = format!("{digest:x}").chars().take(12).collect::<String>();
+    if sanitized.is_empty() {
+        format!("{prefix}-webdav-file")
+    } else {
+        format!("{prefix}-{sanitized}")
+    }
 }
 
 fn source_file_name(state: &AppState, key: &str) -> ApiResult<String> {

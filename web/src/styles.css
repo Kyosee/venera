@@ -563,6 +563,69 @@ button {
   box-shadow: 0 1px 8px color-mix(in srgb, var(--text) 8%, transparent);
 }
 
+.webdav-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.webdav-form input {
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface-soft);
+}
+
+.webdav-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.webdav-path,
+.webdav-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.webdav-path span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.webdav-row {
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.webdav-entry-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text);
+  background: transparent;
+}
+
+.webdav-entry-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .segmented-control {
   display: inline-grid;
   grid-template-columns: repeat(3, minmax(74px, 1fr));
@@ -679,6 +742,10 @@ button {
 
   .search-strip .primary-button {
     grid-column: 1 / -1;
+  }
+
+  .webdav-form {
+    grid-template-columns: 1fr;
   }
 }
 

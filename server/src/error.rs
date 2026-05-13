@@ -19,6 +19,8 @@ pub enum ApiError {
     SourceRuntime(String),
     #[error("image proxy error: {0}")]
     ImageProxy(String),
+    #[error("webdav error: {0}")]
+    WebDav(String),
 }
 
 #[derive(Serialize)]
@@ -30,7 +32,9 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = match self {
             ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
-            ApiError::SourceRuntime(_) | ApiError::ImageProxy(_) => StatusCode::BAD_GATEWAY,
+            ApiError::SourceRuntime(_) | ApiError::ImageProxy(_) | ApiError::WebDav(_) => {
+                StatusCode::BAD_GATEWAY
+            }
             ApiError::Database(_) | ApiError::Io(_) | ApiError::State(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }

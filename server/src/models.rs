@@ -190,3 +190,55 @@ pub struct FavoriteWriteRequest {
     pub cover: Option<String>,
     pub favorite: bool,
 }
+
+#[derive(Serialize)]
+pub struct WebDavConfigResponse {
+    pub endpoint_url: Option<String>,
+    pub username: Option<String>,
+    pub root_path: String,
+    pub password_configured: bool,
+    pub read_only: bool,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct WebDavConfigRequest {
+    pub endpoint_url: String,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub root_path: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct WebDavListRequest {
+    pub path: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct WebDavEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    pub size: Option<u64>,
+    pub modified: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct WebDavListResponse {
+    pub path: String,
+    pub entries: Vec<WebDavEntry>,
+}
+
+#[derive(Deserialize)]
+pub struct WebDavDownloadRequest {
+    pub path: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct WebDavDownloadResponse {
+    pub path: String,
+    pub file_name: String,
+    pub local_path: String,
+    pub size: u64,
+    pub content_type: Option<String>,
+}

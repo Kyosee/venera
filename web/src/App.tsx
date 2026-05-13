@@ -3,7 +3,9 @@ import {
   BookOpen,
   ClipboardList,
   Compass,
+  Download,
   EyeOff,
+  FolderOpen,
   Heart,
   Home,
   Library,
@@ -27,14 +29,20 @@ import {
   type SearchComic,
   type SettingsResponse,
   type SourceSummary,
+  type WebDavConfigResponse,
+  type WebDavEntry,
   getComicInfo,
   getComicPages,
   getHealth,
   getLibrary,
   getSettings,
   getSources,
+  getWebDavConfig,
+  listWebDav,
   saveSource,
+  saveWebDavConfig,
   deleteSource,
+  downloadWebDav,
   imageProxyUrl,
   recordHistory,
   searchComics,
@@ -772,6 +780,7 @@ function SettingsView({
           ))}
         </div>
       </Panel>
+      <WebDavPanel />
       <Panel title="Web 屏蔽项" action={String(hidden.length)}>
         <div className="hidden-list">
           {hidden.map((item) => (
@@ -783,6 +792,143 @@ function SettingsView({
         </div>
       </Panel>
     </div>
+  )
+}
+
+function WebDavPanel() {
+  const [config, setConfig] = useState<WebDavConfigResponse | null>(null)
+  const [endpointUrl, setEndpointUrl] = useState('')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [rootPath, setRootPath] = useState('/')
+  const [currentPath, setCurrentPath] = useState('')
+  const [entries, setEntries] = useState<WebDavEntry[]>([])
+  const [message, setMessage] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    void getWebDavConfig()
+      .then((next) => {
+        setConfig(next)
+        setEndpointUrl(next.endpoint_url ?? '')
+        setUsername(next.username ?? '')
+        setRootPath(next.root_path || '/')
+      })
+      .catch((err) => setMessage(err instanceof Error ? err.message : 'WebDAV 配置读取失败'))
+  }, [])
+
+  const handleSave = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setBusy(true)
+    setMessage(null)
+    try {
+      const next = await saveWebDavConfig({
+        endpoint_url: endpointUrl,
+        username,
+        password: password || undefined,
+        root_path: rootPath
+      })
+      setConfig(next)
+      setPassword('')
+      setMessage('WebDAV 已保存')
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'WebDAV 保存失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const openPath = async (path: string) => {
+    setBusy(true)
+    setMessage(null)
+    try {
+      const listing = await listWebDav(path)
+      setCurrentPath(listing.path)
+      setEntries(listing.entries)
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'WebDAV 读取失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const downloadPath = async (path: string) => {
+    setBusy(true)
+    setMessage(null)
+    try {
+      const result = await downloadWebDav(path)
+      setMessage(`已下载 ${result.file_name}`)
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'WebDAV 下载失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const parentPath = currentPath.split('/').filter(Boolean).slice(0, -1).join('/')
+
+  return (
+    <Panel title="WebDAV" action={config?.read_only ? '只读' : undefined}>
+      <form className="webdav-form" onSubmit={handleSave}>
+        <input
+          value={endpointUrl}
+          placeholder="WebDAV 地址"
+          onChange={(event) => setEndpointUrl(event.target.value)}
+        />
+        <input value={username} placeholder="用户名" onChange={(event) => setUsername(event.target.value)} />
+        <input
+          value={password}
+          placeholder={config?.password_configured ? '密码已配置' : '密码'}
+          type="password"
+          onChange={(event) => setPassword(event.target.value)}
+        />
+        <input value={rootPath} placeholder="根路径" onChange={(event) => setRootPath(event.target.value)} />
+        <button className="primary-button" type="submit" disabled={busy || !endpointUrl.trim()}>
+          保存
+        </button>
+        <button className="icon-text-button subtle" type="button" disabled={busy} onClick={() => void openPath('')}>
+          <FolderOpen size={16} />
+          浏览
+        </button>
+      </form>
+      {message ? <div className="data-row">{message}</div> : null}
+      {entries.length > 0 || currentPath ? (
+        <div className="webdav-list">
+          <div className="webdav-path">
+            <span>{currentPath || '/'}</span>
+            {currentPath ? (
+              <button className="icon-button" type="button" disabled={busy} onClick={() => void openPath(parentPath)}>
+                <FolderOpen size={16} />
+              </button>
+            ) : null}
+          </div>
+          {entries.map((entry) => (
+            <div className="webdav-row" key={entry.path}>
+              <button
+                className="webdav-entry-button"
+                type="button"
+                disabled={busy || !entry.is_dir}
+                onClick={() => void openPath(entry.path)}
+              >
+                {entry.is_dir ? <FolderOpen size={16} /> : <BookOpen size={16} />}
+                <span>{entry.name}</span>
+              </button>
+              {!entry.is_dir ? (
+                <button
+                  className="icon-button"
+                  type="button"
+                  disabled={busy}
+                  aria-label={`下载 ${entry.name}`}
+                  onClick={() => void downloadPath(entry.path)}
+                >
+                  <Download size={16} />
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </Panel>
   )
 }
 

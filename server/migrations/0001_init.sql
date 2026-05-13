@@ -35,6 +35,15 @@ CREATE TABLE IF NOT EXISTS favorites (
     PRIMARY KEY (source_key, comic_id)
 );
 
+CREATE TABLE IF NOT EXISTS webdav_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    endpoint_url TEXT NOT NULL,
+    username TEXT,
+    password TEXT,
+    root_path TEXT NOT NULL DEFAULT '/',
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY NOT NULL,
     kind TEXT NOT NULL,

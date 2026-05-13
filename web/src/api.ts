@@ -123,6 +123,43 @@ export type FavoriteWriteRequest = {
   favorite: boolean
 }
 
+export type WebDavConfigResponse = {
+  endpoint_url: string | null
+  username: string | null
+  root_path: string
+  password_configured: boolean
+  read_only: boolean
+  updated_at: string | null
+}
+
+export type WebDavConfigRequest = {
+  endpoint_url: string
+  username?: string
+  password?: string
+  root_path?: string
+}
+
+export type WebDavEntry = {
+  name: string
+  path: string
+  is_dir: boolean
+  size: number | null
+  modified: string | null
+}
+
+export type WebDavListResponse = {
+  path: string
+  entries: WebDavEntry[]
+}
+
+export type WebDavDownloadResponse = {
+  path: string
+  file_name: string
+  local_path: string
+  size: number
+  content_type: string | null
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     headers: {
@@ -178,6 +215,37 @@ export function setFavorite(payload: FavoriteWriteRequest) {
   return request<LibraryResponse>('/api/favorites', {
     method: 'POST',
     body: JSON.stringify(payload)
+  })
+}
+
+export function getWebDavConfig() {
+  return request<WebDavConfigResponse>('/api/webdav/config')
+}
+
+export function saveWebDavConfig(payload: WebDavConfigRequest) {
+  return request<WebDavConfigResponse>('/api/webdav/config', {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  })
+}
+
+export function clearWebDavConfig() {
+  return request<WebDavConfigResponse>('/api/webdav/config', {
+    method: 'DELETE'
+  })
+}
+
+export function listWebDav(path = '') {
+  return request<WebDavListResponse>('/api/webdav/list', {
+    method: 'POST',
+    body: JSON.stringify({ path })
+  })
+}
+
+export function downloadWebDav(path: string) {
+  return request<WebDavDownloadResponse>('/api/webdav/download', {
+    method: 'POST',
+    body: JSON.stringify({ path })
   })
 }
 

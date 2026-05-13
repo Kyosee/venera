@@ -24,6 +24,7 @@ async fn ensure_directories(config: &AppConfig) -> anyhow::Result<()> {
         config.sources_dir(),
         config.cache_dir(),
         config.downloads_dir(),
+        config.imports_dir(),
         config.tmp_dir(),
     ];
 

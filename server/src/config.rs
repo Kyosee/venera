@@ -48,6 +48,10 @@ impl AppConfig {
         self.data_dir.join("downloads")
     }
 
+    pub fn imports_dir(&self) -> PathBuf {
+        self.data_dir.join("imports")
+    }
+
     pub fn tmp_dir(&self) -> PathBuf {
         self.data_dir.join("tmp")
     }
