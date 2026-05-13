@@ -29,6 +29,7 @@ import {
   getSources,
   saveSource,
   deleteSource,
+  imageProxyUrl,
   searchComics,
   updateSettings
 } from './api'
@@ -489,7 +490,7 @@ function SearchResults({
       {comics.map((comic) => (
         <button className="result-row" key={comic.id} type="button" onClick={() => onSelect(comic)}>
           {comic.cover ? (
-            <img src={comic.cover} alt="" loading="lazy" referrerPolicy="no-referrer" />
+            <img src={imageProxyUrl(comic.cover)} alt="" loading="lazy" />
           ) : (
             <div className="result-cover-placeholder">
               <BookOpen size={18} />
@@ -532,7 +533,7 @@ function ComicDetails({
     <div className="comic-detail">
       <div className="comic-summary">
         {comic.cover ? (
-          <img src={comic.cover} alt="" loading="lazy" referrerPolicy="no-referrer" />
+          <img src={imageProxyUrl(comic.cover)} alt="" loading="lazy" />
         ) : (
           <div className="result-cover-placeholder">
             <BookOpen size={20} />
@@ -562,7 +563,7 @@ function ComicDetails({
       {images.length > 0 ? (
         <div className="image-preview-list">
           {images.slice(0, 6).map((image) => (
-            <img key={image} src={image} alt="" loading="lazy" referrerPolicy="no-referrer" />
+            <img key={image} src={imageProxyUrl(image)} alt="" loading="lazy" />
           ))}
         </div>
       ) : null}

@@ -82,6 +82,11 @@ pub struct ComicPagesRequest {
     pub episode_id: String,
 }
 
+#[derive(Deserialize)]
+pub struct ImageProxyQuery {
+    pub url: String,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct SearchComic {
     pub id: String,

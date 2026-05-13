@@ -165,3 +165,7 @@ export function getComicPages(sourceKey: string, comicId: string, episodeId: str
     body: JSON.stringify({ source_key: sourceKey, comic_id: comicId, episode_id: episodeId })
   })
 }
+
+export function imageProxyUrl(url: string) {
+  return `/api/image?url=${encodeURIComponent(url)}`
+}

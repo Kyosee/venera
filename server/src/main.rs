@@ -1,6 +1,7 @@
 mod config;
 mod db;
 mod error;
+mod image_proxy;
 mod models;
 mod routes;
 mod source_runtime;

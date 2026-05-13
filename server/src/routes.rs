@@ -1,7 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
+    http::{
+        header::{CACHE_CONTROL, CONTENT_TYPE},
+        HeaderMap, HeaderValue,
+    },
+    response::{IntoResponse, Response},
     routing::{delete, get, post},
     Json, Router,
 };
@@ -11,10 +16,11 @@ use tokio::fs;
 
 use crate::{
     error::{ApiError, ApiResult},
+    image_proxy,
     models::{
         CapabilitiesResponse, Capability, ComicInfoRequest, ComicInfoResponse, ComicPagesRequest,
-        ComicPagesResponse, DeleteResponse, HealthResponse, SearchRequest, SearchResponse,
-        SettingsPatch, SettingsResponse, SourceSummary, SourceWriteRequest,
+        ComicPagesResponse, DeleteResponse, HealthResponse, ImageProxyQuery, SearchRequest,
+        SearchResponse, SettingsPatch, SettingsResponse, SourceSummary, SourceWriteRequest,
     },
     source_runtime,
     state::AppState,
@@ -30,6 +36,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/search", post(search_comics))
         .route("/comic/info", post(comic_info))
         .route("/comic/pages", post(comic_pages))
+        .route("/image", get(proxy_image))
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
@@ -204,6 +211,27 @@ async fn comic_pages(
         episode_id: episode_id.to_string(),
         images: pages.images,
     }))
+}
+
+async fn proxy_image(
+    State(state): State<AppState>,
+    Query(query): Query<ImageProxyQuery>,
+) -> ApiResult<Response> {
+    let image = image_proxy::load_image(&state.config, &query.url).await?;
+    let content_type = HeaderValue::from_str(&image.content_type)
+        .map_err(|_| ApiError::ImageProxy("invalid image content type".to_string()))?;
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, content_type);
+    headers.insert(
+        CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=604800, immutable"),
+    );
+    headers.insert(
+        "x-venera-cache",
+        HeaderValue::from_static(image.cache_status),
+    );
+
+    Ok((headers, image.bytes).into_response())
 }
 
 async fn list_sources(State(state): State<AppState>) -> ApiResult<Json<Vec<SourceSummary>>> {
