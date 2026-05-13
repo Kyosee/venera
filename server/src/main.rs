@@ -3,6 +3,7 @@ mod db;
 mod error;
 mod models;
 mod routes;
+mod source_runtime;
 mod state;
 
 use axum::Router;

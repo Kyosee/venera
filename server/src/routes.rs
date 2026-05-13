@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use axum::{
     extract::{Path, State},
-    routing::{delete, get},
+    routing::{delete, get, post},
     Json, Router,
 };
 use regex::Regex;
@@ -12,9 +12,10 @@ use tokio::fs;
 use crate::{
     error::{ApiError, ApiResult},
     models::{
-        CapabilitiesResponse, Capability, DeleteResponse, HealthResponse, SettingsPatch,
-        SettingsResponse, SourceSummary, SourceWriteRequest,
+        CapabilitiesResponse, Capability, DeleteResponse, HealthResponse, SearchRequest,
+        SearchResponse, SettingsPatch, SettingsResponse, SourceSummary, SourceWriteRequest,
     },
+    source_runtime,
     state::AppState,
 };
 
@@ -25,6 +26,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/settings", get(get_settings).put(update_settings))
         .route("/sources", get(list_sources).post(upsert_source))
         .route("/sources/{key}", delete(delete_source))
+        .route("/search", post(search_comics))
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
@@ -33,6 +35,7 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         version: env!("CARGO_PKG_VERSION"),
         database: "sqlite",
         data_dir: state.config.data_dir.display().to_string(),
+        source_runtime: state.config.source_runtime_path().is_file(),
         static_assets: state.config.static_dir.join("index.html").is_file(),
     })
 }
@@ -52,8 +55,8 @@ async fn capabilities() -> Json<CapabilitiesResponse> {
             Capability {
                 key: "comic_sources",
                 label: "Comic source runtime",
-                status: "planned",
-                reason: Some("server-side source parser/runtime will be connected in stage 2"),
+                status: "available",
+                reason: Some("basic server-side source search runtime is available"),
             },
             Capability {
                 key: "reader",
@@ -121,6 +124,33 @@ async fn update_settings(
     }
 
     get_settings(State(state)).await
+}
+
+async fn search_comics(
+    State(state): State<AppState>,
+    Json(payload): Json<SearchRequest>,
+) -> ApiResult<Json<SearchResponse>> {
+    if !is_valid_source_key(&payload.source_key) {
+        return Err(ApiError::BadRequest("invalid source key".to_string()));
+    }
+    let keyword = payload.keyword.trim();
+    if keyword.is_empty() {
+        return Err(ApiError::BadRequest("keyword cannot be empty".to_string()));
+    }
+
+    let page = payload.page.unwrap_or(1).max(1);
+    let file_name = source_file_name(&state, &payload.source_key)?;
+    let source_path = state.config.sources_dir().join(file_name);
+    let result = source_runtime::search(&state.config, &source_path, keyword, page).await?;
+
+    Ok(Json(SearchResponse {
+        source_key: payload.source_key,
+        keyword: keyword.to_string(),
+        page,
+        max_page: result.max_page,
+        next: result.next,
+        comics: result.comics,
+    }))
 }
 
 async fn list_sources(State(state): State<AppState>) -> ApiResult<Json<Vec<SourceSummary>>> {
@@ -303,6 +333,26 @@ fn read_settings(state: &AppState) -> ApiResult<BTreeMap<String, Value>> {
     }
 
     Ok(values)
+}
+
+fn source_file_name(state: &AppState, key: &str) -> ApiResult<String> {
+    let database = state
+        .database
+        .lock()
+        .map_err(|_| ApiError::State("database lock poisoned".to_string()))?;
+
+    database
+        .query_row(
+            "SELECT file_name FROM comic_sources WHERE source_key = ?1 AND enabled = 1",
+            [key],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|err| match err {
+            rusqlite::Error::QueryReturnedNoRows => {
+                ApiError::BadRequest("source not found".to_string())
+            }
+            other => ApiError::Database(other),
+        })
 }
 
 struct SourceMetadata {

@@ -52,7 +52,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -194,12 +195,20 @@ button {
   box-shadow: var(--shadow);
 }
 
-.search-strip input {
+.search-strip input,
+.search-strip select {
   min-width: 0;
   border: 0;
   outline: 0;
   color: var(--text);
   background: transparent;
+}
+
+.search-strip select {
+  min-height: 34px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: var(--surface-soft);
 }
 
 .primary-button,
@@ -342,6 +351,8 @@ button {
 }
 
 .source-main span,
+.result-main span,
+.result-main small,
 .empty-line,
 .data-row {
   color: var(--muted);
@@ -381,6 +392,50 @@ button {
 
 .notice.error {
   color: var(--danger);
+}
+
+.result-list {
+  display: grid;
+  gap: 10px;
+}
+
+.result-row {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.result-row img,
+.result-cover-placeholder {
+  width: 54px;
+  aspect-ratio: 3 / 4;
+  border-radius: 6px;
+  object-fit: cover;
+  background: color-mix(in srgb, var(--primary) 12%, var(--surface));
+}
+
+.result-cover-placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--primary);
+}
+
+.result-main {
+  display: grid;
+  min-width: 0;
+}
+
+.result-main strong,
+.result-main span,
+.result-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .segmented-control {
@@ -491,6 +546,10 @@ button {
 
   .search-strip {
     grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .search-strip select {
+    grid-column: 1 / -1;
   }
 
   .search-strip .primary-button {

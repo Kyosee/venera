@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import {
   type HealthResponse,
+  type SearchComic,
   type SettingsResponse,
   type SourceSummary,
   getHealth,
@@ -25,6 +26,7 @@ import {
   getSources,
   saveSource,
   deleteSource,
+  searchComics,
   updateSettings
 } from './api'
 import { ReloadPrompt } from './ReloadPrompt'
@@ -182,7 +184,7 @@ function BottomNav({
 }) {
   return (
     <nav className="bottom-nav" aria-label="底部导航">
-      {[...primaryNav, actionNav[2]].map((item) => (
+      {[primaryNav[0], primaryNav[1], primaryNav[2], actionNav[0], actionNav[2]].map((item) => (
         <NavButton key={item.key} item={item} active={activeTab === item.key} onSelect={onSelect} />
       ))}
     </nav>
@@ -230,6 +232,7 @@ function TopBar({
     health?.status === 'ok' &&
     health.database === 'sqlite' &&
     health.data_dir.trim().length > 0 &&
+    health.source_runtime &&
     !error
 
   return (
@@ -294,7 +297,48 @@ function SearchView({
   onSourceUpload: (file: File) => Promise<void>
   onSourceDelete: (key: string) => Promise<void>
 }) {
+  const [keyword, setKeyword] = useState('')
+  const [selectedSource, setSelectedSource] = useState('')
+  const [searching, setSearching] = useState(false)
+  const [searchMessage, setSearchMessage] = useState<string | null>(null)
+  const [results, setResults] = useState<SearchComic[]>([])
   const [sourceMessage, setSourceMessage] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (selectedSource && sources.some((source) => source.key === selectedSource)) return
+    const nextSource = sources[0]?.key ?? ''
+    setSelectedSource(nextSource)
+    setResults([])
+    setSearchMessage(null)
+    if (!nextSource) {
+      setKeyword('')
+    }
+  }, [selectedSource, sources])
+
+  const handleSourceChange = (value: string) => {
+    setSelectedSource(value)
+    setResults([])
+    setSearchMessage(null)
+  }
+
+  const handleSearch = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const value = keyword.trim()
+    if (!value || !selectedSource) return
+
+    setSearching(true)
+    setSearchMessage(null)
+    try {
+      const response = await searchComics(selectedSource, value, 1)
+      setResults(response.comics)
+      setSearchMessage(response.comics.length === 0 ? '没有结果' : null)
+    } catch (err) {
+      setResults([])
+      setSearchMessage(err instanceof Error ? err.message : '搜索失败')
+    } finally {
+      setSearching(false)
+    }
+  }
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -322,13 +366,33 @@ function SearchView({
 
   return (
     <div className="view-stack">
-      <section className="search-strip" aria-label="搜索">
+      <form className="search-strip" aria-label="搜索" onSubmit={handleSearch}>
         <Search size={20} />
-        <input placeholder="关键词" disabled />
-        <button className="primary-button" disabled>
-          搜索
+        <input
+          value={keyword}
+          placeholder={selectedSource ? '关键词' : '先导入漫画源'}
+          disabled={!selectedSource || searching}
+          onChange={(event) => setKeyword(event.target.value)}
+        />
+        <select
+          value={selectedSource}
+          disabled={sources.length === 0 || searching}
+          aria-label="漫画源"
+          onChange={(event) => handleSourceChange(event.target.value)}
+        >
+          {sources.map((source) => (
+            <option key={source.key} value={source.key}>
+              {source.name}
+            </option>
+          ))}
+        </select>
+        <button className="primary-button" disabled={!keyword.trim() || !selectedSource || searching} type="submit">
+          {searching ? '搜索中' : '搜索'}
         </button>
-      </section>
+      </form>
+      <Panel title="搜索结果" action={String(results.length)}>
+        {searchMessage ? <EmptyLine icon={Search} text={searchMessage} /> : <SearchResults comics={results} />}
+      </Panel>
       <Panel title="源管理" action={String(sources.length)}>
         <div className="source-toolbar">
           <label className="icon-text-button">
@@ -340,6 +404,33 @@ function SearchView({
         </div>
         <SourceList sources={sources} onDelete={handleDelete} />
       </Panel>
+    </div>
+  )
+}
+
+function SearchResults({ comics }: { comics: SearchComic[] }) {
+  if (comics.length === 0) {
+    return <EmptyLine icon={Search} text="输入关键词开始搜索" />
+  }
+
+  return (
+    <div className="result-list">
+      {comics.map((comic) => (
+        <article className="result-row" key={comic.id}>
+          {comic.cover ? (
+            <img src={comic.cover} alt="" loading="lazy" referrerPolicy="no-referrer" />
+          ) : (
+            <div className="result-cover-placeholder">
+              <BookOpen size={18} />
+            </div>
+          )}
+          <div className="result-main">
+            <strong>{comic.title}</strong>
+            {comic.subtitle ? <span>{comic.subtitle}</span> : null}
+            {comic.tags.length > 0 ? <small>{comic.tags.slice(0, 4).join(' / ')}</small> : null}
+          </div>
+        </article>
+      ))}
     </div>
   )
 }

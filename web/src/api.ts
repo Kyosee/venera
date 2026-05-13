@@ -3,6 +3,7 @@ export type HealthResponse = {
   version: string
   database: string
   data_dir: string
+  source_runtime: boolean
   static_assets: boolean
 }
 
@@ -38,6 +39,25 @@ export type SourceSummary = {
 export type SourceWriteRequest = {
   file_name?: string
   content: string
+}
+
+export type SearchComic = {
+  id: string
+  title: string
+  subtitle: string | null
+  cover: string | null
+  url: string | null
+  tags: string[]
+  raw: unknown
+}
+
+export type SearchResponse = {
+  source_key: string
+  keyword: string
+  page: number
+  max_page: number | null
+  next: string | null
+  comics: SearchComic[]
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -94,5 +114,12 @@ export function saveSource(payload: SourceWriteRequest) {
 export function deleteSource(key: string) {
   return request<{ deleted: boolean }>(`/api/sources/${encodeURIComponent(key)}`, {
     method: 'DELETE'
+  })
+}
+
+export function searchComics(sourceKey: string, keyword: string, page = 1) {
+  return request<SearchResponse>('/api/search', {
+    method: 'POST',
+    body: JSON.stringify({ source_key: sourceKey, keyword, page })
   })
 }

@@ -17,7 +17,7 @@ COPY server/src ./src
 COPY server/migrations ./migrations
 RUN CARGO_REGISTRIES_CRATES_IO_PROTOCOL="$CARGO_REGISTRIES_CRATES_IO_PROTOCOL" cargo build --release
 
-FROM debian:bookworm-slim
+FROM node:25-bookworm-slim
 ARG DEBIAN_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian
 RUN sed -i "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g; s|http://security.debian.org/debian-security|${DEBIAN_MIRROR}-security|g" /etc/apt/sources.list.d/debian.sources
 RUN apt-get update \
@@ -26,8 +26,11 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=server-builder /app/server/target/release/venera-web-server /app/venera-web-server
 COPY --from=web-builder /app/web/dist /app/web/dist
+COPY server/js /app/server/js
 ENV VENERA_WEB_BIND=0.0.0.0:3000
 ENV VENERA_WEB_DATA_DIR=/data
+ENV VENERA_WEB_NODE_BIN=node
+ENV VENERA_WEB_RUNTIME_DIR=/app/server/js
 ENV VENERA_WEB_STATIC_DIR=/app/web/dist
 VOLUME ["/data"]
 EXPOSE 3000

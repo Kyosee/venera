@@ -4,6 +4,8 @@ use std::{env, path::PathBuf};
 pub struct AppConfig {
     pub bind: String,
     pub data_dir: PathBuf,
+    pub node_bin: String,
+    pub runtime_dir: PathBuf,
     pub static_dir: PathBuf,
 }
 
@@ -13,6 +15,10 @@ impl AppConfig {
         let data_dir = env::var_os("VENERA_WEB_DATA_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("./data.venera/webpwa"));
+        let node_bin = env::var("VENERA_WEB_NODE_BIN").unwrap_or_else(|_| "node".to_string());
+        let runtime_dir = env::var_os("VENERA_WEB_RUNTIME_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("./server/js"));
         let static_dir = env::var_os("VENERA_WEB_STATIC_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("./web/dist"));
@@ -20,6 +26,8 @@ impl AppConfig {
         Self {
             bind,
             data_dir,
+            node_bin,
+            runtime_dir,
             static_dir,
         }
     }
@@ -42,5 +50,9 @@ impl AppConfig {
 
     pub fn tmp_dir(&self) -> PathBuf {
         self.data_dir.join("tmp")
+    }
+
+    pub fn source_runtime_path(&self) -> PathBuf {
+        self.runtime_dir.join("source-runtime.mjs")
     }
 }

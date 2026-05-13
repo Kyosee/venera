@@ -9,6 +9,7 @@ pub struct HealthResponse {
     pub version: &'static str,
     pub database: &'static str,
     pub data_dir: String,
+    pub source_runtime: bool,
     pub static_assets: bool,
 }
 
@@ -59,4 +60,39 @@ pub struct SourceWriteRequest {
 #[derive(Serialize)]
 pub struct DeleteResponse {
     pub deleted: bool,
+}
+
+#[derive(Deserialize)]
+pub struct SearchRequest {
+    pub source_key: String,
+    pub keyword: String,
+    pub page: Option<u32>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SearchComic {
+    pub id: String,
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub cover: Option<String>,
+    pub url: Option<String>,
+    pub tags: Vec<String>,
+    pub raw: Value,
+}
+
+#[derive(Serialize)]
+pub struct SearchResponse {
+    pub source_key: String,
+    pub keyword: String,
+    pub page: u32,
+    pub max_page: Option<u32>,
+    pub next: Option<String>,
+    pub comics: Vec<SearchComic>,
+}
+
+#[derive(Deserialize)]
+pub struct RuntimeSearchResult {
+    pub max_page: Option<u32>,
+    pub next: Option<String>,
+    pub comics: Vec<SearchComic>,
 }
