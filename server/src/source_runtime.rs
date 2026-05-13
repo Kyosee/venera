@@ -8,7 +8,7 @@ use crate::{
     error::{ApiError, ApiResult},
     models::{
         RuntimeComicInfo, RuntimeComicPages, RuntimeSearchResult, RuntimeSourceComicList,
-        RuntimeSourcePageManifest,
+        RuntimeSourcePageManifest, SourceSettingsResponse,
     },
 };
 
@@ -55,6 +55,29 @@ pub async fn manifest(
 ) -> ApiResult<RuntimeSourcePageManifest> {
     let source = source_path.display().to_string();
     run_runtime(config, &["manifest", source.as_str()]).await
+}
+
+pub async fn source_settings(
+    config: &AppConfig,
+    source_path: &Path,
+) -> ApiResult<SourceSettingsResponse> {
+    let source = source_path.display().to_string();
+    run_runtime(config, &["settings", source.as_str()]).await
+}
+
+pub async fn set_source_setting(
+    config: &AppConfig,
+    source_path: &Path,
+    key: &str,
+    value: &serde_json::Value,
+) -> ApiResult<SourceSettingsResponse> {
+    let source = source_path.display().to_string();
+    let value = serde_json::to_string(value).unwrap_or_else(|_| "null".to_string());
+    run_runtime(
+        config,
+        &["set-setting", source.as_str(), key, value.as_str()],
+    )
+    .await
 }
 
 pub async fn explore_page(

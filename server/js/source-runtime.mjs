@@ -870,6 +870,73 @@ function sourceManifest(source) {
   }
 }
 
+function sourceSettings(source) {
+  const settings = source.settings && typeof source.settings === 'object' ? source.settings : {}
+  const current = source.__data?.settings && typeof source.__data.settings === 'object' ? source.__data.settings : {}
+  const items = Object.entries(settings).map(([key, raw]) => normalizeSourceSetting(key, raw, current))
+  return {
+    source_key: text(source.key),
+    source_name: text(source.name ?? source.key),
+    items,
+    account: {
+      available: Boolean(source.account),
+      logged: source.__data?.account != null,
+      web_login_hidden: Boolean(source.account)
+    }
+  }
+}
+
+function normalizeSourceSetting(key, raw, current) {
+  const setting = raw && typeof raw === 'object' ? raw : {}
+  const type = text(setting.type || 'input')
+  const value = Object.hasOwn(current, key) ? current[key] : setting.default
+  return {
+    key,
+    title: text(setting.title ?? setting.label ?? key),
+    type,
+    default: sanitizeSettingValue(setting.default),
+    value: sanitizeSettingValue(value),
+    options: Array.isArray(setting.options) ? setting.options.map(normalizeSettingOption) : [],
+    validator: typeof setting.validator === 'string' ? setting.validator : null,
+    button_text: text(setting.buttonText ?? setting.label ?? '执行'),
+    supported: ['select', 'switch', 'input'].includes(type)
+  }
+}
+
+function normalizeSettingOption(option) {
+  if (typeof option === 'string') {
+    const index = option.indexOf('-')
+    if (index >= 0) {
+      const value = option.slice(0, index)
+      const label = option.slice(index + 1)
+      return { value, text: label || value }
+    }
+    return { value: option, text: option }
+  }
+  if (option && typeof option === 'object') {
+    const value = Object.hasOwn(option, 'value') ? option.value : option.text
+    return {
+      value: sanitizeSettingValue(value),
+      text: text(option.text ?? value)
+    }
+  }
+  return { value: sanitizeSettingValue(option), text: text(option) }
+}
+
+function sanitizeSettingValue(value) {
+  if (value == null || ['string', 'number', 'boolean'].includes(typeof value)) return value ?? null
+  return text(value)
+}
+
+function setSourceSetting(source, key, value) {
+  source.__data = source.__data && typeof source.__data === 'object' ? source.__data : {}
+  source.__data.settings =
+    source.__data.settings && typeof source.__data.settings === 'object' ? source.__data.settings : {}
+  source.__data.settings[key] = sanitizeSettingValue(value)
+  source.__flushData()
+  return sourceSettings(source)
+}
+
 async function explorePage(source, title, page) {
   const pages = Array.isArray(source.explore) ? source.explore : []
   const data = pages.find((item, index) => {
@@ -1181,6 +1248,16 @@ async function main() {
   let data
   if (action === 'manifest') {
     data = sourceManifest(source)
+  } else if (action === 'settings') {
+    data = sourceSettings(source)
+  } else if (action === 'set-setting') {
+    let value = null
+    try {
+      value = JSON.parse(second || 'null')
+    } catch {
+      value = second
+    }
+    data = setSourceSetting(source, first, value)
   } else if (action === 'explore') {
     data = await explorePage(source, first, Number.parseInt(second, 10) || 1)
   } else if (action === 'category') {

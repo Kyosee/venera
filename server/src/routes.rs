@@ -27,9 +27,10 @@ use crate::{
         ImportBackupPreviewRequest, ImportBackupPreviewResponse, ImportBackupsResponse,
         LibraryItem, LibraryQuery, LibraryResponse, SearchRequest, SearchResponse, SettingsPatch,
         SettingsResponse, SourceCategoryRequest, SourceComicListResponse, SourceExploreRequest,
-        SourcePageManifest, SourcePagesResponse, SourcePatchRequest, SourceSummary,
-        SourceWriteRequest, WebDavConfigRequest, WebDavConfigResponse, WebDavDownloadRequest,
-        WebDavDownloadResponse, WebDavListRequest, WebDavListResponse,
+        SourcePageManifest, SourcePagesResponse, SourcePatchRequest, SourceSettingPatchRequest,
+        SourceSettingsResponse, SourceSummary, SourceWriteRequest, WebDavConfigRequest,
+        WebDavConfigResponse, WebDavDownloadRequest, WebDavDownloadResponse, WebDavListRequest,
+        WebDavListResponse,
     },
     source_runtime,
     state::AppState,
@@ -60,6 +61,10 @@ pub fn api_router() -> Router<AppState> {
         .route("/source-pages", get(list_source_pages))
         .route("/source-pages/explore", post(load_source_explore_page))
         .route("/source-pages/category", post(load_source_category_page))
+        .route(
+            "/sources/{key}/settings",
+            get(get_source_settings).patch(update_source_setting),
+        )
         .route("/sources/{key}", patch(update_source).delete(delete_source))
         .route("/search", post(search_comics))
         .route("/comic/info", post(comic_info))
@@ -806,6 +811,42 @@ async fn update_source(
     Ok(Json(source))
 }
 
+async fn get_source_settings(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> ApiResult<Json<SourceSettingsResponse>> {
+    if !is_valid_source_key(&key) {
+        return Err(ApiError::BadRequest("invalid source key".to_string()));
+    }
+    let file_name = source_file_name_any(&state, &key)?;
+    let source_path = state.config.sources_dir().join(file_name);
+    let settings = source_runtime::source_settings(&state.config, &source_path).await?;
+    Ok(Json(settings))
+}
+
+async fn update_source_setting(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(payload): Json<SourceSettingPatchRequest>,
+) -> ApiResult<Json<SourceSettingsResponse>> {
+    if !is_valid_source_key(&key) {
+        return Err(ApiError::BadRequest("invalid source key".to_string()));
+    }
+    if payload.key.trim().is_empty() {
+        return Err(ApiError::BadRequest("setting key is required".to_string()));
+    }
+    let file_name = source_file_name_any(&state, &key)?;
+    let source_path = state.config.sources_dir().join(file_name);
+    let settings = source_runtime::set_source_setting(
+        &state.config,
+        &source_path,
+        payload.key.trim(),
+        &payload.value,
+    )
+    .await?;
+    Ok(Json(settings))
+}
+
 async fn delete_source(
     State(state): State<AppState>,
     Path(key): Path<String>,
@@ -1298,6 +1339,26 @@ fn source_file_name(state: &AppState, key: &str) -> ApiResult<String> {
     database
         .query_row(
             "SELECT file_name FROM comic_sources WHERE source_key = ?1 AND enabled = 1",
+            [key],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|err| match err {
+            rusqlite::Error::QueryReturnedNoRows => {
+                ApiError::BadRequest("source not found".to_string())
+            }
+            other => ApiError::Database(other),
+        })
+}
+
+fn source_file_name_any(state: &AppState, key: &str) -> ApiResult<String> {
+    let database = state
+        .database
+        .lock()
+        .map_err(|_| ApiError::State("database lock poisoned".to_string()))?;
+
+    database
+        .query_row(
+            "SELECT file_name FROM comic_sources WHERE source_key = ?1",
             [key],
             |row| row.get::<_, String>(0),
         )

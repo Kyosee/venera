@@ -573,6 +573,17 @@ button {
   gap: 8px;
 }
 
+.source-item {
+  display: grid;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.source-item.expanded {
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
 .comic-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
@@ -908,12 +919,46 @@ button {
   min-height: 58px;
 }
 
+.source-item .source-row {
+  background: transparent;
+  border-radius: 0;
+}
+
+.source-expand-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 18px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.source-expand-button svg {
+  transition: transform 0.16s ease;
+}
+
+.source-item.expanded .source-expand-button svg {
+  transform: rotate(180deg);
+}
+
 .source-main,
 .library-main {
   display: grid;
   flex: 1 1 auto;
   gap: 3px;
   min-width: 0;
+}
+
+.source-main-button {
+  padding: 0;
+  color: var(--text);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
 }
 
 .source-title-row {
@@ -969,6 +1014,102 @@ button {
 .source-main .source-version-chip {
   color: var(--text);
   font-size: 12px;
+}
+
+.source-settings-panel {
+  display: grid;
+  padding: 0 10px 10px 52px;
+  border-top: 1px solid var(--border);
+}
+
+.source-settings-message {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 46px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.source-settings-message.error {
+  color: var(--danger);
+}
+
+.source-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+
+.source-setting-row:first-child {
+  border-top: 0;
+}
+
+.source-setting-row.disabled {
+  color: var(--muted);
+}
+
+.source-setting-main {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 2px;
+  min-width: 0;
+}
+
+.source-setting-main strong,
+.source-setting-main span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-setting-main strong {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.source-setting-main span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.source-setting-select,
+.source-setting-main input {
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.source-setting-select {
+  max-width: min(220px, 44vw);
+  padding: 0 8px;
+}
+
+.source-setting-row.input {
+  align-items: end;
+}
+
+.source-setting-row.input .source-setting-main {
+  gap: 6px;
+}
+
+.source-setting-main input {
+  width: 100%;
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.source-setting-row .icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .library-row {
@@ -1531,6 +1672,26 @@ button {
 
   .search-strip .primary-button {
     grid-column: 1 / -1;
+  }
+
+  .source-settings-panel {
+    padding-left: 10px;
+  }
+
+  .source-setting-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .source-setting-row > .source-toggle,
+  .source-setting-row > .status-pill,
+  .source-setting-row > .source-setting-select,
+  .source-setting-row > .icon-button {
+    align-self: flex-end;
+  }
+
+  .source-setting-select {
+    max-width: 100%;
   }
 
   .webdav-form {

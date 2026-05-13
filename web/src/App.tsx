@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BookOpen,
   Bookmark,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   CheckSquare,
@@ -23,6 +24,7 @@ import {
   Trash2,
   Upload,
   RefreshCw,
+  Save,
   Search,
   Settings,
   Tags,
@@ -48,6 +50,9 @@ import {
   type SourceComicListResponse,
   type SourcePageManifest,
   type SourcePagesResponse,
+  type SourceSettingItem,
+  type SourceSettingsResponse,
+  type SourceSettingValue,
   type SourceSummary,
   type WebDavConfigResponse,
   type WebDavEntry,
@@ -59,6 +64,7 @@ import {
   getLibrary,
   getSettings,
   getSourcePages,
+  getSourceSettings,
   getSources,
   getWebDavConfig,
   listImportBackups,
@@ -75,6 +81,7 @@ import {
   searchComics,
   setFavorite,
   updateSource,
+  updateSourceSetting,
   updateSettings
 } from './api'
 import { ReloadPrompt } from './ReloadPrompt'
@@ -2703,57 +2710,358 @@ function SourceList({
   onDelete?: (key: string) => void
   onToggle?: (key: string, enabled: boolean) => void
 }) {
+  const [expandedKey, setExpandedKey] = useState<string | null>(null)
+  const [settingsState, setSettingsState] = useState<Record<string, SourceSettingsCacheItem>>({})
+  const [savingSetting, setSavingSetting] = useState<string | null>(null)
+
+  const loadSourceSettings = useCallback(async (key: string) => {
+    setSettingsState((current) => ({
+      ...current,
+      [key]: { loading: true, error: null, data: current[key]?.data ?? null }
+    }))
+    try {
+      const data = await getSourceSettings(key)
+      setSettingsState((current) => ({
+        ...current,
+        [key]: { loading: false, error: null, data }
+      }))
+    } catch (err) {
+      setSettingsState((current) => ({
+        ...current,
+        [key]: {
+          loading: false,
+          error: err instanceof Error ? err.message : '读取源设置失败',
+          data: current[key]?.data ?? null
+        }
+      }))
+    }
+  }, [])
+
+  const handleExpand = (source: SourceSummary) => {
+    if (expandedKey === source.key) {
+      setExpandedKey(null)
+      return
+    }
+    setExpandedKey(source.key)
+    const state = settingsState[source.key]
+    if (source.runtime_status === 'registered' && !state?.data && !state?.loading) {
+      void loadSourceSettings(source.key)
+    }
+  }
+
+  const handleSaveSetting = async (
+    sourceKey: string,
+    setting: SourceSettingItem,
+    value: SourceSettingValue
+  ) => {
+    const saveKey = `${sourceKey}:${setting.key}`
+    setSavingSetting(saveKey)
+    try {
+      const data = await updateSourceSetting(sourceKey, { key: setting.key, value })
+      setSettingsState((current) => ({
+        ...current,
+        [sourceKey]: { loading: false, error: null, data }
+      }))
+    } catch (err) {
+      setSettingsState((current) => ({
+        ...current,
+        [sourceKey]: {
+          loading: false,
+          error: err instanceof Error ? err.message : '保存源设置失败',
+          data: current[sourceKey]?.data ?? null
+        }
+      }))
+    } finally {
+      setSavingSetting(null)
+    }
+  }
+
   if (sources.length === 0) {
     return <EmptyLine icon={Library} text="暂无源文件" />
   }
 
   return (
     <div className={compact ? 'source-list compact' : 'source-list'}>
-      {sources.map((source) => (
-        <div className="source-row" key={source.key}>
-          <div className="source-main">
-            <div className="source-title-row">
-              <strong>{source.name}</strong>
-              {source.version ? <span className="source-version-chip">{source.version}</span> : null}
-            </div>
-            <span>{source.file_name}</span>
-          </div>
-          <div className="source-actions">
-            <StatusPill
-              ok={source.runtime_status === 'registered' && source.enabled}
-              text={
-                source.runtime_status !== 'registered'
-                  ? '待解析'
-                  : source.enabled
-                    ? '启用'
-                    : '停用'
-              }
-            />
-            {onToggle && source.runtime_status === 'registered' ? (
-              <label className="source-toggle" title={source.enabled ? '停用' : '启用'}>
-                <input
-                  type="checkbox"
-                  checked={source.enabled}
-                  onChange={(event) => onToggle(source.key, event.target.checked)}
-                />
-                <span />
-              </label>
-            ) : null}
-            {onDelete ? (
+      {sources.map((source) => {
+        const expanded = expandedKey === source.key
+        return (
+          <div className={expanded ? 'source-item expanded' : 'source-item'} key={source.key}>
+            <div className="source-row">
               <button
-                className="icon-button danger"
+                className="source-expand-button"
                 type="button"
-                aria-label={`删除 ${source.name}`}
-                onClick={() => onDelete(source.key)}
+                aria-label={expanded ? `收起 ${source.name}` : `展开 ${source.name}`}
+                onClick={() => handleExpand(source)}
               >
-                <Trash2 size={16} />
+                <ChevronDown size={18} />
               </button>
+              <button className="source-main source-main-button" type="button" onClick={() => handleExpand(source)}>
+                <div className="source-title-row">
+                  <strong>{source.name}</strong>
+                  {source.version ? <span className="source-version-chip">{source.version}</span> : null}
+                </div>
+                <span>{source.file_name}</span>
+              </button>
+              <div className="source-actions">
+                <StatusPill
+                  ok={source.runtime_status === 'registered' && source.enabled}
+                  text={
+                    source.runtime_status !== 'registered'
+                      ? '待解析'
+                      : source.enabled
+                        ? '启用'
+                        : '停用'
+                  }
+                />
+                {onToggle && source.runtime_status === 'registered' ? (
+                  <label className="source-toggle" title={source.enabled ? '停用' : '启用'}>
+                    <input
+                      type="checkbox"
+                      checked={source.enabled}
+                      onChange={(event) => onToggle(source.key, event.target.checked)}
+                    />
+                    <span />
+                  </label>
+                ) : null}
+                {onDelete ? (
+                  <button
+                    className="icon-button danger"
+                    type="button"
+                    aria-label={`删除 ${source.name}`}
+                    onClick={() => onDelete(source.key)}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            {expanded ? (
+              <SourceSettingsPanel
+                source={source}
+                state={settingsState[source.key] ?? emptySourceSettingsState}
+                savingSetting={savingSetting}
+                onRefresh={() => loadSourceSettings(source.key)}
+                onSave={(setting, value) => handleSaveSetting(source.key, setting, value)}
+              />
             ) : null}
           </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
+}
+
+type SourceSettingsCacheItem = {
+  loading: boolean
+  error: string | null
+  data: SourceSettingsResponse | null
+}
+
+const emptySourceSettingsState: SourceSettingsCacheItem = {
+  loading: false,
+  error: null,
+  data: null
+}
+
+function SourceSettingsPanel({
+  source,
+  state,
+  savingSetting,
+  onRefresh,
+  onSave
+}: {
+  source: SourceSummary
+  state: SourceSettingsCacheItem
+  savingSetting: string | null
+  onRefresh: () => void
+  onSave: (setting: SourceSettingItem, value: SourceSettingValue) => void
+}) {
+  if (source.runtime_status !== 'registered') {
+    return (
+      <div className="source-settings-panel">
+        <EmptyLine icon={Settings} text="源解析完成后可查看设置" />
+      </div>
+    )
+  }
+
+  const data = state.data
+  const showEmpty = data && data.items.length === 0 && !data.account.available
+
+  return (
+    <div className="source-settings-panel">
+      {state.loading && !data ? (
+        <div className="source-settings-message">
+          <Loader2 className="spin" size={16} />
+          <span>读取设置中</span>
+        </div>
+      ) : null}
+      {state.error ? (
+        <div className="source-settings-message error">
+          <span>{state.error}</span>
+          <button className="icon-button" type="button" aria-label="重试读取源设置" onClick={onRefresh}>
+            <RefreshCw size={15} />
+          </button>
+        </div>
+      ) : null}
+      {showEmpty ? <EmptyLine icon={Settings} text="该源没有设置项" /> : null}
+      {data?.items.map((item) => (
+        <SourceSettingControl
+          item={item}
+          key={item.key}
+          saving={savingSetting === `${source.key}:${item.key}`}
+          onSave={(value) => onSave(item, value)}
+        />
+      ))}
+      {data?.account.available ? (
+        <div className="source-setting-row disabled">
+          <div className="source-setting-main">
+            <strong>账号</strong>
+            <span>{data.account.logged ? 'App 端已有账号数据，Web 登录/退出暂不开放' : 'Web 端登录暂不开放'}</span>
+          </div>
+          <StatusPill ok={data.account.logged} text={data.account.logged ? '已登录' : '隐藏'} />
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function SourceSettingControl({
+  item,
+  saving,
+  onSave
+}: {
+  item: SourceSettingItem
+  saving: boolean
+  onSave: (value: SourceSettingValue) => void
+}) {
+  const currentValue = sourceSettingValue(item)
+
+  if (!item.supported || item.type === 'callback') {
+    return (
+      <div className="source-setting-row disabled">
+        <div className="source-setting-main">
+          <strong>{item.title}</strong>
+          <span>{item.type === 'callback' ? 'Web 端暂不执行源回调' : `暂不支持 ${item.type}`}</span>
+        </div>
+        <span className="muted-text">{item.button_text ?? '隐藏'}</span>
+      </div>
+    )
+  }
+
+  if (item.type === 'switch') {
+    return (
+      <div className="source-setting-row">
+        <div className="source-setting-main">
+          <strong>{item.title}</strong>
+          <span>{settingValueText(currentValue)}</span>
+        </div>
+        <label className="source-toggle" title={Boolean(currentValue) ? '关闭' : '开启'}>
+          <input
+            type="checkbox"
+            checked={Boolean(currentValue)}
+            disabled={saving}
+            onChange={(event) => onSave(event.target.checked)}
+          />
+          <span />
+        </label>
+      </div>
+    )
+  }
+
+  if (item.type === 'select') {
+    const selectedIndex = Math.max(
+      0,
+      item.options.findIndex((option) => settingValuesEqual(option.value, currentValue))
+    )
+    return (
+      <div className="source-setting-row">
+        <div className="source-setting-main">
+          <strong>{item.title}</strong>
+          <span>{item.options[selectedIndex]?.text ?? settingValueText(currentValue)}</span>
+        </div>
+        <select
+          className="source-setting-select"
+          disabled={saving || item.options.length === 0}
+          value={String(selectedIndex)}
+          onChange={(event) => {
+            const option = item.options[Number(event.target.value)]
+            if (option) onSave(option.value)
+          }}
+        >
+          {item.options.map((option, index) => (
+            <option key={`${item.key}:${index}:${settingValueText(option.value)}`} value={String(index)}>
+              {option.text}
+            </option>
+          ))}
+        </select>
+      </div>
+    )
+  }
+
+  return <SourceInputSetting item={item} saving={saving} onSave={onSave} />
+}
+
+function SourceInputSetting({
+  item,
+  saving,
+  onSave
+}: {
+  item: SourceSettingItem
+  saving: boolean
+  onSave: (value: SourceSettingValue) => void
+}) {
+  const currentValue = sourceSettingValue(item)
+  const currentText = settingValueText(currentValue)
+  const [draft, setDraft] = useState(currentText)
+
+  useEffect(() => {
+    setDraft(currentText)
+  }, [currentText, item.key])
+
+  const changed = draft !== currentText
+  const save = () => {
+    if (!changed || saving) return
+    onSave(draft)
+  }
+
+  return (
+    <div className="source-setting-row input">
+      <div className="source-setting-main">
+        <strong>{item.title}</strong>
+        <input
+          value={draft}
+          pattern={item.validator ?? undefined}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') save()
+          }}
+        />
+      </div>
+      <button
+        className="icon-button"
+        type="button"
+        title="保存"
+        aria-label={`保存 ${item.title}`}
+        disabled={!changed || saving}
+        onClick={save}
+      >
+        <Save size={15} />
+      </button>
+    </div>
+  )
+}
+
+function sourceSettingValue(item: SourceSettingItem): SourceSettingValue {
+  return item.value ?? item.default ?? null
+}
+
+function settingValueText(value: SourceSettingValue): string {
+  if (value == null) return ''
+  return String(value)
+}
+
+function settingValuesEqual(left: SourceSettingValue, right: SourceSettingValue) {
+  return left === right || settingValueText(left) === settingValueText(right)
 }
 
 function EmptyLine({ icon: Icon, text }: { icon: typeof Home; text: string }) {

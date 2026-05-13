@@ -62,6 +62,47 @@ pub struct SourcePatchRequest {
     pub enabled: Option<bool>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct SourceSettingOption {
+    pub value: Value,
+    pub text: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SourceSettingItem {
+    pub key: String,
+    pub title: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub default: Option<Value>,
+    pub value: Option<Value>,
+    pub options: Vec<SourceSettingOption>,
+    pub validator: Option<String>,
+    pub button_text: Option<String>,
+    pub supported: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SourceAccountSummary {
+    pub available: bool,
+    pub logged: bool,
+    pub web_login_hidden: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SourceSettingsResponse {
+    pub source_key: String,
+    pub source_name: String,
+    pub items: Vec<SourceSettingItem>,
+    pub account: SourceAccountSummary,
+}
+
+#[derive(Deserialize)]
+pub struct SourceSettingPatchRequest {
+    pub key: String,
+    pub value: Value,
+}
+
 #[derive(Serialize)]
 pub struct DeleteResponse {
     pub deleted: bool,

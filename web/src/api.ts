@@ -45,6 +45,43 @@ export type SourcePatchRequest = {
   enabled?: boolean
 }
 
+export type SourceSettingValue = string | number | boolean | null
+
+export type SourceSettingOption = {
+  value: SourceSettingValue
+  text: string
+}
+
+export type SourceSettingItem = {
+  key: string
+  title: string
+  type: string
+  default: SourceSettingValue
+  value: SourceSettingValue
+  options: SourceSettingOption[]
+  validator: string | null
+  button_text: string | null
+  supported: boolean
+}
+
+export type SourceAccountSummary = {
+  available: boolean
+  logged: boolean
+  web_login_hidden: boolean
+}
+
+export type SourceSettingsResponse = {
+  source_key: string
+  source_name: string
+  items: SourceSettingItem[]
+  account: SourceAccountSummary
+}
+
+export type SourceSettingPatchRequest = {
+  key: string
+  value: SourceSettingValue
+}
+
 export type SourceExplorePage = {
   title: string
   page_type: string | null
@@ -460,6 +497,17 @@ export function saveSource(payload: SourceWriteRequest) {
 
 export function updateSource(key: string, payload: SourcePatchRequest) {
   return request<SourceSummary>(`/api/sources/${encodeURIComponent(key)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload)
+  })
+}
+
+export function getSourceSettings(key: string) {
+  return request<SourceSettingsResponse>(`/api/sources/${encodeURIComponent(key)}/settings`)
+}
+
+export function updateSourceSetting(key: string, payload: SourceSettingPatchRequest) {
+  return request<SourceSettingsResponse>(`/api/sources/${encodeURIComponent(key)}/settings`, {
     method: 'PATCH',
     body: JSON.stringify(payload)
   })
