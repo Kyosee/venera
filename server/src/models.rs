@@ -69,6 +69,19 @@ pub struct SearchRequest {
     pub page: Option<u32>,
 }
 
+#[derive(Deserialize)]
+pub struct ComicInfoRequest {
+    pub source_key: String,
+    pub comic_id: String,
+}
+
+#[derive(Deserialize)]
+pub struct ComicPagesRequest {
+    pub source_key: String,
+    pub comic_id: String,
+    pub episode_id: String,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct SearchComic {
     pub id: String,
@@ -95,4 +108,41 @@ pub struct RuntimeSearchResult {
     pub max_page: Option<u32>,
     pub next: Option<String>,
     pub comics: Vec<SearchComic>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ComicEpisode {
+    pub id: String,
+    pub title: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct RuntimeComicInfo {
+    pub id: String,
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub cover: Option<String>,
+    pub description: Option<String>,
+    pub tags: Vec<String>,
+    pub episodes: Vec<ComicEpisode>,
+    pub raw: Value,
+}
+
+#[derive(Serialize)]
+pub struct ComicInfoResponse {
+    pub source_key: String,
+    pub comic: RuntimeComicInfo,
+}
+
+#[derive(Deserialize)]
+pub struct RuntimeComicPages {
+    pub images: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct ComicPagesResponse {
+    pub source_key: String,
+    pub comic_id: String,
+    pub episode_id: String,
+    pub images: Vec<String>,
 }

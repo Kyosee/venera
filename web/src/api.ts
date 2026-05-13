@@ -60,6 +60,34 @@ export type SearchResponse = {
   comics: SearchComic[]
 }
 
+export type ComicEpisode = {
+  id: string
+  title: string
+}
+
+export type ComicInfo = {
+  id: string
+  title: string
+  subtitle: string | null
+  cover: string | null
+  description: string | null
+  tags: string[]
+  episodes: ComicEpisode[]
+  raw: unknown
+}
+
+export type ComicInfoResponse = {
+  source_key: string
+  comic: ComicInfo
+}
+
+export type ComicPagesResponse = {
+  source_key: string
+  comic_id: string
+  episode_id: string
+  images: string[]
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     headers: {
@@ -121,5 +149,19 @@ export function searchComics(sourceKey: string, keyword: string, page = 1) {
   return request<SearchResponse>('/api/search', {
     method: 'POST',
     body: JSON.stringify({ source_key: sourceKey, keyword, page })
+  })
+}
+
+export function getComicInfo(sourceKey: string, comicId: string) {
+  return request<ComicInfoResponse>('/api/comic/info', {
+    method: 'POST',
+    body: JSON.stringify({ source_key: sourceKey, comic_id: comicId })
+  })
+}
+
+export function getComicPages(sourceKey: string, comicId: string, episodeId: string) {
+  return request<ComicPagesResponse>('/api/comic/pages', {
+    method: 'POST',
+    body: JSON.stringify({ source_key: sourceKey, comic_id: comicId, episode_id: episodeId })
   })
 }

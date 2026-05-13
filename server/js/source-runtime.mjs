@@ -123,6 +123,34 @@ async function search(source, keyword, page) {
   throw new Error('source does not implement search.load')
 }
 
+async function comicInfo(source, comicId) {
+  if (typeof source.comic?.loadInfo !== 'function') {
+    throw new Error('source does not implement comic.loadInfo')
+  }
+  const result = await source.comic.loadInfo(comicId)
+  return normalizeComicInfo(result, comicId)
+}
+
+async function comicPages(source, comicId, episodeId) {
+  if (typeof source.comic?.loadEp !== 'function') {
+    throw new Error('source does not implement comic.loadEp')
+  }
+  const result = await source.comic.loadEp(comicId, episodeId)
+  const images = Array.isArray(result?.images)
+    ? result.images
+    : Array.isArray(result?.pages)
+      ? result.pages
+      : Array.isArray(result?.data)
+        ? result.data
+        : Array.isArray(result)
+          ? result
+          : []
+
+  return {
+    images: images.map((image) => String(image)).filter(Boolean)
+  }
+}
+
 function normalizeSearchResult(result) {
   const comics = Array.isArray(result?.comics)
     ? result.comics
@@ -139,14 +167,57 @@ function normalizeSearchResult(result) {
   }
 }
 
+function normalizeComicInfo(result, fallbackId) {
+  const raw = result && typeof result === 'object' ? result : { value: result }
+  const title = text(raw.title ?? raw.name ?? raw.label ?? fallbackId) ?? fallbackId
+  return {
+    id: text(raw.id ?? raw.comicId ?? fallbackId) ?? fallbackId,
+    title,
+    subtitle: text(raw.subtitle ?? raw.subTitle ?? raw.author),
+    cover: text(raw.cover ?? raw.coverUrl ?? raw.thumbnail ?? raw.pic ?? raw.image),
+    description: text(raw.description ?? raw.introduction ?? raw.summary),
+    tags: normalizeTags(raw.tags ?? raw.categories),
+    episodes: normalizeEpisodes(raw.episodes ?? raw.eps ?? raw.chapters ?? raw.chapter),
+    raw
+  }
+}
+
+function normalizeTags(value) {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => String(item)).filter(Boolean)
+}
+
+function normalizeEpisodes(value) {
+  const items = flattenEpisodes(value)
+  return items.map((item, index) => {
+    const raw = item && typeof item === 'object' ? item : { title: item }
+    const title = text(raw.title ?? raw.name ?? raw.label ?? raw.id ?? `EP ${index + 1}`) ?? `EP ${index + 1}`
+    return {
+      id: text(raw.id ?? raw.epId ?? raw.chapterId ?? raw.url ?? title) ?? title,
+      title
+    }
+  })
+}
+
+function flattenEpisodes(value) {
+  if (Array.isArray(value)) return value
+  if (!value || typeof value !== 'object') return []
+  return Object.values(value).flatMap((item) => (Array.isArray(item) ? item : [item]))
+}
+
 async function main() {
-  const [action, sourcePath, keyword = '', page = '1'] = process.argv.slice(2)
-  if (action !== 'search') {
+  const [action, sourcePath, first = '', second = '1'] = process.argv.slice(2)
+  const source = await loadSource(sourcePath)
+  let data
+  if (action === 'search') {
+    data = await search(source, first, Number.parseInt(second, 10) || 1)
+  } else if (action === 'info') {
+    data = await comicInfo(source, first)
+  } else if (action === 'pages') {
+    data = await comicPages(source, first, second)
+  } else {
     throw new Error(`unsupported runtime action: ${action}`)
   }
-
-  const source = await loadSource(sourcePath)
-  const data = await search(source, keyword, Number.parseInt(page, 10) || 1)
   json({ ok: true, data })
 }
 

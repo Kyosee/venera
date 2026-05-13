@@ -1,12 +1,12 @@
 use std::{path::Path, time::Duration};
 
-use serde::Deserialize;
+use serde::{de::DeserializeOwned, Deserialize};
 use tokio::{process::Command, time::timeout};
 
 use crate::{
     config::AppConfig,
     error::{ApiError, ApiResult},
-    models::RuntimeSearchResult,
+    models::{RuntimeComicInfo, RuntimeComicPages, RuntimeSearchResult},
 };
 
 #[derive(Deserialize)]
@@ -22,6 +22,34 @@ pub async fn search(
     keyword: &str,
     page: u32,
 ) -> ApiResult<RuntimeSearchResult> {
+    let source = source_path.display().to_string();
+    let page = page.to_string();
+    run_runtime(config, &["search", source.as_str(), keyword, page.as_str()]).await
+}
+
+pub async fn comic_info(
+    config: &AppConfig,
+    source_path: &Path,
+    comic_id: &str,
+) -> ApiResult<RuntimeComicInfo> {
+    let source = source_path.display().to_string();
+    run_runtime(config, &["info", source.as_str(), comic_id]).await
+}
+
+pub async fn comic_pages(
+    config: &AppConfig,
+    source_path: &Path,
+    comic_id: &str,
+    episode_id: &str,
+) -> ApiResult<RuntimeComicPages> {
+    let source = source_path.display().to_string();
+    run_runtime(config, &["pages", source.as_str(), comic_id, episode_id]).await
+}
+
+async fn run_runtime<T>(config: &AppConfig, args: &[&str]) -> ApiResult<T>
+where
+    T: DeserializeOwned,
+{
     let runtime_path = config.source_runtime_path();
     if !runtime_path.is_file() {
         return Err(ApiError::State(format!(
@@ -31,12 +59,7 @@ pub async fn search(
     }
 
     let mut command = Command::new(&config.node_bin);
-    command
-        .arg(runtime_path)
-        .arg("search")
-        .arg(source_path)
-        .arg(keyword)
-        .arg(page.to_string());
+    command.arg(runtime_path).args(args);
 
     let output = timeout(Duration::from_secs(20), command.output())
         .await
@@ -49,7 +72,7 @@ pub async fn search(
         return Err(ApiError::SourceRuntime(runtime_error(&stdout, &stderr)));
     }
 
-    let envelope: RuntimeEnvelope<RuntimeSearchResult> = serde_json::from_str(stdout.trim())
+    let envelope: RuntimeEnvelope<T> = serde_json::from_str(stdout.trim())
         .map_err(|err| ApiError::SourceRuntime(format!("invalid runtime response: {err}")))?;
     if !envelope.ok {
         return Err(ApiError::SourceRuntime(

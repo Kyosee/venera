@@ -17,10 +17,13 @@ import {
   WifiOff
 } from 'lucide-react'
 import {
+  type ComicInfo,
   type HealthResponse,
   type SearchComic,
   type SettingsResponse,
   type SourceSummary,
+  getComicInfo,
+  getComicPages,
   getHealth,
   getSettings,
   getSources,
@@ -302,6 +305,11 @@ function SearchView({
   const [searching, setSearching] = useState(false)
   const [searchMessage, setSearchMessage] = useState<string | null>(null)
   const [results, setResults] = useState<SearchComic[]>([])
+  const [selectedComic, setSelectedComic] = useState<ComicInfo | null>(null)
+  const [comicMessage, setComicMessage] = useState<string | null>(null)
+  const [images, setImages] = useState<string[]>([])
+  const [loadingComic, setLoadingComic] = useState(false)
+  const [loadingImages, setLoadingImages] = useState(false)
   const [sourceMessage, setSourceMessage] = useState<string | null>(null)
 
   useEffect(() => {
@@ -310,6 +318,9 @@ function SearchView({
     setSelectedSource(nextSource)
     setResults([])
     setSearchMessage(null)
+    setSelectedComic(null)
+    setComicMessage(null)
+    setImages([])
     if (!nextSource) {
       setKeyword('')
     }
@@ -319,6 +330,9 @@ function SearchView({
     setSelectedSource(value)
     setResults([])
     setSearchMessage(null)
+    setSelectedComic(null)
+    setComicMessage(null)
+    setImages([])
   }
 
   const handleSearch = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -331,12 +345,49 @@ function SearchView({
     try {
       const response = await searchComics(selectedSource, value, 1)
       setResults(response.comics)
+      setSelectedComic(null)
+      setImages([])
       setSearchMessage(response.comics.length === 0 ? '没有结果' : null)
     } catch (err) {
       setResults([])
       setSearchMessage(err instanceof Error ? err.message : '搜索失败')
     } finally {
       setSearching(false)
+    }
+  }
+
+  const handleOpenComic = async (comic: SearchComic) => {
+    if (!selectedSource) return
+
+    setLoadingComic(true)
+    setComicMessage(null)
+    setImages([])
+    try {
+      const response = await getComicInfo(selectedSource, comic.id)
+      setSelectedComic(response.comic)
+      setComicMessage(response.comic.episodes.length === 0 ? '暂无章节' : null)
+    } catch (err) {
+      setSelectedComic(null)
+      setComicMessage(err instanceof Error ? err.message : '详情加载失败')
+    } finally {
+      setLoadingComic(false)
+    }
+  }
+
+  const handleLoadImages = async (episodeId: string) => {
+    if (!selectedSource || !selectedComic) return
+
+    setLoadingImages(true)
+    setComicMessage(null)
+    try {
+      const response = await getComicPages(selectedSource, selectedComic.id, episodeId)
+      setImages(response.images)
+      setComicMessage(response.images.length === 0 ? '暂无图片' : null)
+    } catch (err) {
+      setImages([])
+      setComicMessage(err instanceof Error ? err.message : '章节加载失败')
+    } finally {
+      setLoadingImages(false)
     }
   }
 
@@ -391,7 +442,21 @@ function SearchView({
         </button>
       </form>
       <Panel title="搜索结果" action={String(results.length)}>
-        {searchMessage ? <EmptyLine icon={Search} text={searchMessage} /> : <SearchResults comics={results} />}
+        {searchMessage ? (
+          <EmptyLine icon={Search} text={searchMessage} />
+        ) : (
+          <SearchResults comics={results} onSelect={handleOpenComic} />
+        )}
+      </Panel>
+      <Panel title="漫画详情" action={selectedComic ? String(selectedComic.episodes.length) : undefined}>
+        <ComicDetails
+          comic={selectedComic}
+          images={images}
+          loadingComic={loadingComic}
+          loadingImages={loadingImages}
+          message={comicMessage}
+          onLoadImages={handleLoadImages}
+        />
       </Panel>
       <Panel title="源管理" action={String(sources.length)}>
         <div className="source-toolbar">
@@ -408,7 +473,13 @@ function SearchView({
   )
 }
 
-function SearchResults({ comics }: { comics: SearchComic[] }) {
+function SearchResults({
+  comics,
+  onSelect
+}: {
+  comics: SearchComic[]
+  onSelect: (comic: SearchComic) => void
+}) {
   if (comics.length === 0) {
     return <EmptyLine icon={Search} text="输入关键词开始搜索" />
   }
@@ -416,7 +487,7 @@ function SearchResults({ comics }: { comics: SearchComic[] }) {
   return (
     <div className="result-list">
       {comics.map((comic) => (
-        <article className="result-row" key={comic.id}>
+        <button className="result-row" key={comic.id} type="button" onClick={() => onSelect(comic)}>
           {comic.cover ? (
             <img src={comic.cover} alt="" loading="lazy" referrerPolicy="no-referrer" />
           ) : (
@@ -429,8 +500,72 @@ function SearchResults({ comics }: { comics: SearchComic[] }) {
             {comic.subtitle ? <span>{comic.subtitle}</span> : null}
             {comic.tags.length > 0 ? <small>{comic.tags.slice(0, 4).join(' / ')}</small> : null}
           </div>
-        </article>
+        </button>
       ))}
+    </div>
+  )
+}
+
+function ComicDetails({
+  comic,
+  images,
+  loadingComic,
+  loadingImages,
+  message,
+  onLoadImages
+}: {
+  comic: ComicInfo | null
+  images: string[]
+  loadingComic: boolean
+  loadingImages: boolean
+  message: string | null
+  onLoadImages: (episodeId: string) => void
+}) {
+  if (loadingComic) {
+    return <EmptyLine icon={Loader2} text="加载详情中" />
+  }
+  if (!comic) {
+    return <EmptyLine icon={BookOpen} text={message ?? '选择搜索结果查看详情'} />
+  }
+
+  return (
+    <div className="comic-detail">
+      <div className="comic-summary">
+        {comic.cover ? (
+          <img src={comic.cover} alt="" loading="lazy" referrerPolicy="no-referrer" />
+        ) : (
+          <div className="result-cover-placeholder">
+            <BookOpen size={20} />
+          </div>
+        )}
+        <div>
+          <strong>{comic.title}</strong>
+          {comic.subtitle ? <span>{comic.subtitle}</span> : null}
+          {comic.description ? <p>{comic.description}</p> : null}
+        </div>
+      </div>
+      <div className="episode-list">
+        {comic.episodes.map((episode) => (
+          <button
+            key={episode.id}
+            className="episode-button"
+            type="button"
+            disabled={loadingImages}
+            onClick={() => onLoadImages(episode.id)}
+          >
+            {episode.title}
+          </button>
+        ))}
+      </div>
+      {message ? <EmptyLine icon={BookOpen} text={message} /> : null}
+      {loadingImages ? <EmptyLine icon={Loader2} text="加载章节中" /> : null}
+      {images.length > 0 ? (
+        <div className="image-preview-list">
+          {images.slice(0, 6).map((image) => (
+            <img key={image} src={image} alt="" loading="lazy" referrerPolicy="no-referrer" />
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }

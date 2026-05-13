@@ -407,7 +407,10 @@ button {
   min-width: 0;
   padding: 8px;
   border-radius: 8px;
+  color: var(--text);
   background: var(--surface-soft);
+  text-align: left;
+  cursor: pointer;
 }
 
 .result-row img,
@@ -436,6 +439,72 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.comic-detail {
+  display: grid;
+  gap: 12px;
+}
+
+.comic-summary {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.comic-summary img,
+.comic-summary .result-cover-placeholder {
+  width: 72px;
+  aspect-ratio: 3 / 4;
+}
+
+.comic-summary strong,
+.comic-summary span,
+.comic-summary p {
+  display: block;
+  min-width: 0;
+  margin: 0;
+}
+
+.comic-summary span,
+.comic-summary p {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.episode-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.episode-button {
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface-soft);
+  cursor: pointer;
+}
+
+.episode-button:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.image-preview-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 8px;
+}
+
+.image-preview-list img {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--surface-soft);
 }
 
 .segmented-control {

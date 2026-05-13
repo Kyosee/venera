@@ -12,8 +12,9 @@ use tokio::fs;
 use crate::{
     error::{ApiError, ApiResult},
     models::{
-        CapabilitiesResponse, Capability, DeleteResponse, HealthResponse, SearchRequest,
-        SearchResponse, SettingsPatch, SettingsResponse, SourceSummary, SourceWriteRequest,
+        CapabilitiesResponse, Capability, ComicInfoRequest, ComicInfoResponse, ComicPagesRequest,
+        ComicPagesResponse, DeleteResponse, HealthResponse, SearchRequest, SearchResponse,
+        SettingsPatch, SettingsResponse, SourceSummary, SourceWriteRequest,
     },
     source_runtime,
     state::AppState,
@@ -27,6 +28,8 @@ pub fn api_router() -> Router<AppState> {
         .route("/sources", get(list_sources).post(upsert_source))
         .route("/sources/{key}", delete(delete_source))
         .route("/search", post(search_comics))
+        .route("/comic/info", post(comic_info))
+        .route("/comic/pages", post(comic_pages))
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
@@ -61,8 +64,8 @@ async fn capabilities() -> Json<CapabilitiesResponse> {
             Capability {
                 key: "reader",
                 label: "Reader API",
-                status: "planned",
-                reason: Some("image proxy, cache, and history are stage 3"),
+                status: "available",
+                reason: Some("basic details and chapter image APIs are available"),
             },
             Capability {
                 key: "native_login",
@@ -150,6 +153,56 @@ async fn search_comics(
         max_page: result.max_page,
         next: result.next,
         comics: result.comics,
+    }))
+}
+
+async fn comic_info(
+    State(state): State<AppState>,
+    Json(payload): Json<ComicInfoRequest>,
+) -> ApiResult<Json<ComicInfoResponse>> {
+    if !is_valid_source_key(&payload.source_key) {
+        return Err(ApiError::BadRequest("invalid source key".to_string()));
+    }
+    let comic_id = payload.comic_id.trim();
+    if comic_id.is_empty() {
+        return Err(ApiError::BadRequest("comic id cannot be empty".to_string()));
+    }
+
+    let file_name = source_file_name(&state, &payload.source_key)?;
+    let source_path = state.config.sources_dir().join(file_name);
+    let comic = source_runtime::comic_info(&state.config, &source_path, comic_id).await?;
+
+    Ok(Json(ComicInfoResponse {
+        source_key: payload.source_key,
+        comic,
+    }))
+}
+
+async fn comic_pages(
+    State(state): State<AppState>,
+    Json(payload): Json<ComicPagesRequest>,
+) -> ApiResult<Json<ComicPagesResponse>> {
+    if !is_valid_source_key(&payload.source_key) {
+        return Err(ApiError::BadRequest("invalid source key".to_string()));
+    }
+    let comic_id = payload.comic_id.trim();
+    let episode_id = payload.episode_id.trim();
+    if comic_id.is_empty() || episode_id.is_empty() {
+        return Err(ApiError::BadRequest(
+            "comic id and episode id are required".to_string(),
+        ));
+    }
+
+    let file_name = source_file_name(&state, &payload.source_key)?;
+    let source_path = state.config.sources_dir().join(file_name);
+    let pages =
+        source_runtime::comic_pages(&state.config, &source_path, comic_id, episode_id).await?;
+
+    Ok(Json(ComicPagesResponse {
+        source_key: payload.source_key,
+        comic_id: comic_id.to_string(),
+        episode_id: episode_id.to_string(),
+        images: pages.images,
     }))
 }
 
