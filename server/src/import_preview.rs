@@ -49,12 +49,27 @@ struct ImportedLibraryItem {
     timestamp_ms: Option<i64>,
 }
 
+struct ImportedFavoriteFolder {
+    name: String,
+    title: String,
+    sort_order: i64,
+}
+
+struct ImportedFavoriteFolderItem {
+    folder_name: String,
+    source_key: String,
+    comic_id: String,
+    timestamp_ms: Option<i64>,
+}
+
 struct ImportPlan {
     file_name: String,
     path: String,
     sources: Vec<ImportedSource>,
     source_data_files: Vec<ImportedSourceDataFile>,
     favorites: Vec<ImportedLibraryItem>,
+    favorite_folders: Vec<ImportedFavoriteFolder>,
+    favorite_folder_items: Vec<ImportedFavoriteFolderItem>,
     history: Vec<ImportedLibraryItem>,
     favorites_skipped: usize,
     history_skipped: usize,
@@ -195,6 +210,40 @@ pub async fn apply_backup(
                     &favorite.subtitle,
                     &favorite.cover,
                     favorite.timestamp_ms,
+                ],
+            )?;
+        }
+
+        transaction.execute("DELETE FROM favorite_folder_items", [])?;
+        transaction.execute("DELETE FROM favorite_folders", [])?;
+
+        for folder in &plan.favorite_folders {
+            transaction.execute(
+                r#"
+                INSERT INTO favorite_folders (folder_name, title, sort_order, updated_at)
+                VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP)
+                ON CONFLICT(folder_name) DO UPDATE SET
+                    title = excluded.title,
+                    sort_order = excluded.sort_order,
+                    updated_at = CURRENT_TIMESTAMP
+                "#,
+                params![&folder.name, &folder.title, folder.sort_order],
+            )?;
+        }
+
+        for item in &plan.favorite_folder_items {
+            transaction.execute(
+                r#"
+                INSERT INTO favorite_folder_items (folder_name, source_key, comic_id, created_at)
+                VALUES (?1, ?2, ?3, COALESCE(datetime(?4 / 1000, 'unixepoch'), CURRENT_TIMESTAMP))
+                ON CONFLICT(folder_name, source_key, comic_id) DO UPDATE SET
+                    created_at = excluded.created_at
+                "#,
+                params![
+                    &item.folder_name,
+                    &item.source_key,
+                    &item.comic_id,
+                    item.timestamp_ms,
                 ],
             )?;
         }
@@ -346,7 +395,7 @@ fn build_import_plan(
         history_path.as_deref(),
         &source_keys,
     );
-    let (favorites, favorites_skipped) =
+    let (favorites, favorite_folders, favorite_folder_items, favorites_skipped) =
         import_favorites(&domain, &type_map, favorite_path.as_deref())?;
     let (history, history_skipped) = import_history(&domain, &type_map, history_path.as_deref())?;
 
@@ -363,6 +412,8 @@ fn build_import_plan(
         sources,
         source_data_files,
         favorites,
+        favorite_folders,
+        favorite_folder_items,
         history,
         favorites_skipped,
         history_skipped,
@@ -644,20 +695,59 @@ fn import_favorites(
     domain: &DomainIndex,
     type_map: &HashMap<i64, String>,
     favorite_path: Option<&Path>,
-) -> ApiResult<(Vec<ImportedLibraryItem>, usize)> {
+) -> ApiResult<(
+    Vec<ImportedLibraryItem>,
+    Vec<ImportedFavoriteFolder>,
+    Vec<ImportedFavoriteFolderItem>,
+    usize,
+)> {
     let Some(path) = favorite_path else {
-        return Ok((Vec::new(), 0));
+        return Ok((Vec::new(), Vec::new(), Vec::new(), 0));
     };
 
+    let folder_order = read_favorite_folder_order(path)?;
+    let mut folders = BTreeMap::<String, ImportedFavoriteFolder>::new();
+    let mut folder_items_seen = HashSet::new();
+    let mut folder_items = Vec::new();
     let mut seen = HashSet::new();
     let mut imported = Vec::new();
     let mut skipped = 0;
     scan_favorite_rows(path, |row| {
+        let next_sort_order = folders.len() as i64;
+        let sort_order = folder_order
+            .get(&row.folder_name)
+            .copied()
+            .unwrap_or(next_sort_order);
+        folders
+            .entry(row.folder_name.clone())
+            .or_insert_with(|| ImportedFavoriteFolder {
+                name: row.folder_name.clone(),
+                title: row.folder_name.clone(),
+                sort_order,
+            });
+
         let Some(source_key) = resolve_source_key(domain, type_map, &row.comic_id, row.type_value)
         else {
             skipped += 1;
             return;
         };
+        let timestamp_ms = parse_favorite_time(row.time.clone()).or_else(|| {
+            domain
+                .record(&source_key, &row.comic_id)
+                .and_then(|value| value.timestamp_ms)
+        });
+        if folder_items_seen.insert((
+            row.folder_name.clone(),
+            source_key.clone(),
+            row.comic_id.clone(),
+        )) {
+            folder_items.push(ImportedFavoriteFolderItem {
+                folder_name: row.folder_name.clone(),
+                source_key: source_key.clone(),
+                comic_id: row.comic_id.clone(),
+                timestamp_ms,
+            });
+        }
         if !seen.insert((source_key.clone(), row.comic_id.clone())) {
             return;
         }
@@ -672,12 +762,16 @@ fn import_favorites(
             cover: first_non_empty(row.cover, record.and_then(|value| value.cover.clone())),
             episode_id: None,
             episode_title: None,
-            timestamp_ms: parse_favorite_time(row.time)
-                .or_else(|| record.and_then(|value| value.timestamp_ms)),
+            timestamp_ms,
         });
     })?;
 
-    Ok((imported, skipped))
+    Ok((
+        imported,
+        folders.into_values().collect(),
+        folder_items,
+        skipped,
+    ))
 }
 
 fn import_history(
@@ -727,6 +821,7 @@ fn import_history(
 }
 
 struct FavoriteRow {
+    folder_name: String,
     comic_id: String,
     title: Option<String>,
     author: Option<String>,
@@ -743,6 +838,33 @@ struct HistoryRow {
     time_ms: Option<i64>,
     type_value: i64,
     episode: Option<i64>,
+}
+
+fn read_favorite_folder_order(path: &Path) -> rusqlite::Result<HashMap<String, i64>> {
+    let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let has_folder_order = connection
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'folder_order'",
+            [],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if !has_folder_order {
+        return Ok(HashMap::new());
+    }
+
+    let mut statement = connection.prepare("SELECT folder_name, order_value FROM folder_order")?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?;
+
+    let mut order = HashMap::new();
+    for row in rows {
+        let (folder_name, order_value) = row?;
+        order.insert(folder_name, order_value);
+    }
+    Ok(order)
 }
 
 fn scan_favorite_rows(path: &Path, mut visit: impl FnMut(FavoriteRow)) -> rusqlite::Result<()> {
@@ -764,6 +886,7 @@ fn scan_favorite_rows(path: &Path, mut visit: impl FnMut(FavoriteRow)) -> rusqli
         ))?;
         let rows = statement.query_map([], |row| {
             Ok(FavoriteRow {
+                folder_name: table_name.clone(),
                 comic_id: row.get(0)?,
                 title: row.get(1)?,
                 author: row.get(2)?,

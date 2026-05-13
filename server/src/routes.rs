@@ -21,7 +21,7 @@ use crate::{
     image_proxy, import_preview,
     models::{
         CapabilitiesResponse, Capability, ComicInfoRequest, ComicInfoResponse, ComicPagesRequest,
-        ComicPagesResponse, DeleteResponse, FavoriteWriteRequest, HealthResponse,
+        ComicPagesResponse, DeleteResponse, FavoriteFolder, FavoriteWriteRequest, HealthResponse,
         HistoryWriteRequest, ImageProxyQuery, ImportBackupApplyRequest, ImportBackupApplyResponse,
         ImportBackupPreviewRequest, ImportBackupPreviewResponse, ImportBackupsResponse,
         LibraryItem, LibraryQuery, LibraryResponse, SearchRequest, SearchResponse, SettingsPatch,
@@ -654,15 +654,20 @@ struct LibraryWindow {
     history_offset: u32,
     favorites_limit: u32,
     favorites_offset: u32,
+    favorite_folder: Option<String>,
 }
 
 impl From<LibraryQuery> for LibraryWindow {
     fn from(query: LibraryQuery) -> Self {
+        let favorite_folder = query
+            .favorite_folder
+            .and_then(|value| (!value.trim().is_empty()).then(|| value.trim().to_string()));
         Self {
             history_limit: normalize_limit(query.history_limit, DEFAULT_HISTORY_LIMIT),
             history_offset: query.history_offset.unwrap_or(0),
             favorites_limit: normalize_limit(query.favorites_limit, DEFAULT_FAVORITES_LIMIT),
             favorites_offset: query.favorites_offset.unwrap_or(0),
+            favorite_folder,
         }
     }
 }
@@ -715,44 +720,110 @@ fn read_library(state: &AppState, query: LibraryQuery) -> ApiResult<LibraryRespo
         row.get::<_, u64>(0)
     })?;
 
-    let favorites = {
-        let mut statement = database.prepare(
-            r#"
-            SELECT source_key, comic_id, title, subtitle, cover, created_at
-            FROM favorites
-            ORDER BY created_at DESC
-            LIMIT ?1 OFFSET ?2
-            "#,
-        )?;
-        let rows = statement.query_map(
-            params![
-                i64::from(window.favorites_limit),
-                i64::from(window.favorites_offset)
-            ],
-            |row| {
-                Ok(LibraryItem {
-                    source_key: row.get(0)?,
-                    comic_id: row.get(1)?,
-                    title: row.get(2)?,
-                    subtitle: row.get(3)?,
-                    cover: row.get(4)?,
-                    episode_id: None,
-                    episode_title: None,
-                    updated_at: row.get(5)?,
-                })
-            },
-        )?;
-        rows.collect::<Result<Vec<_>, _>>()?
+    let favorite_folders = read_favorite_folders(&database)?;
+    let favorites = match window.favorite_folder.as_deref() {
+        Some(folder_name) => {
+            let mut statement = database.prepare(
+                r#"
+                SELECT f.source_key, f.comic_id, f.title, f.subtitle, f.cover, i.created_at
+                FROM favorite_folder_items i
+                JOIN favorites f ON f.source_key = i.source_key AND f.comic_id = i.comic_id
+                WHERE i.folder_name = ?1
+                ORDER BY i.created_at DESC
+                LIMIT ?2 OFFSET ?3
+                "#,
+            )?;
+            let rows = statement.query_map(
+                params![
+                    folder_name,
+                    i64::from(window.favorites_limit),
+                    i64::from(window.favorites_offset)
+                ],
+                library_item_from_favorite_row,
+            )?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        }
+        None => {
+            let mut statement = database.prepare(
+                r#"
+                SELECT source_key, comic_id, title, subtitle, cover, created_at
+                FROM favorites
+                ORDER BY created_at DESC
+                LIMIT ?1 OFFSET ?2
+                "#,
+            )?;
+            let rows = statement.query_map(
+                params![
+                    i64::from(window.favorites_limit),
+                    i64::from(window.favorites_offset)
+                ],
+                library_item_from_favorite_row,
+            )?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        }
     };
     let favorites_total = database.query_row("SELECT COUNT(*) FROM favorites", [], |row| {
         row.get::<_, u64>(0)
     })?;
+    let favorites_window_total = match window.favorite_folder.as_deref() {
+        Some(folder_name) => database.query_row(
+            "SELECT COUNT(*) FROM favorite_folder_items WHERE folder_name = ?1",
+            params![folder_name],
+            |row| row.get::<_, u64>(0),
+        )?,
+        None => favorites_total,
+    };
 
     Ok(LibraryResponse {
         history_total,
         favorites_total,
+        favorites_window_total,
         history,
         favorites,
+        favorite_folders,
+    })
+}
+
+fn read_favorite_folders(database: &rusqlite::Connection) -> rusqlite::Result<Vec<FavoriteFolder>> {
+    let mut statement = database.prepare(
+        r#"
+        SELECT folder_name, title, sort_order
+        FROM favorite_folders
+        ORDER BY sort_order ASC, title ASC
+        "#,
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
+        ))
+    })?;
+
+    let mut folders = Vec::new();
+    for row in rows {
+        let (name, title, _) = row?;
+        let count = database.query_row(
+            "SELECT COUNT(*) FROM favorite_folder_items WHERE folder_name = ?1",
+            params![&name],
+            |row| row.get::<_, u64>(0),
+        )?;
+        folders.push(FavoriteFolder { name, title, count });
+    }
+
+    Ok(folders)
+}
+
+fn library_item_from_favorite_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<LibraryItem> {
+    Ok(LibraryItem {
+        source_key: row.get(0)?,
+        comic_id: row.get(1)?,
+        title: row.get(2)?,
+        subtitle: row.get(3)?,
+        cover: row.get(4)?,
+        episode_id: None,
+        episode_title: None,
+        updated_at: row.get(5)?,
     })
 }
 

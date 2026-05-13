@@ -165,11 +165,20 @@ pub struct LibraryItem {
 }
 
 #[derive(Serialize)]
+pub struct FavoriteFolder {
+    pub name: String,
+    pub title: String,
+    pub count: u64,
+}
+
+#[derive(Serialize)]
 pub struct LibraryResponse {
     pub history_total: u64,
     pub favorites_total: u64,
+    pub favorites_window_total: u64,
     pub history: Vec<LibraryItem>,
     pub favorites: Vec<LibraryItem>,
+    pub favorite_folders: Vec<FavoriteFolder>,
 }
 
 #[derive(Default, Deserialize)]
@@ -178,6 +187,7 @@ pub struct LibraryQuery {
     pub history_offset: Option<u32>,
     pub favorites_limit: Option<u32>,
     pub favorites_offset: Option<u32>,
+    pub favorite_folder: Option<String>,
 }
 
 #[derive(Deserialize)]

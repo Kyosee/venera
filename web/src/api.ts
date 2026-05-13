@@ -99,11 +99,19 @@ export type LibraryItem = {
   updated_at: string | null
 }
 
+export type FavoriteFolder = {
+  name: string
+  title: string
+  count: number
+}
+
 export type LibraryResponse = {
   history_total: number
   favorites_total: number
+  favorites_window_total: number
   history: LibraryItem[]
   favorites: LibraryItem[]
+  favorite_folders: FavoriteFolder[]
 }
 
 export type LibraryQuery = {
@@ -111,6 +119,7 @@ export type LibraryQuery = {
   history_offset?: number
   favorites_limit?: number
   favorites_offset?: number
+  favorite_folder?: string
 }
 
 export type HistoryWriteRequest = {

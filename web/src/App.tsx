@@ -23,6 +23,7 @@ import {
   type ComicEpisode,
   type ComicInfo,
   type FavoriteWriteRequest,
+  type FavoriteFolder,
   type HistoryWriteRequest,
   type HealthResponse,
   type ImportBackupApplyResponse,
@@ -93,7 +94,14 @@ const emptyData: AppData = {
   health: null,
   settings: null,
   sources: [],
-  library: { history_total: 0, favorites_total: 0, history: [], favorites: [] }
+  library: {
+    history_total: 0,
+    favorites_total: 0,
+    favorites_window_total: 0,
+    history: [],
+    favorites: [],
+    favorite_folders: []
+  }
 }
 
 const libraryPageStep = 100
@@ -120,6 +128,7 @@ export default function App() {
   const [data, setData] = useState<AppData>(emptyData)
   const [loading, setLoading] = useState(true)
   const [loadingMoreLibrary, setLoadingMoreLibrary] = useState<'history' | 'favorites' | null>(null)
+  const [activeFavoriteFolder, setActiveFavoriteFolder] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [lastUpdated, setLastUpdated] = useState<string | null>(null)
 
@@ -134,6 +143,7 @@ export default function App() {
         getLibrary()
       ])
       setData({ health, settings, sources, library })
+      setActiveFavoriteFolder(null)
       setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour12: false }))
     } catch (err) {
       setError(err instanceof Error ? err.message : '服务端请求失败')
@@ -219,7 +229,8 @@ export default function App() {
         history_limit: kind === 'history' ? libraryPageStep : 0,
         history_offset: kind === 'history' ? data.library.history.length : 0,
         favorites_limit: kind === 'favorites' ? libraryPageStep : 0,
-        favorites_offset: kind === 'favorites' ? data.library.favorites.length : 0
+        favorites_offset: kind === 'favorites' ? data.library.favorites.length : 0,
+        favorite_folder: kind === 'favorites' && activeFavoriteFolder ? activeFavoriteFolder : undefined
       })
       setData((current) => ({
         ...current,
@@ -237,6 +248,39 @@ export default function App() {
       }))
     } catch (err) {
       setError(err instanceof Error ? err.message : '资料库加载失败')
+    } finally {
+      setLoadingMoreLibrary(null)
+    }
+  }
+
+  const selectFavoriteFolder = async (folder: string | null) => {
+    setActiveFavoriteFolder(folder)
+    setLoadingMoreLibrary('favorites')
+    setError(null)
+    setData((current) => ({
+      ...current,
+      library: {
+        ...current.library,
+        favorites: [],
+        favorites_window_total: 0
+      }
+    }))
+    try {
+      const library = await getLibrary({
+        history_limit: 0,
+        favorites_limit: 50,
+        favorites_offset: 0,
+        favorite_folder: folder ?? undefined
+      })
+      setData((current) => ({
+        ...current,
+        library: {
+          ...library,
+          history: current.library.history
+        }
+      }))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '收藏文件夹加载失败')
     } finally {
       setLoadingMoreLibrary(null)
     }
@@ -274,15 +318,17 @@ export default function App() {
             />
           ) : null}
           {activeTab === 'favorites' ? (
-            <LibraryView
-              title="收藏"
-              icon={Heart}
+            <FavoritesView
               items={data.library.favorites}
-              total={data.library.favorites_total}
-              emptyText="暂无收藏"
+              total={data.library.favorites_window_total}
+              allTotal={data.library.favorites_total}
+              folders={data.library.favorite_folders}
+              activeFolder={activeFavoriteFolder}
+              loadingFolder={loadingMoreLibrary === 'favorites' && data.library.favorites.length === 0}
               loadingMore={loadingMoreLibrary === 'favorites'}
+              onFolderSelect={selectFavoriteFolder}
               onLoadMore={
-                data.library.favorites.length < data.library.favorites_total
+                data.library.favorites.length < data.library.favorites_window_total
                   ? () => loadMoreLibrary('favorites')
                   : undefined
               }
@@ -827,6 +873,112 @@ function ComicDetails({
         </div>
       ) : null}
     </div>
+  )
+}
+
+function FavoritesView({
+  items,
+  total,
+  allTotal,
+  folders,
+  activeFolder,
+  loadingFolder,
+  loadingMore = false,
+  onFolderSelect,
+  onLoadMore,
+  onRecordHistory
+}: {
+  items: LibraryItem[]
+  total: number
+  allTotal: number
+  folders: FavoriteFolder[]
+  activeFolder: string | null
+  loadingFolder?: boolean
+  loadingMore?: boolean
+  onFolderSelect: (folder: string | null) => Promise<void>
+  onLoadMore?: () => void
+  onRecordHistory: (payload: HistoryWriteRequest) => Promise<void>
+}) {
+  const [selectedItem, setSelectedItem] = useState<LibraryItem | null>(null)
+  const activeFolderTitle =
+    activeFolder == null
+      ? '全部'
+      : folders.find((folder) => folder.name === activeFolder)?.title ?? activeFolder
+
+  return (
+    <div className="favorite-layout">
+      <aside className="favorite-folder-panel" aria-label="收藏文件夹">
+        <div className="folder-section-title">本地收藏</div>
+        <FavoriteFolderButton
+          title="全部"
+          count={allTotal}
+          active={activeFolder == null}
+          onClick={() => onFolderSelect(null)}
+        />
+        {folders.map((folder) => (
+          <FavoriteFolderButton
+            key={folder.name}
+            title={folder.title}
+            count={folder.count}
+            active={activeFolder === folder.name}
+            onClick={() => onFolderSelect(folder.name)}
+          />
+        ))}
+      </aside>
+      <div className="view-stack">
+        <Panel title={activeFolderTitle} action={String(total)}>
+          {loadingFolder ? (
+            <EmptyLine icon={Loader2} text="加载收藏中" />
+          ) : (
+            <LibraryList
+              items={items}
+              emptyText="暂无收藏"
+              icon={Heart}
+              onSelect={setSelectedItem}
+            />
+          )}
+          {onLoadMore ? (
+            <button
+              className="icon-text-button subtle library-more-button"
+              type="button"
+              disabled={loadingMore}
+              onClick={onLoadMore}
+            >
+              {loadingMore ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />}
+              {loadingMore ? '加载中' : `加载更多 (${items.length}/${total})`}
+            </button>
+          ) : null}
+        </Panel>
+        {selectedItem ? (
+          <Panel title="漫画详情">
+            <LibraryReader item={selectedItem} onRecordHistory={onRecordHistory} />
+          </Panel>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function FavoriteFolderButton({
+  title,
+  count,
+  active,
+  onClick
+}: {
+  title: string
+  count: number
+  active: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      className={active ? 'favorite-folder-button active' : 'favorite-folder-button'}
+      type="button"
+      onClick={onClick}
+    >
+      <span>{title}</span>
+      <small>{count}</small>
+    </button>
   )
 }
 
