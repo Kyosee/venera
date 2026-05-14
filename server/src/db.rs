@@ -38,6 +38,8 @@ fn ensure_schema_upgrades(connection: &Connection) -> rusqlite::Result<()> {
         "last_check_time",
         "last_check_time INTEGER",
     )?;
+    add_column_if_missing(connection, "reading_history", "page", "page INTEGER")?;
+    add_column_if_missing(connection, "reading_history", "max_page", "max_page INTEGER")?;
     connection.execute(
         r#"
         CREATE INDEX IF NOT EXISTS idx_favorite_folder_items_updates

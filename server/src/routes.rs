@@ -37,7 +37,8 @@ use crate::{
         SourcePageManifest, SourcePagesResponse, SourcePatchRequest, SourceSettingPatchRequest,
         SourceSettingsResponse, SourceSummary, SourceWriteRequest, TaskSummary, TasksResponse,
         WebDavConfigRequest, WebDavConfigResponse, WebDavDownloadRequest, WebDavDownloadResponse,
-        WebDavListRequest, WebDavListResponse, WebDavUploadRequest, WebDavUploadResponse,
+        WebDavListRequest, WebDavListResponse, WebDavSyncDownloadResponse, WebDavUploadRequest,
+        WebDavUploadResponse,
     },
     source_runtime,
     state::AppState,
@@ -72,6 +73,7 @@ pub fn api_router() -> Router<AppState> {
         )
         .route("/webdav/list", post(list_webdav))
         .route("/webdav/download", post(download_webdav))
+        .route("/webdav/download-latest", post(download_latest_webdav))
         .route("/webdav/upload", post(upload_webdav))
         .route("/imports/backups", get(list_import_backups))
         .route("/imports/preview", post(preview_import_backup))
@@ -300,15 +302,17 @@ async fn upsert_history(
         database.execute(
             r#"
             INSERT INTO reading_history (
-                source_key, comic_id, title, subtitle, cover, episode_id, episode_title, updated_at
+                source_key, comic_id, title, subtitle, cover, episode_id, episode_title, page, max_page, updated_at
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, CURRENT_TIMESTAMP)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, CURRENT_TIMESTAMP)
             ON CONFLICT(source_key, comic_id) DO UPDATE SET
                 title = excluded.title,
                 subtitle = excluded.subtitle,
                 cover = excluded.cover,
                 episode_id = excluded.episode_id,
                 episode_title = excluded.episode_title,
+                page = excluded.page,
+                max_page = excluded.max_page,
                 updated_at = CURRENT_TIMESTAMP
             "#,
             params![
@@ -319,6 +323,8 @@ async fn upsert_history(
                 payload.cover,
                 payload.episode_id.trim(),
                 payload.episode_title.trim(),
+                payload.page,
+                payload.max_page,
             ],
         )?;
     }
@@ -537,6 +543,9 @@ async fn save_webdav_config(
             params![endpoint_url, username, password, root_path],
         )?;
     }
+    if let Some(auto_sync) = payload.auto_sync {
+        write_setting_value(&state, "webdavAutoSync", json!(auto_sync))?;
+    }
 
     Ok(Json(read_webdav_config_response(&state)?))
 }
@@ -551,6 +560,7 @@ async fn clear_webdav_config(
             .map_err(|_| ApiError::State("database lock poisoned".to_string()))?;
         database.execute("DELETE FROM webdav_config WHERE id = 1", [])?;
     }
+    write_setting_value(&state, "webdavAutoSync", json!(false))?;
 
     Ok(Json(read_webdav_config_response(&state)?))
 }
@@ -586,11 +596,62 @@ async fn download_webdav(
     Ok(Json(response))
 }
 
+async fn download_latest_webdav(
+    State(state): State<AppState>,
+) -> ApiResult<Json<WebDavSyncDownloadResponse>> {
+    let webdav_config = read_webdav_config(&state)?;
+    let local_version = read_data_version(&state)?;
+    let listing = webdav_runtime::list(&state.config, &webdav_config, "").await?;
+    let latest = listing
+        .entries
+        .into_iter()
+        .filter(|entry| !entry.is_dir && entry.name.ends_with(".venera"))
+        .max_by(|left, right| left.name.cmp(&right.name))
+        .ok_or_else(|| ApiError::WebDav("No data file found".to_string()))?;
+    let remote_version = data_version_from_file_name(&latest.name);
+    if remote_version.is_some_and(|version| version <= local_version) {
+        return Ok(Json(WebDavSyncDownloadResponse {
+            skipped: true,
+            message: "No new data to download".to_string(),
+            local_version,
+            remote_version,
+            download: None,
+            import_result: None,
+        }));
+    }
+
+    let import_dir = state.config.imports_dir().join("webdav");
+    fs::create_dir_all(&import_dir).await?;
+    let file_name = local_import_file_name(&latest.path);
+    let local_path = import_dir.join(&file_name);
+    let download =
+        webdav_runtime::download(&state.config, &webdav_config, &latest.path, &local_path).await?;
+    let import_path = format!("webdav/{file_name}");
+    let import_result = import_preview::apply_backup(&state, &import_path).await?;
+    if let Some(version) = remote_version {
+        write_data_version(&state, version)?;
+    }
+    let local_version = match remote_version {
+        Some(version) => version,
+        None => read_data_version(&state)?,
+    };
+
+    Ok(Json(WebDavSyncDownloadResponse {
+        skipped: false,
+        message: "Data downloaded successfully".to_string(),
+        local_version,
+        remote_version,
+        download: Some(download),
+        import_result: Some(import_result),
+    }))
+}
+
 async fn upload_webdav(
     State(state): State<AppState>,
     Json(payload): Json<WebDavUploadRequest>,
 ) -> ApiResult<Json<WebDavUploadResponse>> {
     let backup = backup_export::export_backup(&state).await?;
+    let next_version = data_version_from_file_name(&backup.file_name);
     if payload.dry_run.unwrap_or(false) {
         return Ok(Json(backup));
     }
@@ -604,6 +665,9 @@ async fn upload_webdav(
         &local_path,
     )
     .await?;
+    if let Some(next_version) = next_version {
+        write_data_version(&state, next_version)?;
+    }
     Ok(Json(response))
 }
 
@@ -1151,7 +1215,7 @@ fn read_library(state: &AppState, query: LibraryQuery) -> ApiResult<LibraryRespo
     let history = {
         let mut statement = database.prepare(
             r#"
-            SELECT source_key, comic_id, title, subtitle, cover, episode_id, episode_title, updated_at
+            SELECT source_key, comic_id, title, subtitle, cover, episode_id, episode_title, page, max_page, updated_at
             FROM reading_history
             ORDER BY updated_at DESC
             LIMIT ?1 OFFSET ?2
@@ -1171,7 +1235,9 @@ fn read_library(state: &AppState, query: LibraryQuery) -> ApiResult<LibraryRespo
                     cover: row.get(4)?,
                     episode_id: row.get(5)?,
                     episode_title: row.get(6)?,
-                    updated_at: row.get(7)?,
+                    page: row.get(7)?,
+                    max_page: row.get(8)?,
+                    updated_at: row.get(9)?,
                 })
             },
         )?;
@@ -1284,7 +1350,24 @@ fn library_item_from_favorite_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<L
         cover: row.get(4)?,
         episode_id: None,
         episode_title: None,
+        page: None,
+        max_page: None,
         updated_at: row.get(5)?,
+    })
+}
+
+fn library_item_from_follow_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<LibraryItem> {
+    Ok(LibraryItem {
+        source_key: row.get(0)?,
+        comic_id: row.get(1)?,
+        title: row.get(2)?,
+        subtitle: row.get(3)?,
+        cover: row.get(4)?,
+        episode_id: None,
+        episode_title: None,
+        page: row.get(5)?,
+        max_page: row.get(6)?,
+        updated_at: row.get(7)?,
     })
 }
 
@@ -1302,7 +1385,7 @@ fn read_follow_updates(
         .lock()
         .map_err(|_| ApiError::State("database lock poisoned".to_string()))?;
 
-    let (all_total, updated_total, updated, all) = match folder.as_deref() {
+    let (all_total, updated_total, unread_total, ended_total, updated, unread, ended, all) = match folder.as_deref() {
         Some(folder_name) => {
             let all_total = database.query_row(
                 "SELECT COUNT(*) FROM favorite_folder_items WHERE folder_name = ?1",
@@ -1318,12 +1401,37 @@ fn read_follow_updates(
                 params![folder_name],
                 |row| row.get::<_, u64>(0),
             )?;
+            let unread_total = database.query_row(
+                r#"
+                SELECT COUNT(*)
+                FROM favorite_folder_items i
+                LEFT JOIN reading_history h ON h.source_key = i.source_key AND h.comic_id = i.comic_id
+                WHERE i.folder_name = ?1
+                  AND (h.max_page IS NULL OR h.page IS NULL OR h.page < h.max_page)
+                "#,
+                params![folder_name],
+                |row| row.get::<_, u64>(0),
+            )?;
+            let ended_total = database.query_row(
+                r#"
+                SELECT COUNT(*)
+                FROM favorite_folder_items i
+                JOIN reading_history h ON h.source_key = i.source_key AND h.comic_id = i.comic_id
+                WHERE i.folder_name = ?1
+                  AND h.max_page IS NOT NULL
+                  AND h.page IS NOT NULL
+                  AND h.page >= h.max_page
+                "#,
+                params![folder_name],
+                |row| row.get::<_, u64>(0),
+            )?;
             let mut statement = database.prepare(
                 r#"
                 SELECT f.source_key, f.comic_id, f.title, f.subtitle, f.cover,
-                       COALESCE(i.last_update_time, i.created_at)
+                       h.page, h.max_page, COALESCE(i.last_update_time, i.created_at)
                 FROM favorite_folder_items i
                 JOIN favorites f ON f.source_key = i.source_key AND f.comic_id = i.comic_id
+                LEFT JOIN reading_history h ON h.source_key = i.source_key AND h.comic_id = i.comic_id
                 WHERE i.folder_name = ?1 AND i.has_new_update != 0
                 ORDER BY COALESCE(i.last_update_time, i.created_at) DESC
                 LIMIT ?2 OFFSET ?3
@@ -1331,15 +1439,54 @@ fn read_follow_updates(
             )?;
             let rows = statement.query_map(
                 params![folder_name, i64::from(limit), i64::from(offset)],
-                library_item_from_favorite_row,
+                library_item_from_follow_row,
             )?;
             let updated = rows.collect::<Result<Vec<_>, _>>()?;
+            let mut unread_statement = database.prepare(
+                r#"
+                SELECT f.source_key, f.comic_id, f.title, f.subtitle, f.cover,
+                       h.page, h.max_page, COALESCE(i.last_update_time, i.created_at)
+                FROM favorite_folder_items i
+                JOIN favorites f ON f.source_key = i.source_key AND f.comic_id = i.comic_id
+                LEFT JOIN reading_history h ON h.source_key = i.source_key AND h.comic_id = i.comic_id
+                WHERE i.folder_name = ?1
+                  AND (h.max_page IS NULL OR h.page IS NULL OR h.page < h.max_page)
+                ORDER BY i.has_new_update DESC, COALESCE(i.last_update_time, i.created_at) DESC
+                LIMIT ?2 OFFSET ?3
+                "#,
+            )?;
+            let unread_rows = unread_statement.query_map(
+                params![folder_name, i64::from(limit), i64::from(offset)],
+                library_item_from_follow_row,
+            )?;
+            let unread = unread_rows.collect::<Result<Vec<_>, _>>()?;
+            let mut ended_statement = database.prepare(
+                r#"
+                SELECT f.source_key, f.comic_id, f.title, f.subtitle, f.cover,
+                       h.page, h.max_page, COALESCE(i.last_update_time, i.created_at)
+                FROM favorite_folder_items i
+                JOIN favorites f ON f.source_key = i.source_key AND f.comic_id = i.comic_id
+                JOIN reading_history h ON h.source_key = i.source_key AND h.comic_id = i.comic_id
+                WHERE i.folder_name = ?1
+                  AND h.max_page IS NOT NULL
+                  AND h.page IS NOT NULL
+                  AND h.page >= h.max_page
+                ORDER BY COALESCE(i.last_update_time, i.created_at) DESC
+                LIMIT ?2 OFFSET ?3
+                "#,
+            )?;
+            let ended_rows = ended_statement.query_map(
+                params![folder_name, i64::from(limit), i64::from(offset)],
+                library_item_from_follow_row,
+            )?;
+            let ended = ended_rows.collect::<Result<Vec<_>, _>>()?;
             let mut all_statement = database.prepare(
                 r#"
                 SELECT f.source_key, f.comic_id, f.title, f.subtitle, f.cover,
-                       COALESCE(i.last_update_time, i.created_at)
+                       h.page, h.max_page, COALESCE(i.last_update_time, i.created_at)
                 FROM favorite_folder_items i
                 JOIN favorites f ON f.source_key = i.source_key AND f.comic_id = i.comic_id
+                LEFT JOIN reading_history h ON h.source_key = i.source_key AND h.comic_id = i.comic_id
                 WHERE i.folder_name = ?1
                 ORDER BY i.has_new_update DESC, COALESCE(i.last_update_time, i.created_at) DESC
                 LIMIT ?2 OFFSET ?3
@@ -1347,12 +1494,16 @@ fn read_follow_updates(
             )?;
             let all_rows = all_statement.query_map(
                 params![folder_name, i64::from(limit), i64::from(offset)],
-                library_item_from_favorite_row,
+                library_item_from_follow_row,
             )?;
             (
                 all_total,
                 updated_total,
+                unread_total,
+                ended_total,
                 updated,
+                unread,
+                ended,
                 all_rows.collect::<Result<Vec<_>, _>>()?,
             )
         }
@@ -1374,12 +1525,36 @@ fn read_follow_updates(
                 [],
                 |row| row.get::<_, u64>(0),
             )?;
+            let unread_total = database.query_row(
+                r#"
+                SELECT COUNT(DISTINCT i.source_key || char(31) || i.comic_id)
+                FROM favorite_folder_items i
+                LEFT JOIN reading_history h ON h.source_key = i.source_key AND h.comic_id = i.comic_id
+                WHERE h.max_page IS NULL OR h.page IS NULL OR h.page < h.max_page
+                "#,
+                [],
+                |row| row.get::<_, u64>(0),
+            )?;
+            let ended_total = database.query_row(
+                r#"
+                SELECT COUNT(DISTINCT i.source_key || char(31) || i.comic_id)
+                FROM favorite_folder_items i
+                JOIN reading_history h ON h.source_key = i.source_key AND h.comic_id = i.comic_id
+                WHERE h.max_page IS NOT NULL
+                  AND h.page IS NOT NULL
+                  AND h.page >= h.max_page
+                "#,
+                [],
+                |row| row.get::<_, u64>(0),
+            )?;
             let mut statement = database.prepare(
                 r#"
                 SELECT f.source_key, f.comic_id, f.title, f.subtitle, f.cover,
+                       MAX(h.page) AS page, MAX(h.max_page) AS max_page,
                        MAX(COALESCE(i.last_update_time, i.created_at)) AS updated_at
                 FROM favorite_folder_items i
                 JOIN favorites f ON f.source_key = i.source_key AND f.comic_id = i.comic_id
+                LEFT JOIN reading_history h ON h.source_key = i.source_key AND h.comic_id = i.comic_id
                 WHERE i.has_new_update != 0
                 GROUP BY f.source_key, f.comic_id
                 ORDER BY updated_at DESC
@@ -1388,16 +1563,59 @@ fn read_follow_updates(
             )?;
             let rows = statement.query_map(
                 params![i64::from(limit), i64::from(offset)],
-                library_item_from_favorite_row,
+                library_item_from_follow_row,
             )?;
             let updated = rows.collect::<Result<Vec<_>, _>>()?;
-            let mut all_statement = database.prepare(
+            let mut unread_statement = database.prepare(
                 r#"
                 SELECT f.source_key, f.comic_id, f.title, f.subtitle, f.cover,
+                       MAX(h.page) AS page, MAX(h.max_page) AS max_page,
                        MAX(COALESCE(i.last_update_time, i.created_at)) AS updated_at,
                        MAX(i.has_new_update) AS has_update
                 FROM favorite_folder_items i
                 JOIN favorites f ON f.source_key = i.source_key AND f.comic_id = i.comic_id
+                LEFT JOIN reading_history h ON h.source_key = i.source_key AND h.comic_id = i.comic_id
+                WHERE h.max_page IS NULL OR h.page IS NULL OR h.page < h.max_page
+                GROUP BY f.source_key, f.comic_id
+                ORDER BY has_update DESC, updated_at DESC
+                LIMIT ?1 OFFSET ?2
+                "#,
+            )?;
+            let unread_rows = unread_statement.query_map(
+                params![i64::from(limit), i64::from(offset)],
+                library_item_from_follow_row,
+            )?;
+            let unread = unread_rows.collect::<Result<Vec<_>, _>>()?;
+            let mut ended_statement = database.prepare(
+                r#"
+                SELECT f.source_key, f.comic_id, f.title, f.subtitle, f.cover,
+                       MAX(h.page) AS page, MAX(h.max_page) AS max_page,
+                       MAX(COALESCE(i.last_update_time, i.created_at)) AS updated_at
+                FROM favorite_folder_items i
+                JOIN favorites f ON f.source_key = i.source_key AND f.comic_id = i.comic_id
+                JOIN reading_history h ON h.source_key = i.source_key AND h.comic_id = i.comic_id
+                WHERE h.max_page IS NOT NULL
+                  AND h.page IS NOT NULL
+                  AND h.page >= h.max_page
+                GROUP BY f.source_key, f.comic_id
+                ORDER BY updated_at DESC
+                LIMIT ?1 OFFSET ?2
+                "#,
+            )?;
+            let ended_rows = ended_statement.query_map(
+                params![i64::from(limit), i64::from(offset)],
+                library_item_from_follow_row,
+            )?;
+            let ended = ended_rows.collect::<Result<Vec<_>, _>>()?;
+            let mut all_statement = database.prepare(
+                r#"
+                SELECT f.source_key, f.comic_id, f.title, f.subtitle, f.cover,
+                       MAX(h.page) AS page, MAX(h.max_page) AS max_page,
+                       MAX(COALESCE(i.last_update_time, i.created_at)) AS updated_at,
+                       MAX(i.has_new_update) AS has_update
+                FROM favorite_folder_items i
+                JOIN favorites f ON f.source_key = i.source_key AND f.comic_id = i.comic_id
+                LEFT JOIN reading_history h ON h.source_key = i.source_key AND h.comic_id = i.comic_id
                 GROUP BY f.source_key, f.comic_id
                 ORDER BY has_update DESC, updated_at DESC
                 LIMIT ?1 OFFSET ?2
@@ -1405,12 +1623,16 @@ fn read_follow_updates(
             )?;
             let all_rows = all_statement.query_map(
                 params![i64::from(limit), i64::from(offset)],
-                library_item_from_favorite_row,
+                library_item_from_follow_row,
             )?;
             (
                 all_total,
                 updated_total,
+                unread_total,
+                ended_total,
                 updated,
+                unread,
+                ended,
                 all_rows.collect::<Result<Vec<_>, _>>()?,
             )
         }
@@ -1419,8 +1641,12 @@ fn read_follow_updates(
     Ok(FollowUpdatesResponse {
         folder,
         updated_total,
+        unread_total,
+        ended_total,
         all_total,
         updated,
+        unread,
+        ended,
         all,
     })
 }
@@ -1913,6 +2139,7 @@ fn validate_library_key(source_key: &str, comic_id: &str) -> ApiResult<()> {
 }
 
 fn read_webdav_config_response(state: &AppState) -> ApiResult<WebDavConfigResponse> {
+    let auto_sync = read_bool_setting(state, "webdavAutoSync", false)?;
     let database = state
         .database
         .lock()
@@ -1938,6 +2165,7 @@ fn read_webdav_config_response(state: &AppState) -> ApiResult<WebDavConfigRespon
             endpoint_url: Some(endpoint_url),
             username,
             root_path,
+            auto_sync,
             password_configured: password.is_some_and(|value| !value.is_empty()),
             read_only: false,
             updated_at,
@@ -1948,6 +2176,7 @@ fn read_webdav_config_response(state: &AppState) -> ApiResult<WebDavConfigRespon
         endpoint_url: None,
         username: None,
         root_path: "/".to_string(),
+        auto_sync,
         password_configured: false,
         read_only: false,
         updated_at: None,
@@ -1977,7 +2206,95 @@ fn read_webdav_config(state: &AppState) -> ApiResult<WebDavConfig> {
                 ApiError::BadRequest("webdav config is missing".to_string())
             }
             other => ApiError::Database(other),
+    })
+}
+
+fn read_bool_setting(state: &AppState, key: &str, default: bool) -> ApiResult<bool> {
+    let database = state
+        .database
+        .lock()
+        .map_err(|_| ApiError::State("database lock poisoned".to_string()))?;
+    let value = database
+        .query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| {
+            row.get::<_, String>(0)
         })
+        .optional()?;
+    Ok(value
+        .as_deref()
+        .and_then(parse_setting_bool)
+        .unwrap_or(default))
+}
+
+fn read_data_version(state: &AppState) -> ApiResult<i64> {
+    let database = state
+        .database
+        .lock()
+        .map_err(|_| ApiError::State("database lock poisoned".to_string()))?;
+    let value = database
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'dataVersion'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    Ok(value
+        .as_deref()
+        .and_then(parse_setting_i64)
+        .unwrap_or(0))
+}
+
+fn write_data_version(state: &AppState, value: i64) -> ApiResult<()> {
+    write_setting_value(state, "dataVersion", json!(value))
+}
+
+fn write_setting_value(state: &AppState, key: &str, value: Value) -> ApiResult<()> {
+    let database = state
+        .database
+        .lock()
+        .map_err(|_| ApiError::State("database lock poisoned".to_string()))?;
+    database.execute(
+        r#"
+        INSERT INTO settings (key, value, updated_at)
+        VALUES (?1, ?2, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            updated_at = CURRENT_TIMESTAMP
+        "#,
+        params![key, value.to_string()],
+    )?;
+    Ok(())
+}
+
+fn parse_setting_bool(value: &str) -> Option<bool> {
+    serde_json::from_str::<Value>(value)
+        .ok()
+        .and_then(|value| {
+            value
+                .as_bool()
+                .or_else(|| value.as_str().and_then(|text| text.parse::<bool>().ok()))
+        })
+        .or_else(|| value.parse::<bool>().ok())
+}
+
+fn parse_setting_i64(value: &str) -> Option<i64> {
+    serde_json::from_str::<Value>(value)
+        .ok()
+        .and_then(|value| {
+            value
+                .as_i64()
+                .or_else(|| value.as_str().and_then(|text| text.parse::<i64>().ok()))
+        })
+        .or_else(|| value.parse::<i64>().ok())
+}
+
+fn data_version_from_file_name(file_name: &str) -> Option<i64> {
+    file_name
+        .split('-')
+        .nth(1)?
+        .split('.')
+        .next()?
+        .parse::<i64>()
+        .ok()
 }
 
 fn normalize_remote_path(value: &str) -> ApiResult<String> {

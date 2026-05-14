@@ -92,7 +92,7 @@ impl ExportSnapshot {
     fn load(database: &Connection) -> rusqlite::Result<Self> {
         let sources = read_sources(database)?;
         let type_map = build_type_map(&sources);
-        let data_version = current_unix_seconds();
+        let data_version = read_data_version(database) + 1;
         let folders = read_folders(database)?;
         let all_favorites = read_all_favorites(database, &type_map)?;
         let favorites = read_folder_favorites(database, &type_map)?;
@@ -126,6 +126,29 @@ fn read_sources(database: &Connection) -> rusqlite::Result<Vec<ExportSource>> {
         source.type_value = legacy_type_value(&source.key).unwrap_or(900_000 + index as i64);
     }
     Ok(rows)
+}
+
+fn read_data_version(database: &Connection) -> i64 {
+    database
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'dataVersion'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()
+        .and_then(|value| parse_setting_i64(&value))
+        .unwrap_or(0)
+}
+
+fn parse_setting_i64(value: &str) -> Option<i64> {
+    serde_json::from_str::<serde_json::Value>(value)
+        .ok()
+        .and_then(|value| {
+            value
+                .as_i64()
+                .or_else(|| value.as_str().and_then(|text| text.parse::<i64>().ok()))
+        })
+        .or_else(|| value.parse::<i64>().ok())
 }
 
 fn read_folders(database: &Connection) -> rusqlite::Result<Vec<ExportFolder>> {
@@ -259,11 +282,11 @@ fn write_backup(
     fs::create_dir_all(tmp_dir)?;
 
     let day = current_unix_millis() / 86_400_000;
-    let mut file_name = format!("{day}-{}-webpwa.venera", snapshot.data_version);
+    let mut file_name = format!("{day}-{}.venera", snapshot.data_version);
     let mut local_path = backup_dir.join(&file_name);
     if local_path.exists() {
         file_name = format!(
-            "{day}-{}-webpwa-{}.venera",
+            "{day}-{}-{}.venera",
             snapshot.data_version,
             current_unix_millis()
         );
@@ -514,10 +537,6 @@ fn non_empty_folder(value: &str) -> String {
 
 fn quote_identifier(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\"\""))
-}
-
-fn current_unix_seconds() -> i64 {
-    current_unix_millis() / 1000
 }
 
 fn current_unix_millis() -> i64 {

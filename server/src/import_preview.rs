@@ -68,6 +68,7 @@ struct ImportedFavoriteFolderItem {
 struct ImportPlan {
     file_name: String,
     path: String,
+    data_version: Option<i64>,
     sources: Vec<ImportedSource>,
     source_data_files: Vec<ImportedSourceDataFile>,
     favorites: Vec<ImportedLibraryItem>,
@@ -315,6 +316,10 @@ pub async fn apply_backup(
         transaction.commit()?;
     }
 
+    if let Some(data_version) = plan.data_version {
+        write_data_version(state, data_version)?;
+    }
+
     Ok(ImportBackupApplyResponse {
         file_name: plan.file_name,
         path: plan.path,
@@ -408,6 +413,7 @@ fn build_import_plan(
         .file_name()
         .map(|value| value.to_string_lossy().to_string())
         .unwrap_or_else(|| "backup.venera".to_string());
+    let data_version = read_backup_data_version(&mut archive)?;
     let sources = read_source_files(&mut archive)?;
     let source_data_files = read_source_data_files(&mut archive)?;
     let explicit_type_map = read_source_type_map(&mut archive)?;
@@ -448,6 +454,7 @@ fn build_import_plan(
     Ok(ImportPlan {
         file_name,
         path: relative_path,
+        data_version,
         sources,
         source_data_files,
         favorites,
@@ -457,6 +464,46 @@ fn build_import_plan(
         favorites_skipped,
         history_skipped,
     })
+}
+
+fn write_data_version(state: &AppState, data_version: i64) -> ApiResult<()> {
+    let database = state
+        .database
+        .lock()
+        .map_err(|_| ApiError::State("database lock poisoned".to_string()))?;
+    database.execute(
+        r#"
+        INSERT INTO settings (key, value, updated_at)
+        VALUES ('dataVersion', ?1, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            updated_at = CURRENT_TIMESTAMP
+        "#,
+        [data_version.to_string()],
+    )?;
+    Ok(())
+}
+
+fn read_backup_data_version(archive: &mut ZipArchive<File>) -> ApiResult<Option<i64>> {
+    let mut entry = match archive.by_name("appdata.json") {
+        Ok(entry) => entry,
+        Err(ZipError::FileNotFound) => return Ok(None),
+        Err(err) => return Err(zip_error(err)),
+    };
+    let mut text = String::new();
+    entry.read_to_string(&mut text)?;
+    let value: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|err| ApiError::ImportPreview(format!("invalid appdata.json: {err}")))?;
+    Ok(value
+        .get("settings")
+        .and_then(|settings| settings.get("dataVersion"))
+        .and_then(json_i64))
+}
+
+fn json_i64(value: &serde_json::Value) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_str().and_then(|text| text.parse::<i64>().ok()))
 }
 
 #[derive(Clone, Default)]

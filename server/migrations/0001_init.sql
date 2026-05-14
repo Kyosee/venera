@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS reading_history (
     cover TEXT,
     episode_id TEXT,
     episode_title TEXT,
+    page INTEGER,
+    max_page INTEGER,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (source_key, comic_id)
 );

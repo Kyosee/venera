@@ -190,6 +190,8 @@ export type LibraryItem = {
   cover: string | null
   episode_id: string | null
   episode_title: string | null
+  page: number | null
+  max_page: number | null
   updated_at: string | null
 }
 
@@ -219,8 +221,12 @@ export type LibraryQuery = {
 export type FollowUpdatesResponse = {
   folder: string | null
   updated_total: number
+  unread_total: number
+  ended_total: number
   all_total: number
   updated: LibraryItem[]
+  unread: LibraryItem[]
+  ended: LibraryItem[]
   all: LibraryItem[]
 }
 
@@ -264,6 +270,8 @@ export type HistoryWriteRequest = {
   cover: string | null
   episode_id: string
   episode_title: string
+  page?: number
+  max_page?: number
 }
 
 export type FavoriteWriteRequest = {
@@ -279,6 +287,7 @@ export type WebDavConfigResponse = {
   endpoint_url: string | null
   username: string | null
   root_path: string
+  auto_sync: boolean
   password_configured: boolean
   read_only: boolean
   updated_at: string | null
@@ -289,6 +298,7 @@ export type WebDavConfigRequest = {
   username?: string
   password?: string
   root_path?: string
+  auto_sync?: boolean
 }
 
 export type WebDavEntry = {
@@ -320,6 +330,15 @@ export type WebDavUploadResponse = {
   size: number
   uploaded: boolean
   content_type: string | null
+}
+
+export type WebDavSyncDownloadResponse = {
+  skipped: boolean
+  message: string
+  local_version: number
+  remote_version: number | null
+  download: WebDavDownloadResponse | null
+  import_result: ImportBackupApplyResponse | null
 }
 
 export type ImportBackupSummary = {
@@ -487,6 +506,12 @@ export function downloadWebDav(path: string) {
   return request<WebDavDownloadResponse>('/api/webdav/download', {
     method: 'POST',
     body: JSON.stringify({ path })
+  })
+}
+
+export function downloadLatestWebDav() {
+  return request<WebDavSyncDownloadResponse>('/api/webdav/download-latest', {
+    method: 'POST'
   })
 }
 

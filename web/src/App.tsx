@@ -15,6 +15,7 @@ import {
   Heart,
   History,
   Home,
+  Info,
   Library,
   Loader2,
   MoreHorizontal,
@@ -36,9 +37,6 @@ import {
   type FollowUpdatesResponse,
   type HistoryWriteRequest,
   type HealthResponse,
-  type ImportBackupApplyResponse,
-  type ImportBackupPreviewResponse,
-  type ImportBackupSummary,
   type LibraryItem,
   type LibraryResponse,
   type SearchComic,
@@ -54,9 +52,10 @@ import {
   type SourceSummary,
   type TaskSummary,
   type WebDavConfigResponse,
-  type WebDavEntry,
+  type WebDavSyncDownloadResponse,
   type WebDavUploadResponse,
-  applyImportBackup,
+  clearWebDavConfig,
+  downloadLatestWebDav,
   getComicInfo,
   getComicPages,
   getFollowUpdates,
@@ -67,15 +66,11 @@ import {
   getSourceSettings,
   getSources,
   getWebDavConfig,
-  listImportBackups,
-  listWebDav,
   loadSourceCategoryPage,
   loadSourceExplorePage,
-  previewImportBackup,
   saveSource,
   saveWebDavConfig,
   deleteSource,
-  downloadWebDav,
   imageProxyUrl,
   recordHistory,
   searchComics,
@@ -98,6 +93,7 @@ import { IconButton } from './ui/IconButton'
 import { CircularProgress, LinearProgress } from './ui/ProgressIndicator'
 import { Switch } from './ui/Switch'
 import { Menu } from './ui/Menu'
+import { Dialog } from './ui/Dialog'
 import { TextField } from './ui/TextField'
 import { Button } from './ui/Button'
 import { ComicTile as ComicTilePrimitive } from './components/ComicTile'
@@ -126,6 +122,15 @@ type AppData = {
   library: LibraryResponse
   followUpdates: FollowUpdatesResponse
   tasks: TaskSummary[]
+  webdav: WebDavConfigResponse | null
+}
+
+type WebDavSyncState = {
+  mode: 'idle' | 'uploading' | 'downloading'
+  message: string | null
+  error: string | null
+  upload: WebDavUploadResponse | null
+  download: WebDavSyncDownloadResponse | null
 }
 
 type ComicOpenRequest = {
@@ -192,14 +197,43 @@ const emptyData: AppData = {
     favorites: [],
     favorite_folders: []
   },
-  followUpdates: { folder: null, updated_total: 0, all_total: 0, updated: [], all: [] },
-  tasks: []
+  followUpdates: {
+    folder: null,
+    updated_total: 0,
+    unread_total: 0,
+    ended_total: 0,
+    all_total: 0,
+    updated: [],
+    unread: [],
+    ended: [],
+    all: []
+  },
+  tasks: [],
+  webdav: null
+}
+
+const idleWebDavSync: WebDavSyncState = {
+  mode: 'idle',
+  message: null,
+  error: null,
+  upload: null,
+  download: null
 }
 
 const libraryPageStep = 100
 
 function emptyFollowUpdates(folder: string | null): FollowUpdatesResponse {
-  return { folder, updated_total: 0, all_total: 0, updated: [], all: [] }
+  return {
+    folder,
+    updated_total: 0,
+    unread_total: 0,
+    ended_total: 0,
+    all_total: 0,
+    updated: [],
+    unread: [],
+    ended: [],
+    all: []
+  }
 }
 
 function storedFollowFolder(settings: SettingsResponse, folders: FavoriteFolder[]) {
@@ -234,7 +268,11 @@ type ComicMetaRow = {
 
 type SettingsSectionKey = 'appearance' | 'reading' | 'explore' | 'network' | 'webdav' | 'about' | 'hidden'
 
-function cleanText(value: unknown) {
+function cleanText(value: unknown): string | null {
+  if (Array.isArray(value)) {
+    const text = value.map(cleanText).filter(Boolean).join(', ')
+    return text.length > 0 ? text : null
+  }
   if (typeof value !== 'string' && typeof value !== 'number') return null
   const text = String(value).replace(/\s+/g, ' ').trim()
   return text.length > 0 ? text : null
@@ -277,10 +315,49 @@ function firstPresent(values: Array<string | null | undefined>) {
   return values.find((value) => value != null && value.trim().length > 0) ?? null
 }
 
-function searchComicMetaRows(comic: SearchComic): ComicMetaRow[] {
+function searchComicMetaRows(comic: SearchComic, sourceKey?: string | null): ComicMetaRow[] {
+  const update = firstPresent([
+    rawText(comic.raw, ['updateTime', 'update_time', 'lastUpdate', 'last_update']),
+    rawText(comic.raw, ['uploadTime', 'upload_time'])
+  ])
+  const status = rawText(comic.raw, ['status', 'state'])
+  const pages = rawText(comic.raw, ['maxPage', 'pages', 'pageCount'])
+  const description = rawText(comic.raw, ['description', 'desc', 'intro', 'introduction'])
   return [
-    { label: 'Authors', value: comic.subtitle ?? '', tone: 'blue' },
-    { label: 'Tags', value: comic.tags.slice(0, 3).join(', '), tone: 'pink' }
+    { label: '作者', value: firstPresent([comic.subtitle, rawText(comic.raw, ['author', 'authors', 'uploader', 'artist'])]) ?? '', tone: 'blue' },
+    { label: '更新', value: update ?? '', tone: 'cyan' },
+    { label: '来源', value: sourceKey ?? '', tone: 'cyan' },
+    { label: '标签', value: comic.tags.slice(0, 4).join(' / '), tone: 'pink' },
+    { label: '状态', value: status ?? '', tone: 'purple' },
+    { label: '页数', value: pages ?? '', tone: 'orange' },
+    { label: '描述', value: description ?? '', tone: 'orange' }
+  ].filter((row) => row.value.trim().length > 0) as ComicMetaRow[]
+}
+
+function latestChapterTitle(raw: unknown) {
+  return rawText(raw, [
+    'latest',
+    'latestTitle',
+    'latest_title',
+    'latestChapter',
+    'latest_chapter',
+    'lastChapter',
+    'last_chapter',
+    'chapter',
+    'episode'
+  ])
+}
+
+function libraryItemMetaRows(item: LibraryItem): ComicMetaRow[] {
+  const progress = firstPresent([
+    item.episode_title,
+    item.page != null && item.max_page != null ? `${item.page}/${item.max_page}` : item.page != null ? String(item.page) : null
+  ])
+  return [
+    { label: '作者', value: item.subtitle ?? '', tone: 'blue' },
+    { label: '来源', value: item.source_key, tone: 'cyan' },
+    { label: '进度', value: progress ?? '', tone: 'green' },
+    { label: '页数', value: item.max_page != null ? String(item.max_page) : '', tone: 'orange' }
   ].filter((row) => row.value.trim().length > 0) as ComicMetaRow[]
 }
 
@@ -372,23 +449,28 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [lastUpdated, setLastUpdated] = useState<string | null>(null)
   const [searchPreset, setSearchPreset] = useState<SearchPreset>(null)
+  const [webdavSync, setWebdavSync] = useState<WebDavSyncState>(idleWebDavSync)
+  const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSectionKey>('appearance')
+  const autoUploadTimer = useRef<number | null>(null)
+  const autoDownloadTried = useRef(false)
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const [health, settings, sources, library, tasks] = await Promise.all([
+      const [health, settings, sources, library, tasks, webdav] = await Promise.all([
         getHealth(),
         getSettings(),
         getSources(),
         getLibrary(),
-        getTasks()
+        getTasks(),
+        getWebDavConfig()
       ])
       const followFolder = storedFollowFolder(settings, library.favorite_folders)
       const followUpdates = followFolder
         ? await getFollowUpdates({ folder: followFolder })
         : emptyFollowUpdates(null)
-      setData({ health, settings, sources, library, followUpdates, tasks: tasks.tasks })
+      setData({ health, settings, sources, library, followUpdates, tasks: tasks.tasks, webdav })
       setActiveFavoriteFolder(null)
       setActiveFollowFolder(followFolder)
       setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour12: false }))
@@ -403,6 +485,97 @@ export default function App() {
     void load()
   }, [load])
 
+  useEffect(() => {
+    return () => {
+      if (autoUploadTimer.current != null) {
+        window.clearTimeout(autoUploadTimer.current)
+      }
+    }
+  }, [])
+
+  const runWebDavUpload = useCallback(async (silent = false) => {
+    if (!data.webdav?.endpoint_url) {
+      if (!silent) {
+        setWebdavSync((current) => ({ ...current, error: '请先保存 WebDAV 配置', message: null }))
+      }
+      return null
+    }
+    if (!silent) {
+      setWebdavSync({ mode: 'uploading', message: '正在上传数据', error: null, upload: null, download: null })
+    }
+    try {
+      const upload = await uploadWebDav(false)
+      const webdav = await getWebDavConfig()
+      setData((current) => ({ ...current, webdav }))
+      setWebdavSync({
+        mode: 'idle',
+        message: `已上传 ${upload.remote_path}`,
+        error: null,
+        upload,
+        download: null
+      })
+      return upload
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'WebDAV 上传失败'
+      setWebdavSync({ mode: 'idle', message: null, error: errorMessage, upload: null, download: null })
+      if (!silent) setError(errorMessage)
+      return null
+    }
+  }, [data.webdav])
+
+  const runWebDavDownload = useCallback(async (silent = false) => {
+    if (!data.webdav?.endpoint_url) {
+      if (!silent) {
+        setWebdavSync((current) => ({ ...current, error: '请先保存 WebDAV 配置', message: null }))
+      }
+      return null
+    }
+    if (!silent) {
+      setWebdavSync({ mode: 'downloading', message: '正在下载数据', error: null, upload: null, download: null })
+    }
+    try {
+      const download = await downloadLatestWebDav()
+      setWebdavSync({
+        mode: 'idle',
+        message: download.skipped
+          ? '远端没有更新的数据'
+          : `已下载 ${download.import_result?.file_name ?? download.download?.file_name ?? '最新数据'}`,
+        error: null,
+        upload: null,
+        download
+      })
+      await load()
+      return download
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'WebDAV 下载失败'
+      setWebdavSync({ mode: 'idle', message: null, error: errorMessage, upload: null, download: null })
+      if (!silent) setError(errorMessage)
+      return null
+    }
+  }, [data.webdav, load])
+
+  const scheduleWebDavUpload = useCallback(() => {
+    if (!data.webdav?.auto_sync || !data.webdav.endpoint_url) return
+    if (autoUploadTimer.current != null) {
+      window.clearTimeout(autoUploadTimer.current)
+    }
+    autoUploadTimer.current = window.setTimeout(() => {
+      autoUploadTimer.current = null
+      void runWebDavUpload(true)
+    }, 2000)
+  }, [data.webdav, runWebDavUpload])
+
+  const handleWebDavChange = useCallback((webdav: WebDavConfigResponse) => {
+    setData((current) => ({ ...current, webdav }))
+  }, [])
+
+  useEffect(() => {
+    if (autoDownloadTried.current) return
+    if (!data.webdav?.auto_sync || !data.webdav.endpoint_url) return
+    autoDownloadTried.current = true
+    void runWebDavDownload(true)
+  }, [data.webdav, runWebDavDownload])
+
   const themeMode = useMemo(() => {
     const value = data.settings?.values.themeMode
     return typeof value === 'string' ? value : 'system'
@@ -415,11 +588,13 @@ export default function App() {
   const setThemeMode = async (value: string) => {
     const next = await updateSettings({ themeMode: value })
     setData((current) => ({ ...current, settings: next }))
+    scheduleWebDavUpload()
   }
 
   const setReaderMode = async (value: ReaderMode) => {
     const next = await updateSettings({ readerMode: value })
     setData((current) => ({ ...current, settings: next }))
+    scheduleWebDavUpload()
   }
 
   const upsertSource = async (file: File) => {
@@ -429,6 +604,7 @@ export default function App() {
       ...current,
       sources: [source, ...current.sources.filter((item) => item.key !== source.key)]
     }))
+    scheduleWebDavUpload()
   }
 
   const removeSource = async (key: string) => {
@@ -437,6 +613,7 @@ export default function App() {
       ...current,
       sources: current.sources.filter((item) => item.key !== key)
     }))
+    scheduleWebDavUpload()
   }
 
   const toggleSource = async (key: string, enabled: boolean) => {
@@ -445,6 +622,7 @@ export default function App() {
       ...current,
       sources: current.sources.map((item) => (item.key === key ? source : item))
     }))
+    scheduleWebDavUpload()
   }
 
   const saveHistory = useCallback(async (payload: HistoryWriteRequest) => {
@@ -460,7 +638,8 @@ export default function App() {
             : library.favorites
       }
     }))
-  }, [])
+    scheduleWebDavUpload()
+  }, [scheduleWebDavUpload])
 
   const saveFavorite = async (payload: FavoriteWriteRequest) => {
     const library = await setFavorite(payload)
@@ -479,6 +658,7 @@ export default function App() {
             )
       }
     }))
+    scheduleWebDavUpload()
   }
 
   const loadMoreLibrary = async (kind: 'history' | 'favorites') => {
@@ -571,6 +751,7 @@ export default function App() {
       ...current,
       library: { ...current.library, favorite_folders: response.folders }
     }))
+    scheduleWebDavUpload()
   }
 
   const handleDeleteFolder = async (name: string) => {
@@ -588,6 +769,7 @@ export default function App() {
         library: { ...current.library, favorite_folders: folders }
       }
     })
+    scheduleWebDavUpload()
   }
 
   const refreshTasks = useCallback(async () => {
@@ -670,6 +852,11 @@ export default function App() {
     setRoute({ kind: 'main' })
   }
 
+  const openWebDavSettings = () => {
+    setSettingsInitialSection('webdav')
+    openTab('settings')
+  }
+
   const closeStandalonePage = () => {
     setActiveTab(activePrimaryTab)
     setRoute({ kind: 'main' })
@@ -708,7 +895,7 @@ export default function App() {
     )
   }
 
-  const showRootChrome = route.kind === 'main' && isPrimaryTabKey(activeTab)
+  const showRootChrome = route.kind === 'main'
   const activeFollowTask = data.tasks.find(
     (task) =>
       task.kind === 'follow_updates' &&
@@ -727,11 +914,11 @@ export default function App() {
             >
               <SnackbarHost>
                 <div className="app-shell">
-                  <SideNav activeTab={activePrimaryTab} onSelect={openTab} />
+                  <SideNav activeTab={activeTab} onSelect={openTab} />
                   <main className="main-area">
         {showRootChrome ? (
           <TopBar
-            activeTab={activePrimaryTab}
+            activeTab={activeTab}
             health={data.health}
             loading={loading}
             error={error}
@@ -751,7 +938,6 @@ export default function App() {
               onSearchTag={(sourceKey, tag) => {
                 setSearchPreset({ sourceKey, keyword: tag })
                 setActiveTab('search')
-                setActivePrimaryTab('search' as PrimaryTabKey)
                 setRoute({ kind: 'main' })
               }}
             />
@@ -760,8 +946,12 @@ export default function App() {
             <HomeView
               data={data}
               error={error}
+              webdavSync={webdavSync}
               onOpenTab={openTab}
               onOpenComic={openDetail}
+              onWebDavUpload={() => void runWebDavUpload(false)}
+              onWebDavDownload={() => void runWebDavDownload(false)}
+              onOpenWebDavSettings={openWebDavSettings}
             />
           ) : null}
           {route.kind === 'main' && activeTab === 'history' ? (
@@ -840,6 +1030,7 @@ export default function App() {
               onSourceUpload={upsertSource}
               onSourceDelete={removeSource}
               onSourceToggle={toggleSource}
+              onSourceSettingsChange={scheduleWebDavUpload}
               onOpenComic={openDetail}
               preset={searchPreset}
               onConsumePreset={() => setSearchPreset(null)}
@@ -851,6 +1042,7 @@ export default function App() {
           {route.kind === 'main' && activeTab === 'settings' ? (
             <SettingsView
               settings={data.settings}
+              initialSection={settingsInitialSection}
               themeMode={themeMode}
               readerMode={readerMode}
               sources={data.sources}
@@ -858,6 +1050,9 @@ export default function App() {
               onThemeChange={setThemeMode}
               onReaderModeChange={setReaderMode}
               onImportComplete={load}
+              onWebDavChange={handleWebDavChange}
+              onWebDavUpload={() => runWebDavUpload(false)}
+              onWebDavDownload={() => runWebDavDownload(false)}
             />
           ) : null}
         </div>
@@ -878,7 +1073,7 @@ function SideNav({
   activeTab,
   onSelect
 }: {
-  activeTab: PrimaryTabKey
+  activeTab: TabKey
   onSelect: (tab: TabKey) => void
 }) {
   return (
@@ -893,7 +1088,7 @@ function SideNav({
       </nav>
       <nav className="nav-stack nav-stack-actions">
         {actionNav.map((item) => (
-          <NavButton key={item.key} item={item} active={false} onSelect={onSelect} />
+          <NavButton key={item.key} item={item} active={activeTab === item.key} onSelect={onSelect} />
         ))}
       </nav>
     </aside>
@@ -937,7 +1132,7 @@ function NavButton({
       <Ripple>
         <span className="nav-button-content">
           <Icon size={22} />
-          <span>{item.label}</span>
+          <span className="nav-label">{item.label}</span>
         </span>
       </Ripple>
     </button>
@@ -953,7 +1148,7 @@ function TopBar({
   onRefresh,
   onSelect
 }: {
-  activeTab: PrimaryTabKey
+  activeTab: TabKey
   health: HealthResponse | null
   loading: boolean
   error: string | null
@@ -1005,14 +1200,35 @@ function TopBar({
 function HomeView({
   data,
   error,
+  webdavSync,
   onOpenTab,
-  onOpenComic
+  onOpenComic,
+  onWebDavUpload,
+  onWebDavDownload,
+  onOpenWebDavSettings
 }: {
   data: AppData
   error: string | null
+  webdavSync: WebDavSyncState
   onOpenTab: (tab: TabKey) => void
   onOpenComic: (request: ComicOpenRequest) => void
+  onWebDavUpload: () => void
+  onWebDavDownload: () => void
+  onOpenWebDavSettings: () => void
 }) {
+  const webdavConfigured = Boolean(data.webdav?.endpoint_url)
+  const webdavAutoSync = Boolean(data.webdav?.auto_sync && data.webdav.endpoint_url)
+  const webdavBusy = webdavSync.mode !== 'idle'
+  const webdavSubtitle = webdavSync.error
+    ? webdavSync.error
+    : webdavSync.message
+      ? webdavSync.message
+      : webdavConfigured
+        ? webdavAutoSync
+          ? '自动同步已开启，数据变更后会自动上传'
+          : '已配置，可手动上传或下载最新数据'
+        : '保存 WebDAV 配置后可多端同步'
+
   return (
     <div className="view-stack">
       <button
@@ -1036,12 +1252,34 @@ function HomeView({
       ) : null}
 
       <section className="sync-card">
-        <RefreshCw size={20} />
+        {webdavBusy ? <CircularProgress size={20} /> : <RefreshCw size={20} />}
         <div>
           <strong>同步数据</strong>
-          <span>WebDAV 支持手动下载和备份上传，默认不自动上传</span>
+          <span>{webdavSubtitle}</span>
         </div>
-        <StatusPill ok={data.health?.status === 'ok' && !error} text={data.health?.status === 'ok' && !error ? '正常' : '异常'} />
+        <div className="sync-actions">
+          <IconButton
+            type="button"
+            disabled={webdavBusy || !webdavConfigured}
+            title="上传数据"
+            aria-label="上传数据"
+            onClick={onWebDavUpload}
+          >
+            <Upload size={18} />
+          </IconButton>
+          <IconButton
+            type="button"
+            disabled={webdavBusy || !webdavConfigured}
+            title="下载数据"
+            aria-label="下载数据"
+            onClick={onWebDavDownload}
+          >
+            <Download size={18} />
+          </IconButton>
+          <IconButton type="button" title="WebDAV 设置" aria-label="WebDAV 设置" onClick={onOpenWebDavSettings}>
+            <Settings size={18} />
+          </IconButton>
+        </div>
       </section>
 
       <section className="home-card-list">
@@ -1052,7 +1290,7 @@ function HomeView({
           onOpen={() => onOpenTab('history')}
         >
           <ComicStrip
-            items={data.library.history.slice(0, 8)}
+            items={data.library.history}
             emptyText="暂无阅读记录"
             onSelect={(item) => onOpenComic(libraryItemToOpenRequest(item))}
           />
@@ -1064,7 +1302,7 @@ function HomeView({
           onOpen={() => onOpenTab('updates')}
         >
           <ComicStrip
-            items={data.followUpdates.updated.slice(0, 8)}
+            items={data.followUpdates.updated}
             emptyText={
               data.followUpdates.all_total > 0
                 ? `已跟踪 ${data.followUpdates.all_total} 部，暂无更新`
@@ -1124,6 +1362,23 @@ function ComicStrip({
   icon?: typeof Home
   onSelect?: (item: LibraryItem) => void
 }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [visibleCount, setVisibleCount] = useState(8)
+
+  useEffect(() => {
+    const element = ref.current
+    if (!element) return
+    const update = () => {
+      const width = element.clientWidth
+      const count = Math.max(1, Math.floor((width + 12) / 110))
+      setVisibleCount(Math.min(items.length, count))
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [items.length])
+
   if (items.length === 0) {
     return (
       <div className="home-card-empty">
@@ -1133,10 +1388,11 @@ function ComicStrip({
   }
 
   return (
-    <div className="comic-strip">
-      {items.map((item) => (
+    <div className="comic-strip" ref={ref}>
+      {items.slice(0, visibleCount).map((item) => (
         <ComicTilePrimitive
           key={libraryItemKey(item)}
+          variant="compact"
           data={{
             id: item.comic_id,
             sourceKey: item.source_key,
@@ -1484,13 +1740,14 @@ function ReaderPage({
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState<string | null>(null)
   const [pageIndex, setPageIndex] = useState(0)
+  const [activeEpisode, setActiveEpisode] = useState(request.episode)
   const [chromeOpen, setChromeOpen] = useState(true)
   const isGalleryMode = readerMode.startsWith('gallery')
   const isRTL = readerMode.endsWith('RightToLeft')
   const activePageIndex = images.length === 0 ? 0 : Math.min(pageIndex, images.length - 1)
   const visibleImages = isGalleryMode ? images.slice(activePageIndex, activePageIndex + 1) : images
 
-  const currentEpIndex = request.comic.episodes.findIndex((ep) => ep.id === request.episode.id)
+  const currentEpIndex = request.comic.episodes.findIndex((ep) => ep.id === activeEpisode.id)
   const prevEpisode = currentEpIndex > 0 ? request.comic.episodes[currentEpIndex - 1] : null
   const nextEpisode = currentEpIndex < request.comic.episodes.length - 1 ? request.comic.episodes[currentEpIndex + 1] : null
 
@@ -1499,6 +1756,7 @@ function ReaderPage({
     setMessage(null)
     setImages([])
     setPageIndex(0)
+    setActiveEpisode(episode)
     void getComicPages(request.sourceKey, request.comic.id, episode.id)
       .then(async (response) => {
         setImages(response.images)
@@ -1511,7 +1769,9 @@ function ReaderPage({
             subtitle: request.comic.subtitle,
             cover: request.comic.cover,
             episode_id: episode.id,
-            episode_title: episode.title
+            episode_title: episode.title,
+            page: 1,
+            max_page: response.images.length
           })
         }
       })
@@ -1526,6 +1786,21 @@ function ReaderPage({
   useEffect(() => {
     loadEpisode(request.episode)
   }, [request.episode.id, loadEpisode])
+
+  useEffect(() => {
+    if (images.length === 0) return
+    void onRecordHistory({
+      source_key: request.sourceKey,
+      comic_id: request.comic.id,
+      title: request.comic.title,
+      subtitle: request.comic.subtitle,
+      cover: request.comic.cover,
+      episode_id: activeEpisode.id,
+      episode_title: activeEpisode.title,
+      page: activePageIndex + 1,
+      max_page: images.length
+    })
+  }, [activeEpisode, activePageIndex, images.length, onRecordHistory, request.comic, request.sourceKey])
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
@@ -1572,7 +1847,7 @@ function ReaderPage({
         </IconButton>
         <div>
           <strong>{request.comic.title}</strong>
-          <span>{request.episode.title}</span>
+          <span>{activeEpisode.title}</span>
         </div>
         <div style={{ display: 'flex', gap: '4px' }}>
           {prevEpisode ? (
@@ -1635,6 +1910,7 @@ function SearchView({
   onSourceUpload,
   onSourceDelete,
   onSourceToggle,
+  onSourceSettingsChange,
   onOpenComic,
   preset,
   onConsumePreset
@@ -1644,6 +1920,7 @@ function SearchView({
   onSourceUpload: (file: File) => Promise<void>
   onSourceDelete: (key: string) => Promise<void>
   onSourceToggle: (key: string, enabled: boolean) => Promise<void>
+  onSourceSettingsChange: () => void
   onOpenComic: (request: ComicOpenRequest) => void
   preset: SearchPreset
   onConsumePreset?: () => void
@@ -1922,36 +2199,22 @@ function SearchView({
             <span>{results.length}{resultMaxPage != null ? ` / 第 ${resultPage} 页` : ''}</span>
           </div>
           <div className="comic-grid">
-            {results.map((comic) => (
-              <button
-                className="comic-tile"
-                key={`${resultSource}:${comic.id}`}
-                type="button"
-                onClick={() => {
+            {results.map((comic) => {
+              const sourceKey = aggregatedSearch ? resultSource : selectedSource
+              return (
+                <DetailedComicTile
+                  key={`${resultSource}:${comic.id}`}
+                  title={comic.title}
+                  cover={comic.cover}
+                  rows={searchComicMetaRows(comic, sourceKey)}
+                  latestTitle={latestChapterTitle(comic.raw)}
+                  onClick={() => {
                   const sourceKey = aggregatedSearch ? resultSource : selectedSource
                   if (sourceKey) onOpenComic(searchComicToOpenRequest(sourceKey, comic))
                 }}
-              >
-                <CoverImage url={comic.cover} iconSize={18} />
-                <div className="comic-tile-main">
-                  <strong>{comic.title}</strong>
-                  <div className="comic-meta-rows">
-                    {comic.subtitle ? (
-                      <div className="comic-meta-row">
-                        <span className="comic-meta-label blue">作者</span>
-                        <span className="comic-meta-value">{comic.subtitle}</span>
-                      </div>
-                    ) : null}
-                    {comic.tags.length > 0 ? (
-                      <div className="comic-meta-row">
-                        <span className="comic-meta-label pink">标签</span>
-                        <span className="comic-meta-value">{comic.tags.slice(0, 4).join(', ')}</span>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              </button>
-            ))}
+                />
+              )
+            })}
           </div>
           {hasMore ? (
             <LoadMoreSentinel loading={loadingMore} onLoadMore={handleLoadMore} />
@@ -1976,7 +2239,12 @@ function SearchView({
           </label>
           {sourceMessage ? <span className="muted-text">{sourceMessage}</span> : null}
         </div>
-        <SourceList sources={sources} onDelete={handleDelete} onToggle={handleToggle} />
+        <SourceList
+          sources={sources}
+          onDelete={handleDelete}
+          onToggle={handleToggle}
+          onSettingsChange={onSourceSettingsChange}
+        />
       </Panel>
     </div>
   )
@@ -2163,138 +2431,197 @@ function UpdatesView({
   onMarkRead: () => Promise<void>
   onOpenComic: (request: ComicOpenRequest) => void
 }) {
-  const [activeList, setActiveList] = useState<'updated' | 'all'>('updated')
-  const visibleItems = activeList === 'updated' ? data.updated : data.all
-  const visibleTotal = activeList === 'updated' ? data.updated_total : data.all_total
+  const [activeList, setActiveList] = useState<'updated' | 'unread' | 'ended'>('updated')
+  const [selectorOpen, setSelectorOpen] = useState(false)
+  const [selectedFolder, setSelectedFolder] = useState(activeFolder ?? folders[0]?.name ?? '')
+  const visibleItems =
+    activeList === 'updated' ? data.updated : activeList === 'unread' ? data.unread : data.ended
+  const visibleTotal =
+    activeList === 'updated'
+      ? data.updated_total
+      : activeList === 'unread'
+        ? data.unread_total
+        : data.ended_total
   const activeFolderTitle =
     activeFolder == null
       ? '未配置'
       : folders.find((folder) => folder.name === activeFolder)?.title ?? activeFolder
+  const selectedFolderTitle = folders.find((folder) => folder.name === selectedFolder)?.title ?? selectedFolder
+
+  useEffect(() => {
+    setSelectedFolder(activeFolder ?? folders[0]?.name ?? '')
+  }, [activeFolder, folders])
+
+  const chooseFolder = async () => {
+    if (!selectedFolder) return
+    await onFolderSelect(selectedFolder)
+    setSelectorOpen(false)
+  }
 
   return (
-    <div className="favorite-layout follow-layout">
-      <aside className="favorite-folder-panel" aria-label="追更收藏夹">
-        <div className="folder-section-title">追更收藏夹</div>
-        <FavoriteFolderButton
-          title="未配置"
-          count={0}
-          active={activeFolder == null}
-          onClick={() => void onFolderSelect(null)}
-        />
-        {folders.map((folder) => (
-          <FavoriteFolderButton
-            key={folder.name}
-            title={folder.title}
-            count={folder.count}
-            active={activeFolder === folder.name}
-            onClick={() => void onFolderSelect(folder.name)}
-          />
-        ))}
-      </aside>
-      <div className="view-stack">
-        <PageHeader
-          title="追更"
-          onBack={onBack}
-          actions={
-            <>
-              <button
-                className="icon-button"
-                type="button"
-                aria-label="检查更新"
-                title="检查更新"
-                disabled={!activeFolder || loading || task != null}
-                onClick={() => void onCheck()}
-              >
-                {task ? <CircularProgress size={18} /> : <Play size={18} />}
-              </button>
-              <button
-                className="icon-button"
-                type="button"
-                aria-label="全部已读"
-                title="全部已读"
-                disabled={!activeFolder || loading || data.updated_total === 0}
-                onClick={() => void onMarkRead()}
-              >
-                <CheckSquare size={18} />
-              </button>
-              <button
-                className="icon-button"
-                type="button"
-                aria-label="刷新追更"
-                title="刷新追更"
-                disabled={!activeFolder || loading}
-                onClick={() => void onRefresh()}
-              >
-                {loading ? <CircularProgress size={18} /> : <RefreshCw size={18} />}
-              </button>
-            </>
-          }
-        />
-        <section className="follow-config-card">
-          <div className="follow-config-title">
-            <RefreshCw size={20} />
-            <strong>追更</strong>
-            <span>{activeFolderTitle}</span>
-          </div>
+    <div className="view-stack follow-page">
+      <PageHeader title="追更" onBack={onBack} />
+      <section className="follow-config-card">
+        <div className="follow-config-title">
+          {activeFolder ? <RefreshCw size={20} /> : <Info size={20} />}
+          <strong>{activeFolder ? activeFolderTitle : '未配置'}</strong>
+        </div>
+        <div className="follow-config-copy">
           {activeFolder ? (
-            <div className="follow-config-stats">
-              <span>更新 {data.updated_total}</span>
-              <span>追踪 {data.all_total}</span>
-            </div>
+            <>
+              <span>已开启自动追更检查。</span>
+              <span>应用每天最多自动检查一次更新。</span>
+            </>
           ) : (
-            <div className="follow-config-stats">
-              <span>选择收藏夹后显示追更</span>
-            </div>
+            <span>选择一个收藏夹用于追踪更新。</span>
           )}
-          {task ? <TaskProgressLine task={task} /> : null}
-        </section>
+        </div>
         {activeFolder ? (
+          <div className="follow-config-stats">
+            <span>更新 {data.updated_total}</span>
+            <span>未读 {data.unread_total}</span>
+            <span>完结 {data.ended_total}</span>
+            <span>追踪 {data.all_total}</span>
+          </div>
+        ) : null}
+        {task ? <TaskProgressLine task={task} /> : null}
+        <div className="follow-config-actions">
+          {activeFolder ? (
+            <Button type="button" variant="text" onClick={() => void onFolderSelect(null)}>
+              停用
+            </Button>
+          ) : null}
+          <Button type="button" variant="text" onClick={() => setSelectorOpen(true)}>
+            {activeFolder ? '更换收藏夹' : '选择收藏夹'}
+          </Button>
+          {activeFolder ? (
+            <Button
+              type="button"
+              variant="tonal"
+              disabled={loading || task != null}
+              leading={task ? <CircularProgress size={16} /> : <Play size={16} />}
+              onClick={() => void onCheck()}
+            >
+              立即检查
+            </Button>
+          ) : null}
+          {activeFolder ? (
+            <IconButton
+              type="button"
+              aria-label="刷新追更"
+              title="刷新追更"
+              disabled={loading}
+              onClick={() => void onRefresh()}
+            >
+              {loading ? <CircularProgress size={18} /> : <RefreshCw size={18} />}
+            </IconButton>
+          ) : null}
+        </div>
+      </section>
+      {activeFolder ? (
+        <>
+          <div className="app-tabs follow-tabs" role="tablist" aria-label="追更列表">
+            <button
+              className={activeList === 'updated' ? 'selected' : ''}
+              type="button"
+              role="tab"
+              aria-selected={activeList === 'updated'}
+              onClick={() => setActiveList('updated')}
+            >
+              更新
+            </button>
+            <button
+              className={activeList === 'unread' ? 'selected' : ''}
+              type="button"
+              role="tab"
+              aria-selected={activeList === 'unread'}
+              onClick={() => setActiveList('unread')}
+            >
+              未读
+            </button>
+            <button
+              className={activeList === 'ended' ? 'selected' : ''}
+              type="button"
+              role="tab"
+              aria-selected={activeList === 'ended'}
+              onClick={() => setActiveList('ended')}
+            >
+              完结
+            </button>
+          </div>
+          <section className="follow-tab-body" aria-label={`追更${activeList}`}>
+            {activeList === 'updated' && data.updated_total > 0 ? (
+              <div className="follow-updates-hint">
+                <span>阅读漫画后会自动标记为无更新。</span>
+                <IconButton
+                  type="button"
+                  aria-label="全部已读"
+                  title="全部已读"
+                  disabled={loading}
+                  onClick={() => void onMarkRead()}
+                >
+                  <CheckSquare size={18} />
+                </IconButton>
+              </div>
+            ) : null}
+            {loading ? (
+              <EmptyLine icon={Loader2} text="加载追更中" />
+            ) : (
+              <LibraryGrid
+                items={visibleItems}
+                emptyText={
+                  activeList === 'updated'
+                    ? '暂无更新'
+                    : activeList === 'unread'
+                      ? '暂无未读漫画'
+                      : '暂无完结漫画'
+                }
+                icon={RefreshCw}
+                favorite
+                onSelect={(item) => onOpenComic(libraryItemToOpenRequest(item))}
+              />
+            )}
+            <span className="follow-tab-count">{visibleTotal}</span>
+          </section>
+        </>
+      ) : null}
+      <Dialog
+        open={selectorOpen}
+        onClose={() => setSelectorOpen(false)}
+        title="选择收藏夹"
+        icon={<FolderOpen size={24} />}
+        actions={
           <>
-            <div className="app-tabs" role="tablist" aria-label="追更列表">
-              <button
-                className={activeList === 'updated' ? 'selected' : ''}
-                type="button"
-                role="tab"
-                aria-selected={activeList === 'updated'}
-                onClick={() => setActiveList('updated')}
-              >
-                更新
-              </button>
-              <button
-                className={activeList === 'all' ? 'selected' : ''}
-                type="button"
-                role="tab"
-                aria-selected={activeList === 'all'}
-                onClick={() => setActiveList('all')}
-              >
-                全部
-              </button>
-            </div>
-            <Panel title={activeList === 'updated' ? '更新' : '全部漫画'} action={String(visibleTotal)}>
-              {loading ? (
-                <EmptyLine icon={Loader2} text="加载追更中" />
-              ) : (
-                <LibraryGrid
-                  items={visibleItems}
-                  emptyText={
-                    activeList === 'updated'
-                      ? data.all_total > 0
-                        ? '暂无更新'
-                        : '暂无追更数据'
-                      : '暂无追更数据'
-                  }
-                  icon={RefreshCw}
-                  onSelect={(item) => onOpenComic(libraryItemToOpenRequest(item))}
-                />
-              )}
-            </Panel>
+            {activeFolder ? (
+              <Button type="button" variant="text" onClick={() => { void onFolderSelect(null); setSelectorOpen(false) }}>
+                停用
+              </Button>
+            ) : null}
+            <Button type="button" disabled={!selectedFolder} onClick={() => void chooseFolder()}>
+              确认
+            </Button>
           </>
+        }
+      >
+        {folders.length === 0 ? (
+          <EmptyLine icon={FolderOpen} text="暂无收藏文件夹" />
         ) : (
-          <Panel title="收藏夹" action={String(folders.length)}>
-            <EmptyLine icon={FolderOpen} text={folders.length > 0 ? '请选择收藏夹' : '暂无收藏文件夹'} />
-          </Panel>
+          <div className="folder-dialog-list">
+            {folders.map((folder) => (
+              <button
+                key={folder.name}
+                className={selectedFolder === folder.name ? 'selected' : ''}
+                type="button"
+                onClick={() => setSelectedFolder(folder.name)}
+              >
+                <span>{folder.title}</span>
+                <small>{folder.count}</small>
+              </button>
+            ))}
+          </div>
         )}
-      </div>
+        {selectedFolder ? <p className="muted-text">当前选择：{selectedFolderTitle}</p> : null}
+      </Dialog>
     </div>
   )
 }
@@ -2405,6 +2732,7 @@ function FavoritesView({
               items={items}
               emptyText="暂无收藏"
               icon={Heart}
+              favorite
               onSelect={(item) => onOpenComic(libraryItemToOpenRequest(item))}
             />
           )}
@@ -2579,12 +2907,14 @@ function LibraryGrid({
   items,
   emptyText,
   icon: Icon = BookOpen,
-  onSelect
+  onSelect,
+  favorite = false
 }: {
   items: LibraryItem[]
   emptyText: string
   icon?: typeof Home
   onSelect?: (item: LibraryItem) => void
+  favorite?: boolean
 }) {
   if (items.length === 0) {
     return <EmptyLine icon={Icon} text={emptyText} />
@@ -2593,16 +2923,16 @@ function LibraryGrid({
   return (
     <div className="comic-grid">
       {items.map((item) => (
-        <ComicTilePrimitive
+        <DetailedComicTile
           key={libraryItemKey(item)}
-          data={{
-            id: item.comic_id,
-            sourceKey: item.source_key,
-            title: item.title,
-            cover: item.cover ?? null,
-            subtitle: item.subtitle ?? null,
-          }}
-          onOpen={() => onSelect?.(item)}
+          title={item.title}
+          cover={item.cover ?? null}
+          rows={libraryItemMetaRows(item)}
+          favorite={favorite}
+          page={item.page}
+          maxPage={item.max_page}
+          currentTitle={item.episode_title}
+          onClick={() => onSelect?.(item)}
         />
       ))}
     </div>
@@ -2655,11 +2985,11 @@ function SourceSettingSelectRow({
   )
 }
 
-function ComicMetaRows({ rows }: { rows: ComicMetaRow[] }) {
+function ComicMetaRows({ rows, limit = 6 }: { rows: ComicMetaRow[]; limit?: number }) {
   if (rows.length === 0) return null
   return (
     <div className="comic-meta-rows">
-      {rows.slice(0, 5).map((row) => (
+      {rows.slice(0, limit).map((row) => (
         <div className="comic-meta-row" key={`${row.label}:${row.value}`}>
           <span className={`comic-meta-label ${row.tone}`}>{row.label}</span>
           <span className="comic-meta-value">{row.value}</span>
@@ -2669,8 +2999,84 @@ function ComicMetaRows({ rows }: { rows: ComicMetaRow[] }) {
   )
 }
 
+function ReadingProgressBadge({ page, maxPage }: { page?: number | null; maxPage?: number | null }) {
+  if (page == null) return null
+  if (maxPage != null && page >= maxPage) {
+    return <span className="reading-progress-badge complete">✓</span>
+  }
+  return (
+    <span className="reading-progress-badge">
+      <strong>{page}</strong>
+      {maxPage != null ? <small>/{maxPage}</small> : null}
+    </span>
+  )
+}
+
+function EpisodeProgressBadge({
+  currentTitle,
+  latestTitle
+}: {
+  currentTitle?: string | null
+  latestTitle?: string | null
+}) {
+  if (!currentTitle && !latestTitle) return null
+  return (
+    <div className="episode-progress-badge">
+      {currentTitle ? <span>当前: {currentTitle}</span> : null}
+      {latestTitle ? <span>最新: {latestTitle}</span> : null}
+    </div>
+  )
+}
+
+function DetailedComicTile({
+  title,
+  cover,
+  rows,
+  onClick,
+  favorite = false,
+  page,
+  maxPage,
+  currentTitle,
+  latestTitle
+}: {
+  title: string
+  cover: string | null
+  rows: ComicMetaRow[]
+  onClick: () => void
+  favorite?: boolean
+  page?: number | null
+  maxPage?: number | null
+  currentTitle?: string | null
+  latestTitle?: string | null
+}) {
+  return (
+    <button className="comic-tile" type="button" title={title} onClick={onClick}>
+      <div className="comic-tile-cover">
+        <CoverImage url={cover} iconSize={22} />
+        <div className="comic-cover-status">
+          {favorite ? (
+            <span className="favorite-status-badge" aria-label="已收藏">
+              <Bookmark size={15} fill="currentColor" />
+            </span>
+          ) : null}
+          <ReadingProgressBadge page={page} maxPage={maxPage} />
+        </div>
+        <EpisodeProgressBadge currentTitle={currentTitle} latestTitle={latestTitle} />
+      </div>
+      <div className="comic-tile-main">
+        <strong>{title}</strong>
+        <ComicMetaRows rows={rows} />
+      </div>
+    </button>
+  )
+}
+
 function CoverImage({ url, iconSize }: { url: string | null; iconSize: number }) {
   const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    setFailed(false)
+  }, [url])
 
   if (!url || failed) {
     return (
@@ -2743,7 +3149,9 @@ function LibraryReader({
           subtitle: comic.subtitle,
           cover: comic.cover,
           episode_id: episode.id,
-          episode_title: episode.title
+          episode_title: episode.title,
+          page: 1,
+          max_page: response.images.length
         })
       }
     } catch (err) {
@@ -3113,7 +3521,7 @@ function SourceComicSections({
   return (
     <div className="source-list-content">
       {response.comics.length > 0 ? (
-        <SourceComicGrid comics={response.comics} onSelect={onSelect} />
+        <SourceComicGrid comics={response.comics} sourceKey={response.source_key} onSelect={onSelect} />
       ) : null}
       {response.parts.map((part, index) => (
         <section className="source-comic-section" key={`${part.title}:${index}`}>
@@ -3123,7 +3531,7 @@ function SourceComicSections({
               <span>{part.comics.length}</span>
             </div>
           ) : null}
-          <SourceComicGrid comics={part.comics} onSelect={onSelect} />
+          <SourceComicGrid comics={part.comics} sourceKey={response.source_key} onSelect={onSelect} />
         </section>
       ))}
       {loading ? <EmptyLine icon={Loader2} text="加载中" /> : null}
@@ -3133,29 +3541,24 @@ function SourceComicSections({
 
 function SourceComicGrid({
   comics,
+  sourceKey,
   onSelect
 }: {
   comics: SearchComic[]
+  sourceKey?: string | null
   onSelect: (comic: SearchComic) => void
 }) {
   return (
     <div className="comic-grid">
       {comics.map((comic) => (
-        <button
-          className="comic-tile"
+        <DetailedComicTile
           key={comic.id}
-          type="button"
           title={comic.title}
+          cover={comic.cover}
+          rows={searchComicMetaRows(comic, sourceKey)}
+          latestTitle={latestChapterTitle(comic.raw)}
           onClick={() => onSelect(comic)}
-        >
-          <div className="comic-tile-cover">
-            <CoverImage url={comic.cover} iconSize={18} />
-          </div>
-          <div className="comic-tile-main">
-            <strong>{comic.title}</strong>
-            <ComicMetaRows rows={searchComicMetaRows(comic)} />
-          </div>
-        </button>
+        />
       ))}
     </div>
   )
@@ -3296,15 +3699,20 @@ function TaskProgressLine({ task }: { task: TaskSummary }) {
 
 function SettingsView({
   settings,
+  initialSection,
   themeMode,
   readerMode,
   sources,
   onBack,
   onThemeChange,
   onReaderModeChange,
-  onImportComplete
+  onImportComplete,
+  onWebDavChange,
+  onWebDavUpload,
+  onWebDavDownload
 }: {
   settings: SettingsResponse | null
+  initialSection: SettingsSectionKey
   themeMode: string
   readerMode: ReaderMode
   sources: SourceSummary[]
@@ -3312,9 +3720,12 @@ function SettingsView({
   onThemeChange: (value: string) => Promise<void>
   onReaderModeChange: (value: ReaderMode) => Promise<void>
   onImportComplete: () => void | Promise<void>
+  onWebDavChange: (webdav: WebDavConfigResponse) => void
+  onWebDavUpload: () => Promise<WebDavUploadResponse | null>
+  onWebDavDownload: () => Promise<WebDavSyncDownloadResponse | null>
 }) {
   const hidden = settings?.hidden_features ?? []
-  const [activeSection, setActiveSection] = useState<SettingsSectionKey>('appearance')
+  const [activeSection, setActiveSection] = useState<SettingsSectionKey>(initialSection)
   const cacheLimitMb = useMemo(() => {
     const value = settings?.values.cacheLimitMb
     return typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : 1024
@@ -3323,6 +3734,10 @@ function SettingsView({
     () => sources.filter((source) => source.enabled && source.runtime_status === 'registered'),
     [sources]
   )
+
+  useEffect(() => {
+    setActiveSection(initialSection)
+  }, [initialSection])
   const sections = [
     { key: 'appearance' as const, title: '显示', icon: Settings },
     { key: 'reading' as const, title: '阅读', icon: BookOpen },
@@ -3462,7 +3877,14 @@ function SettingsView({
               </div>
             </SettingsPart>
           ) : null}
-          {activeSection === 'webdav' ? <WebDavPanel onImportComplete={onImportComplete} /> : null}
+          {activeSection === 'webdav' ? (
+            <WebDavPanel
+              onImportComplete={onImportComplete}
+              onConfigChange={onWebDavChange}
+              onUpload={onWebDavUpload}
+              onDownload={onWebDavDownload}
+            />
+          ) : null}
           {activeSection === 'hidden' ? (
             <SettingsPart title="Web 屏蔽项" icon={EyeOff}>
               <div className="settings-list">
@@ -3547,18 +3969,25 @@ function SettingRow({
   )
 }
 
-function WebDavPanel({ onImportComplete }: { onImportComplete: () => void | Promise<void> }) {
+function WebDavPanel({
+  onImportComplete,
+  onConfigChange,
+  onUpload,
+  onDownload
+}: {
+  onImportComplete: () => void | Promise<void>
+  onConfigChange: (webdav: WebDavConfigResponse) => void
+  onUpload: () => Promise<WebDavUploadResponse | null>
+  onDownload: () => Promise<WebDavSyncDownloadResponse | null>
+}) {
   const [config, setConfig] = useState<WebDavConfigResponse | null>(null)
   const [endpointUrl, setEndpointUrl] = useState('')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [rootPath, setRootPath] = useState('/')
-  const [currentPath, setCurrentPath] = useState('')
-  const [entries, setEntries] = useState<WebDavEntry[]>([])
-  const [backups, setBackups] = useState<ImportBackupSummary[]>([])
-  const [preview, setPreview] = useState<ImportBackupPreviewResponse | null>(null)
-  const [importResult, setImportResult] = useState<ImportBackupApplyResponse | null>(null)
+  const [autoSync, setAutoSync] = useState(false)
   const [uploadResult, setUploadResult] = useState<WebDavUploadResponse | null>(null)
+  const [downloadResult, setDownloadResult] = useState<WebDavSyncDownloadResponse | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -3569,30 +3998,35 @@ function WebDavPanel({ onImportComplete }: { onImportComplete: () => void | Prom
         setEndpointUrl(next.endpoint_url ?? '')
         setUsername(next.username ?? '')
         setRootPath(next.root_path || '/')
+        setAutoSync(next.auto_sync)
+        onConfigChange(next)
       })
       .catch((err) => setMessage(err instanceof Error ? err.message : 'WebDAV 配置读取失败'))
-    void loadBackups()
-  }, [])
-
-  const loadBackups = async () => {
-    const result = await listImportBackups()
-    setBackups(result.backups)
-  }
+  }, [onConfigChange])
 
   const handleSave = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setBusy(true)
     setMessage(null)
     try {
-      const next = await saveWebDavConfig({
-        endpoint_url: endpointUrl,
-        username,
-        password: password || undefined,
-        root_path: rootPath
-      })
+      const next =
+        endpointUrl.trim() === '' && username.trim() === '' && password.trim() === ''
+          ? await clearWebDavConfig()
+          : await saveWebDavConfig({
+              endpoint_url: endpointUrl,
+              username,
+              password: password || undefined,
+              root_path: rootPath,
+              auto_sync: autoSync
+            })
       setConfig(next)
+      setEndpointUrl(next.endpoint_url ?? '')
+      setUsername(next.username ?? '')
+      setRootPath(next.root_path || '/')
+      setAutoSync(next.auto_sync)
       setPassword('')
-      setMessage('WebDAV 已保存')
+      onConfigChange(next)
+      setMessage(next.endpoint_url ? 'WebDAV 已保存' : 'WebDAV 已清空')
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'WebDAV 保存失败')
     } finally {
@@ -3600,79 +4034,7 @@ function WebDavPanel({ onImportComplete }: { onImportComplete: () => void | Prom
     }
   }
 
-  const openPath = async (path: string) => {
-    setBusy(true)
-    setMessage(null)
-    try {
-      const listing = await listWebDav(path)
-      setCurrentPath(listing.path)
-      setEntries(listing.entries)
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'WebDAV 读取失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const downloadPath = async (path: string) => {
-    setBusy(true)
-    setMessage(null)
-    try {
-      const result = await downloadWebDav(path)
-      setMessage(`已下载 ${result.file_name}`)
-      await loadBackups()
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'WebDAV 下载失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const previewBackup = async (path: string) => {
-    setBusy(true)
-    setMessage(null)
-    setImportResult(null)
-    try {
-      setPreview(await previewImportBackup(path))
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : '备份预览失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const importBackup = async (path: string) => {
-    setBusy(true)
-    setMessage(null)
-    try {
-      const result = await applyImportBackup(path)
-      setImportResult(result)
-      setMessage(`已导入 ${result.sources_imported} 个源、${result.favorites_imported} 个收藏、${result.history_imported} 条历史`)
-      await onImportComplete()
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : '备份导入失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const createLocalBackup = async () => {
-    setBusy(true)
-    setMessage(null)
-    setUploadResult(null)
-    try {
-      const result = await uploadWebDav(true)
-      setUploadResult(result)
-      setMessage(`已创建本地备份 ${result.file_name}`)
-      await loadBackups()
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : '本地备份创建失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const uploadBackup = async () => {
+  const uploadData = async () => {
     if (!config?.endpoint_url) {
       setMessage('请先保存 WebDAV 配置')
       return
@@ -3680,22 +4042,47 @@ function WebDavPanel({ onImportComplete }: { onImportComplete: () => void | Prom
     setBusy(true)
     setMessage(null)
     setUploadResult(null)
+    setDownloadResult(null)
     try {
-      const result = await uploadWebDav(false)
-      setUploadResult(result)
-      setMessage(`已上传 ${result.remote_path}`)
-      await loadBackups()
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'WebDAV 上传失败')
+      const result = await onUpload()
+      if (result) {
+        setUploadResult(result)
+        setMessage(`已上传 ${result.remote_path}`)
+      }
     } finally {
       setBusy(false)
     }
   }
 
-  const parentPath = currentPath.split('/').filter(Boolean).slice(0, -1).join('/')
+  const downloadData = async () => {
+    if (!config?.endpoint_url) {
+      setMessage('请先保存 WebDAV 配置')
+      return
+    }
+    setBusy(true)
+    setMessage(null)
+    setUploadResult(null)
+    setDownloadResult(null)
+    try {
+      const result = await onDownload()
+      if (result) {
+        setDownloadResult(result)
+        setMessage(result.skipped ? '远端没有更新的数据' : `已下载 ${result.import_result?.file_name ?? '最新数据'}`)
+        await onImportComplete()
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const actionText = config?.endpoint_url
+    ? autoSync
+      ? '自动同步开启'
+      : '已配置'
+    : undefined
 
   return (
-    <Panel title="WebDAV" action={config?.endpoint_url ? '已配置' : undefined}>
+    <Panel title="WebDAV" action={actionText}>
       <form className="webdav-form" onSubmit={handleSave}>
         <TextField
           value={endpointUrl}
@@ -3718,134 +4105,50 @@ function WebDavPanel({ onImportComplete }: { onImportComplete: () => void | Prom
           placeholder="根路径"
           onChange={(event) => setRootPath(event.target.value)}
         />
-        <Button variant="filled" type="submit" disabled={busy || !endpointUrl.trim()}>
+        <div className="webdav-switch-row">
+          <div>
+            <strong>自动同步数据</strong>
+            <span>启动时下载最新数据，本地数据变化后自动上传</span>
+          </div>
+          <Switch checked={autoSync} disabled={busy} onChange={setAutoSync} />
+        </div>
+        <Button variant="filled" type="submit" disabled={busy || (!endpointUrl.trim() && !config?.endpoint_url)}>
           保存
-        </Button>
-        <Button variant="text" type="button" disabled={busy} onClick={() => void openPath('')} leading={<FolderOpen size={16} />}>
-          浏览
         </Button>
       </form>
       <div className="webdav-actions">
-        <Button variant="text" type="button" disabled={busy} onClick={() => void createLocalBackup()} leading={<Save size={16} />}>
-          创建本地备份
+        <Button
+          variant="text"
+          type="button"
+          disabled={busy || !config?.endpoint_url}
+          onClick={() => void uploadData()}
+          leading={<Upload size={16} />}
+        >
+          上传数据
         </Button>
         <Button
           variant="text"
           type="button"
           disabled={busy || !config?.endpoint_url}
-          onClick={() => void uploadBackup()}
-          leading={<Upload size={16} />}
+          onClick={() => void downloadData()}
+          leading={<Download size={16} />}
         >
-          备份并上传
+          下载数据
         </Button>
       </div>
       {message ? <div className="data-row">{message}</div> : null}
-      {entries.length > 0 || currentPath ? (
-        <div className="webdav-list">
-          <div className="webdav-path">
-            <span>{currentPath || '/'}</span>
-            {currentPath ? (
-              <button className="icon-button" type="button" disabled={busy} onClick={() => void openPath(parentPath)}>
-                <FolderOpen size={16} />
-              </button>
-            ) : null}
-          </div>
-          {entries.map((entry) => (
-            <div className="webdav-row" key={entry.path}>
-              <button
-                className="webdav-entry-button"
-                type="button"
-                disabled={busy || !entry.is_dir}
-                onClick={() => void openPath(entry.path)}
-              >
-                {entry.is_dir ? <FolderOpen size={16} /> : <BookOpen size={16} />}
-                <span>{entry.name}</span>
-              </button>
-              {!entry.is_dir ? (
-                <button
-                  className="icon-button"
-                  type="button"
-                  disabled={busy}
-                  aria-label={`下载 ${entry.name}`}
-                  onClick={() => void downloadPath(entry.path)}
-                >
-                  <Download size={16} />
-                </button>
-              ) : null}
-            </div>
-          ))}
-        </div>
-      ) : null}
-      {backups.length > 0 ? (
-        <div className="import-backups">
-          <div className="section-label">本地备份</div>
-          {backups.map((backup) => (
-            <div className="webdav-row" key={backup.path}>
-              <button
-                className="webdav-entry-button"
-                type="button"
-                disabled={busy}
-                onClick={() => void previewBackup(backup.path)}
-              >
-                <BookOpen size={16} />
-                <span>{backup.file_name}</span>
-                <small>{formatBytes(backup.size)}</small>
-              </button>
-              <button
-                className="icon-button"
-                type="button"
-                disabled={busy}
-                aria-label={`导入 ${backup.file_name}`}
-                onClick={() => void importBackup(backup.path)}
-              >
-                <Upload size={16} />
-              </button>
-            </div>
-          ))}
-        </div>
-      ) : null}
-      {preview ? <BackupPreview preview={preview} /> : null}
-      {importResult ? (
-        <div className="import-result">
-          源 {importResult.sources_imported}，收藏 {importResult.favorites_imported}，历史 {importResult.history_imported}
-          ，跳过 {importResult.favorites_skipped + importResult.history_skipped}
-        </div>
-      ) : null}
       {uploadResult ? (
         <div className="import-result">
-          备份 {uploadResult.file_name}，{formatBytes(uploadResult.size)}，
-          {uploadResult.uploaded ? `已上传 ${uploadResult.remote_path}` : '仅创建本地文件'}
+          备份 {uploadResult.file_name}，{formatBytes(uploadResult.size)}，已上传 {uploadResult.remote_path}
+        </div>
+      ) : null}
+      {downloadResult?.import_result ? (
+        <div className="import-result">
+          源 {downloadResult.import_result.sources_imported}，收藏 {downloadResult.import_result.favorites_imported}
+          ，历史 {downloadResult.import_result.history_imported}
         </div>
       ) : null}
     </Panel>
-  )
-}
-
-function BackupPreview({ preview }: { preview: ImportBackupPreviewResponse }) {
-  return (
-    <div className="backup-preview">
-      <div className="section-label">备份预览</div>
-      <div className="backup-stats">
-        <span>源 JS {preview.comic_source_js_count}</span>
-        <span>源数据 {preview.comic_source_data_count}</span>
-        <span>文件 {preview.entry_count}</span>
-      </div>
-      <div className="data-row">AppData: {preview.appdata_keys.join(', ') || '无'}</div>
-      <div className="backup-db-list">
-        {preview.databases.map((database) => (
-          <div className="backup-db" key={database.name}>
-            <strong>{database.name}</strong>
-            <span>
-              {database.present
-                ? database.error
-                  ? database.error
-                  : `${database.tables.length} 表`
-                : '缺失'}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
   )
 }
 
@@ -3879,12 +4182,14 @@ function SourceList({
   sources,
   compact = false,
   onDelete,
-  onToggle
+  onToggle,
+  onSettingsChange
 }: {
   sources: SourceSummary[]
   compact?: boolean
   onDelete?: (key: string) => void
   onToggle?: (key: string, enabled: boolean) => void
+  onSettingsChange?: () => void
 }) {
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [settingsState, setSettingsState] = useState<Record<string, SourceSettingsCacheItem>>({})
@@ -3938,6 +4243,7 @@ function SourceList({
         ...current,
         [sourceKey]: { loading: false, error: null, data }
       }))
+      onSettingsChange?.()
     } catch (err) {
       setSettingsState((current) => ({
         ...current,

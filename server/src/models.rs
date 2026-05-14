@@ -298,6 +298,8 @@ pub struct LibraryItem {
     pub cover: Option<String>,
     pub episode_id: Option<String>,
     pub episode_title: Option<String>,
+    pub page: Option<u32>,
+    pub max_page: Option<u32>,
     pub updated_at: Option<String>,
 }
 
@@ -338,8 +340,12 @@ pub struct FollowUpdatesQuery {
 pub struct FollowUpdatesResponse {
     pub folder: Option<String>,
     pub updated_total: u64,
+    pub unread_total: u64,
+    pub ended_total: u64,
     pub all_total: u64,
     pub updated: Vec<LibraryItem>,
+    pub unread: Vec<LibraryItem>,
+    pub ended: Vec<LibraryItem>,
     pub all: Vec<LibraryItem>,
 }
 
@@ -382,6 +388,8 @@ pub struct HistoryWriteRequest {
     pub cover: Option<String>,
     pub episode_id: String,
     pub episode_title: String,
+    pub page: Option<u32>,
+    pub max_page: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -399,6 +407,7 @@ pub struct WebDavConfigResponse {
     pub endpoint_url: Option<String>,
     pub username: Option<String>,
     pub root_path: String,
+    pub auto_sync: bool,
     pub password_configured: bool,
     pub read_only: bool,
     pub updated_at: Option<String>,
@@ -410,6 +419,7 @@ pub struct WebDavConfigRequest {
     pub username: Option<String>,
     pub password: Option<String>,
     pub root_path: Option<String>,
+    pub auto_sync: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -460,6 +470,16 @@ pub struct WebDavUploadResponse {
     pub size: u64,
     pub uploaded: bool,
     pub content_type: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct WebDavSyncDownloadResponse {
+    pub skipped: bool,
+    pub message: String,
+    pub local_version: i64,
+    pub remote_version: Option<i64>,
+    pub download: Option<WebDavDownloadResponse>,
+    pub import_result: Option<ImportBackupApplyResponse>,
 }
 
 #[derive(Serialize)]
