@@ -80,6 +80,18 @@ class WebHelperBrowserState {
           .toList(),
     );
   }
+
+  List<String> valuesForCookieFields(List<String> fields) {
+    final byName = <String, String>{};
+    final byLowerName = <String, String>{};
+    for (final cookie in cookies) {
+      byName[cookie.name] = cookie.value;
+      byLowerName[cookie.name.toLowerCase()] = cookie.value;
+    }
+    return fields
+        .map((field) => byName[field] ?? byLowerName[field.toLowerCase()] ?? '')
+        .toList();
+  }
 }
 
 class WebLoginImportData {
