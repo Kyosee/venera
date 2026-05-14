@@ -212,6 +212,101 @@ function buildZipArchive(entries) {
   return Buffer.concat([...localParts, centralDirectory, eocd]);
 }
 
+test("WebDAV sync can persist and reuse helper-side configuration", async () => {
+  const serverDataDir = await mkdtemp(join(tmpdir(), "venera-server-db-"));
+  const webDavConfigPath = join(serverDataDir, "webdav-config.json");
+  const seenRequests = [];
+
+  const upstream = createHttpServer(async (req, res) => {
+    seenRequests.push(`${req.method} ${req.url}`);
+    assert.equal(req.headers.authorization, "Basic dXNlcjpwYXNz");
+
+    if (req.method === "PROPFIND") {
+      res.writeHead(207, { "Content-Type": "application/xml" });
+      res.end(`<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response><d:href>/1700000000100.venera</d:href></d:response>
+</d:multistatus>`);
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  const upstreamUrl = await listen(upstream);
+  const helper = createServer({ webDavConfigPath });
+  const helperUrl = await listen(helper);
+
+  try {
+    const emptyConfigResponse = await fetch(`${helperUrl}/sync/webdav/config/get`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(emptyConfigResponse.status, 200);
+    assert.equal((await emptyConfigResponse.json()).configured, false);
+
+    const saveResponse = await fetch(`${helperUrl}/sync/webdav/config/save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: upstreamUrl,
+        user: "user",
+        pass: "pass",
+        autoSync: true,
+        disableSyncFields: "token",
+      }),
+    });
+    assert.equal(saveResponse.status, 200);
+    assert.equal((await saveResponse.json()).configured, true);
+
+    const stored = JSON.parse(await readFile(webDavConfigPath, "utf8"));
+    assert.equal(stored.url, `${upstreamUrl}/`);
+    assert.equal(stored.user, "user");
+    assert.equal(stored.pass, "pass");
+    assert.equal(stored.disableSyncFields, "token");
+
+    const getResponse = await fetch(`${helperUrl}/sync/webdav/config/get`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(getResponse.status, 200);
+    const getPayload = await getResponse.json();
+    assert.equal(getPayload.configured, true);
+    assert.equal(getPayload.url, `${upstreamUrl}/`);
+
+    const listResponse = await fetch(`${helperUrl}/sync/webdav/list`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(listResponse.status, 200);
+    assert.deepEqual((await listResponse.json()).files, ["1700000000100.venera"]);
+    assert.deepEqual(seenRequests, ["PROPFIND /"]);
+
+    const clearResponse = await fetch(`${helperUrl}/sync/webdav/config/clear`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(clearResponse.status, 200);
+    assert.equal((await clearResponse.json()).configured, false);
+
+    const missingConfigResponse = await fetch(`${helperUrl}/sync/webdav/list`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(missingConfigResponse.status, 400);
+  } finally {
+    await close(helper);
+    await close(upstream);
+    await rm(serverDataDir, { recursive: true, force: true });
+  }
+});
+
 test("server-db sync stores WebDAV backup on helper disk", async () => {
   const serverDataDir = await mkdtemp(join(tmpdir(), "venera-server-db-"));
   const historyDb = buildMinimalHistoryDb("server stored history");

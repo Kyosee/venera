@@ -22,6 +22,7 @@ const _serverDbEntries = [
 
 class DataSync with ChangeNotifier {
   DataSync._() {
+    unawaited(_bootstrapWebDavConfig());
     if (isEnabled) {
       downloadData(hydrateLocalCache: false);
     }
@@ -47,12 +48,19 @@ class DataSync with ChangeNotifier {
 
   String? _lastError;
 
+  List<String>? _serverWebDavConfig;
+
+  bool? _serverWebDavAutoSync;
+
   String? get lastError => _lastError;
 
   bool get isEnabled {
     var config = appdata.settings['webdav'];
-    var autoSync = appdata.implicitData['webdavAutoSync'] ?? false;
-    return autoSync && config is List && config.isNotEmpty;
+    var autoSync =
+        appdata.implicitData['webdavAutoSync'] ?? _serverWebDavAutoSync ?? false;
+    return autoSync &&
+        ((config is List && config.isNotEmpty) ||
+            _serverWebDavConfig != null);
   }
 
   void onDataChanged() {
@@ -78,6 +86,29 @@ class DataSync with ChangeNotifier {
     return values;
   }
 
+  Future<void> _bootstrapWebDavConfig() async {
+    try {
+      final config = await loadWebDavConfig(force: true);
+      if (config != null && (config['autoSync'] == true)) {
+        await downloadData(hydrateLocalCache: false);
+      }
+    } catch (e, s) {
+      Log.error('WebDAV Config', e, s);
+    }
+  }
+
+  Future<List<String>?> _resolveConfig() async {
+    final local = _validateConfig();
+    if (local != null && local.isNotEmpty) {
+      return local;
+    }
+    await loadWebDavConfig();
+    if (_serverWebDavConfig != null) {
+      return _serverWebDavConfig;
+    }
+    return local;
+  }
+
   int _dataVersion() {
     final value = appdata.settings['dataVersion'];
     if (value is int) {
@@ -90,6 +121,9 @@ class DataSync with ChangeNotifier {
   }
 
   Map<String, dynamic> _webDavPayload(List<String> config) {
+    if (_serverWebDavConfig != null) {
+      return {};
+    }
     return {'url': config[0], 'user': config[1], 'pass': config[2]};
   }
 
@@ -124,6 +158,61 @@ class DataSync with ChangeNotifier {
     Map<String, dynamic> payload,
   ) {
     return _postHelper('/sync/webdav/$route', payload);
+  }
+
+  Future<Map<String, dynamic>?> loadWebDavConfig({bool force = false}) async {
+    if (!force && _serverWebDavConfig != null) {
+      return {
+        'configured': true,
+        'url': _serverWebDavConfig![0],
+        'user': _serverWebDavConfig![1],
+        'pass': _serverWebDavConfig![2],
+        'autoSync': _serverWebDavAutoSync ?? false,
+      };
+    }
+    final data = await _callHelper('config/get', const <String, dynamic>{});
+    if (data['configured'] != true) {
+      _serverWebDavConfig = null;
+      _serverWebDavAutoSync = false;
+      return null;
+    }
+    final url = data['url']?.toString().trim() ?? '';
+    final user = data['user']?.toString().trim() ?? '';
+    final pass = data['pass']?.toString() ?? '';
+    if (url.isEmpty || user.isEmpty) {
+      _serverWebDavConfig = null;
+      _serverWebDavAutoSync = false;
+      return null;
+    }
+    _serverWebDavConfig = [url, user, pass];
+    _serverWebDavAutoSync = data['autoSync'] == true;
+    return data;
+  }
+
+  Future<void> saveWebDavConfig(
+    List<String> config, {
+    required bool autoSync,
+    required String disableSyncFields,
+  }) async {
+    final data = await _callHelper('config/save', {
+      'url': config[0],
+      'user': config[1],
+      'pass': config[2],
+      'autoSync': autoSync,
+      'disableSyncFields': disableSyncFields,
+    });
+    _serverWebDavConfig = [
+      data['url']?.toString() ?? config[0],
+      data['user']?.toString() ?? config[1],
+      data['pass']?.toString() ?? config[2],
+    ];
+    _serverWebDavAutoSync = data['autoSync'] == true;
+  }
+
+  Future<void> clearWebDavConfig() async {
+    await _callHelper('config/clear', const <String, dynamic>{});
+    _serverWebDavConfig = null;
+    _serverWebDavAutoSync = false;
   }
 
   String get _serverDbProfile {
@@ -285,7 +374,7 @@ class DataSync with ChangeNotifier {
     _lastError = null;
     notifyListeners();
     try {
-      final config = _validateConfig();
+      final config = await _resolveConfig();
       if (config == null) {
         _lastError = 'Invalid WebDAV configuration';
         return const Res.error('Invalid WebDAV configuration');
@@ -357,7 +446,7 @@ class DataSync with ChangeNotifier {
     _lastError = null;
     notifyListeners();
     try {
-      final config = _validateConfig();
+      final config = await _resolveConfig();
       if (config == null) {
         _lastError = 'Invalid WebDAV configuration';
         return const Res.error('Invalid WebDAV configuration');

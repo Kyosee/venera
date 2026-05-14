@@ -89,6 +89,18 @@ class DataSync with ChangeNotifier {
 
   String? get lastError => _lastError;
 
+  Future<Map<String, dynamic>?> loadWebDavConfig({bool force = false}) async {
+    return null;
+  }
+
+  Future<void> saveWebDavConfig(
+    List<String> config, {
+    required bool autoSync,
+    required String disableSyncFields,
+  }) async {}
+
+  Future<void> clearWebDavConfig() async {}
+
   bool get isEnabled {
     var config = appdata.settings['webdav'];
     var autoSync = appdata.implicitData['webdavAutoSync'] ?? false;

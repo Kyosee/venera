@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -1742,6 +1743,61 @@ function normalizeWebDavConfig(payload) {
   return { baseUrl: normalizedBase, user, pass };
 }
 
+function hasWebDavConfigPayload(payload) {
+  return (
+    payload != null &&
+    (Object.hasOwn(payload, "url") ||
+      Object.hasOwn(payload, "user") ||
+      Object.hasOwn(payload, "pass"))
+  );
+}
+
+function readStoredWebDavConfig(webDavConfigPath) {
+  if (!webDavConfigPath || !existsSync(webDavConfigPath)) {
+    return null;
+  }
+  try {
+    const data = JSON.parse(readFileSync(webDavConfigPath, "utf8"));
+    if (!data || typeof data !== "object") {
+      return null;
+    }
+    return data;
+  } catch {
+    throw createHttpError(422, "Stored WebDAV configuration is invalid");
+  }
+}
+
+function writeStoredWebDavConfig(webDavConfigPath, payload) {
+  const normalized = normalizeWebDavConfig(payload);
+  const data = {
+    url: normalized.baseUrl,
+    user: normalized.user,
+    pass: normalized.pass,
+    autoSync: payload.autoSync !== false,
+    disableSyncFields: String(payload.disableSyncFields || ""),
+  };
+  mkdirSync(dirname(webDavConfigPath), { recursive: true });
+  writeFileSync(webDavConfigPath, JSON.stringify(data, null, 2));
+  return data;
+}
+
+function clearStoredWebDavConfig(webDavConfigPath) {
+  if (webDavConfigPath) {
+    rmSync(webDavConfigPath, { force: true });
+  }
+}
+
+function resolveWebDavConfig(payload, webDavConfigPath) {
+  if (hasWebDavConfigPayload(payload)) {
+    return normalizeWebDavConfig(payload);
+  }
+  const stored = readStoredWebDavConfig(webDavConfigPath);
+  if (stored) {
+    return normalizeWebDavConfig(stored);
+  }
+  return normalizeWebDavConfig(payload);
+}
+
 function normalizeWebDavBackupName(rawName, { required = false } = {}) {
   const value = String(rawName || "").trim();
   if (!value) {
@@ -2503,6 +2559,7 @@ async function handleServerDbRoute({
   res,
   parsedUrl,
   serverDataRoot,
+  webDavConfigPath,
   cookieJar,
   persistCookieJar,
   recordProxyRequest,
@@ -2594,7 +2651,7 @@ async function handleServerDbRoute({
       sendJson(res, 405, { error: "Method not allowed" });
       return true;
     }
-    const config = normalizeWebDavConfig(payload);
+    const config = resolveWebDavConfig(payload, webDavConfigPath);
     const metadata = readServerDbMetadata(profileRoot);
     const force = payload.force === true;
     const existingStatus = serverDbStatus(serverDataRoot, profileId);
@@ -2779,6 +2836,7 @@ async function handleSyncWebDavRoute({
   req,
   res,
   parsedUrl,
+  webDavConfigPath,
   cookieJar,
   persistCookieJar,
   recordProxyRequest,
@@ -2792,7 +2850,30 @@ async function handleSyncWebDavRoute({
   }
 
   const payload = parseJsonBody(await readBody(req), "Invalid sync payload");
-  const config = normalizeWebDavConfig(payload);
+
+  if (parsedUrl.pathname === "/sync/webdav/config/get") {
+    const stored = readStoredWebDavConfig(webDavConfigPath);
+    sendJson(res, 200, {
+      ok: true,
+      configured: stored != null,
+      ...(stored || {}),
+    });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/sync/webdav/config/save") {
+    const stored = writeStoredWebDavConfig(webDavConfigPath, payload);
+    sendJson(res, 200, { ok: true, configured: true, ...stored });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/sync/webdav/config/clear") {
+    clearStoredWebDavConfig(webDavConfigPath);
+    sendJson(res, 200, { ok: true, configured: false });
+    return true;
+  }
+
+  const config = resolveWebDavConfig(payload, webDavConfigPath);
 
   if (parsedUrl.pathname === "/sync/webdav/list") {
     const files = await listWebDavBackupFiles({
@@ -3406,6 +3487,11 @@ export function createServer(options = {}) {
       process.env.VENERA_SERVER_DATA_DIR ||
       join(process.cwd(), ".venera-helper-data"),
   );
+  const webDavConfigPath = resolve(
+    options.webDavConfigPath ||
+      process.env.VENERA_WEBDAV_CONFIG_PATH ||
+      join(serverDataRoot, "webdav-config.json"),
+  );
   const cookieJarPath =
     options.cookieJarPath || process.env.VENERA_COOKIE_JAR_PATH || "";
   const cookieJar = loadCookieJar(cookieJarPath);
@@ -3590,6 +3676,7 @@ export function createServer(options = {}) {
           res,
           parsedUrl,
           serverDataRoot,
+          webDavConfigPath,
           cookieJar,
           persistCookieJar,
           recordProxyRequest,
@@ -3603,6 +3690,7 @@ export function createServer(options = {}) {
           req,
           res,
           parsedUrl,
+          webDavConfigPath,
           cookieJar,
           persistCookieJar,
           recordProxyRequest,
