@@ -292,6 +292,18 @@ test("server-db sync stores WebDAV backup on helper disk", async () => {
     assert.equal(statusPayload.databases["history.db"].exists, true);
     assert.equal(statusPayload.metadata.sha256, syncPayload.sha256);
 
+    const historyResponse = await fetch(`${helperUrl}/api/server-db/history/list`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile: "reader", limit: 20 }),
+    });
+    assert.equal(historyResponse.status, 200);
+    const historyPayload = await historyResponse.json();
+    assert.equal(historyPayload.ok, true);
+    assert.equal(historyPayload.total, 1);
+    assert.equal(historyPayload.items[0].title, "server stored history");
+    assert.deepEqual(historyPayload.items[0].readEpisode, []);
+
     assert.deepEqual(seenRequests, [
       "PROPFIND /",
       "GET /1700000000100.venera",

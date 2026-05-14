@@ -2380,6 +2380,47 @@ function writeServerDbBackup(profileRoot, entries) {
   };
 }
 
+function historyRowsFromServerDb(profileRoot, { limit = 100, offset = 0 } = {}) {
+  const filePath = serverDbEntryPath(profileRoot, "history.db");
+  if (!existsSync(filePath)) {
+    throw createHttpError(404, "Server history DB not found");
+  }
+  const data = extractSqliteData(readFileSync(filePath));
+  const table = data.tables.find((item) => item.name === "history");
+  if (!table) {
+    return { total: 0, items: [] };
+  }
+  const rows = table.rows.map((row) => {
+    const item = {};
+    for (let index = 0; index < table.columns.length; index++) {
+      item[table.columns[index]] = row[index];
+    }
+    const readEpisode = String(item.readEpisode || "")
+      .split(",")
+      .filter(Boolean);
+    return {
+      id: String(item.id || ""),
+      title: String(item.title || ""),
+      subtitle: String(item.subtitle || ""),
+      cover: String(item.cover || ""),
+      time: Number(item.time || 0),
+      type: Number(item.type || 0),
+      ep: Number(item.ep || 0),
+      page: Number(item.page || 0),
+      readEpisode,
+      max_page: item.max_page == null ? null : Number(item.max_page),
+      chapter_group: item.chapter_group == null ? null : Number(item.chapter_group),
+    };
+  });
+  rows.sort((a, b) => b.time - a.time);
+  const safeOffset = Math.max(0, Number(offset) || 0);
+  const safeLimit = Math.max(1, Math.min(500, Number(limit) || 100));
+  return {
+    total: rows.length,
+    items: rows.slice(safeOffset, safeOffset + safeLimit),
+  };
+}
+
 function listServerDbProfiles(serverDataRoot) {
   const profilesRoot = join(resolve(serverDataRoot), "profiles");
   if (!existsSync(profilesRoot)) return [];
@@ -2531,6 +2572,19 @@ async function handleServerDbRoute({
       ok: true,
       profile: profileId,
       data,
+    });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/history/list") {
+    const data = historyRowsFromServerDb(profileRoot, {
+      limit: payload.limit,
+      offset: payload.offset,
+    });
+    sendJson(res, 200, {
+      ok: true,
+      profile: profileId,
+      ...data,
     });
     return true;
   }

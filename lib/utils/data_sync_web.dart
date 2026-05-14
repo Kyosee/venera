@@ -23,7 +23,7 @@ const _serverDbEntries = [
 class DataSync with ChangeNotifier {
   DataSync._() {
     if (isEnabled) {
-      downloadData();
+      downloadData(hydrateLocalCache: false);
     }
     LocalFavoritesManager().addListener(onDataChanged);
     ComicSourceManager().addListener(onDataChanged);
@@ -144,7 +144,10 @@ class DataSync with ChangeNotifier {
     });
   }
 
-  Future<void> _importServerDatabaseFromHelper(List<String> config) async {
+  Future<void> _importServerDatabaseFromHelper(
+    List<String> config, {
+    required bool hydrateLocalCache,
+  }) async {
     final syncData = await _syncServerDatabase(config);
     final status = syncData['status'];
     final metadata = status is Map ? status['metadata'] : null;
@@ -157,7 +160,8 @@ class DataSync with ChangeNotifier {
     }
     final importedSha = appdata.implicitData['webServerDbImportSha256']
         ?.toString();
-    if (syncData['skipped'] == true &&
+    if (hydrateLocalCache &&
+        syncData['skipped'] == true &&
         sha256.isNotEmpty &&
         importedSha == sha256) {
       Log.info('Data Sync', 'Server DB already imported');
@@ -174,6 +178,14 @@ class DataSync with ChangeNotifier {
       }
     } on DioException catch (e) {
       if (e.response?.statusCode != 404) rethrow;
+    }
+
+    if (!hydrateLocalCache) {
+      if (sha256.isNotEmpty) {
+        appdata.implicitData['webServerDbSyncedSha256'] = sha256;
+        appdata.writeImplicitData();
+      }
+      return;
     }
 
     final dumps = <String, dynamic>{};
@@ -334,7 +346,7 @@ class DataSync with ChangeNotifier {
     }
   }
 
-  Future<Res<bool>> downloadData() async {
+  Future<Res<bool>> downloadData({bool hydrateLocalCache = true}) async {
     if (_haveWaitingTask) return const Res(true);
     while (isDownloading || isUploading) {
       _haveWaitingTask = true;
@@ -355,7 +367,10 @@ class DataSync with ChangeNotifier {
       }
 
       try {
-        await _importServerDatabaseFromHelper(config);
+        await _importServerDatabaseFromHelper(
+          config,
+          hydrateLocalCache: hydrateLocalCache,
+        );
         Log.info("Data Sync", "Server DB synchronized successfully");
         return const Res(true);
       } catch (e, s) {

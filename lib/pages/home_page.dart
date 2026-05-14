@@ -18,6 +18,7 @@ import 'package:venera/pages/image_favorites_page/image_favorites_page.dart';
 import 'package:venera/pages/search_page.dart';
 import 'package:venera/utils/data_sync.dart';
 import 'package:venera/utils/import_comic.dart';
+import 'package:venera/utils/server_db.dart';
 import 'package:venera/utils/tags_translation.dart';
 import 'package:venera/utils/translations.dart';
 
@@ -229,6 +230,10 @@ class _HistoryState extends State<_History> {
   late int count;
 
   void onHistoryChange() {
+    if (App.isWeb) {
+      loadServerHistory();
+      return;
+    }
     if (mounted) {
       setState(() {
         history = HistoryManager().getRecent();
@@ -237,12 +242,28 @@ class _HistoryState extends State<_History> {
     }
   }
 
+  Future<void> loadServerHistory() async {
+    try {
+      final page = await const ServerDbClient().listHistory(limit: 20);
+      if (!mounted || page == null) {
+        return;
+      }
+      setState(() {
+        history = page.items;
+        count = page.total;
+      });
+    } catch (_) {}
+  }
+
   @override
   void initState() {
     history = HistoryManager().getRecent();
     count = HistoryManager().count();
     HistoryManager().addListener(onHistoryChange);
     super.initState();
+    if (App.isWeb) {
+      loadServerHistory();
+    }
   }
 
   @override

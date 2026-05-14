@@ -5,6 +5,7 @@ import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/history.dart';
 import 'package:venera/foundation/history_tasks.dart';
+import 'package:venera/utils/server_db.dart';
 import 'package:venera/utils/translations.dart';
 
 const _historyReadFilterList = ['All', 'UnCompleted', 'Completed'];
@@ -21,6 +22,9 @@ class _HistoryPageState extends State<HistoryPage> {
   void initState() {
     HistoryManager().addListener(onUpdate);
     super.initState();
+    if (App.isWeb) {
+      _loadServerHistory();
+    }
   }
 
   @override
@@ -31,6 +35,10 @@ class _HistoryPageState extends State<HistoryPage> {
   }
 
   void onUpdate() {
+    if (App.isWeb) {
+      _loadServerHistory();
+      return;
+    }
     setState(() {
       comics = HistoryManager().getAll();
       if (multiSelectMode) {
@@ -51,6 +59,24 @@ class _HistoryPageState extends State<HistoryPage> {
 
   bool multiSelectMode = false;
   Map<History, bool> selectedComics = {};
+
+  Future<void> _loadServerHistory() async {
+    try {
+      final page = await const ServerDbClient().listHistory(limit: 500);
+      if (!mounted || page == null) {
+        return;
+      }
+      setState(() {
+        comics = page.items;
+        if (multiSelectMode) {
+          selectedComics.removeWhere((comic, _) => !comics.contains(comic));
+          if (selectedComics.isEmpty) {
+            multiSelectMode = false;
+          }
+        }
+      });
+    } catch (_) {}
+  }
 
   List<History> get filteredComics {
     return comics.where((comic) {

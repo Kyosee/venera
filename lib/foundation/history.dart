@@ -100,7 +100,9 @@ class History implements Comic {
       readEpisode = Set<String>.from(
         (map["readEpisode"] as List<dynamic>?)?.toSet() ?? const <String>{},
       ),
-      maxPage = map["max_page"];
+      maxPage = map["max_page"] {
+    group = map["chapter_group"];
+  }
 
   @override
   String toString() {
@@ -185,7 +187,9 @@ class HistoryManager with ChangeNotifier {
 
   late String _dbPath;
 
-  int get length => _db.select("select count(*) from history;").first[0] as int;
+  int get length => isInitialized
+      ? _db.select("select count(*) from history;").first[0] as int
+      : 0;
 
   /// Cache of history ids. Improve the performance of find operation.
   Map<String, bool>? _cachedHistoryIds;
@@ -328,6 +332,7 @@ class HistoryManager with ChangeNotifier {
 
   /// Create a isolate to add history to prevent blocking the UI thread.
   Future<void> addHistoryAsync(History newItem) async {
+    if (!isInitialized) return;
     while (_haveAsyncTask) {
       await Future.delayed(Duration(milliseconds: 20));
     }
@@ -355,6 +360,7 @@ class HistoryManager with ChangeNotifier {
   ///
   /// This function would be called when user start reading.
   void addHistory(History newItem) {
+    if (!isInitialized) return;
     _db.execute(_insertHistorySql, _historySqlArgs(newItem));
     if (_cachedHistoryIds == null) {
       updateCache();
@@ -369,12 +375,14 @@ class HistoryManager with ChangeNotifier {
   }
 
   void clearHistory() {
+    if (!isInitialized) return;
     _db.execute("delete from history;");
     updateCache();
     notifyListeners();
   }
 
   void clearUnfavoritedHistory() {
+    if (!isInitialized) return;
     _db.execute('BEGIN TRANSACTION;');
     try {
       final idAndTypes = _db.select("""
@@ -403,6 +411,7 @@ class HistoryManager with ChangeNotifier {
   }
 
   void remove(String id, ComicType type) async {
+    if (!isInitialized) return;
     _db.execute(
       """
       delete from history
@@ -415,6 +424,7 @@ class HistoryManager with ChangeNotifier {
   }
 
   void updateCache() {
+    if (!isInitialized) return;
     _cachedHistoryIds = {};
     var res = _db.select("""
         select id, type from history;
@@ -434,6 +444,7 @@ class HistoryManager with ChangeNotifier {
   }
 
   History? find(String id, ComicType type) {
+    if (!isInitialized) return null;
     if (_cachedHistoryIds == null) {
       updateCache();
     }
@@ -459,6 +470,7 @@ class HistoryManager with ChangeNotifier {
   }
 
   List<History> getAll() {
+    if (!isInitialized) return [];
     var res = _db.select("""
       select * from history
       order by time DESC;
@@ -468,6 +480,7 @@ class HistoryManager with ChangeNotifier {
 
   /// 获取最近阅读的漫画
   List<History> getRecent() {
+    if (!isInitialized) return [];
     var res = _db.select("""
       select * from history
       order by time DESC
@@ -478,6 +491,7 @@ class HistoryManager with ChangeNotifier {
 
   /// 获取历史记录的数量
   int count() {
+    if (!isInitialized) return 0;
     var res = _db.select("""
       select count(*) from history;
     """);
@@ -485,6 +499,7 @@ class HistoryManager with ChangeNotifier {
   }
 
   void close() {
+    if (!isInitialized) return;
     isInitialized = false;
     _db.dispose();
   }
