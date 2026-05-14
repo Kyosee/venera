@@ -1568,47 +1568,45 @@ function ReaderPage({
         ) : null}
       </div>
       <header className={chromeOpen ? 'reader-top open' : 'reader-top'}>
-        <button className="icon-button" type="button" aria-label="返回" onClick={onBack}>
+        <IconButton type="button" aria-label="返回" onClick={onBack}>
           <ChevronLeft size={20} />
-        </button>
+        </IconButton>
         <div>
           <strong>{request.comic.title}</strong>
           <span>{request.episode.title}</span>
         </div>
         <div style={{ display: 'flex', gap: '4px' }}>
           {prevEpisode ? (
-            <button className="icon-button" type="button" aria-label="上一章" title={prevEpisode.title} onClick={goToPrev}>
+            <IconButton type="button" aria-label="上一章" title={prevEpisode.title} onClick={goToPrev}>
               <ChevronLeft size={20} />
-            </button>
+            </IconButton>
           ) : null}
           {nextEpisode ? (
-            <button className="icon-button" type="button" aria-label="下一章" title={nextEpisode.title} onClick={goToNext}>
+            <IconButton type="button" aria-label="下一章" title={nextEpisode.title} onClick={goToNext}>
               <ChevronRight size={20} />
-            </button>
+            </IconButton>
           ) : null}
         </div>
       </header>
       <footer className={chromeOpen ? 'reader-bottom open' : 'reader-bottom'}>
-        <button
-          className="icon-button"
+        <IconButton
           type="button"
           disabled={!isGalleryMode || activePageIndex === 0}
           onClick={() => setPageIndex((current) => Math.max(0, current - 1))}
         >
           <ChevronLeft size={18} />
-        </button>
+        </IconButton>
         <div className="reader-progress">
           <span>{isGalleryMode ? `${activePageIndex + 1}/${images.length || 1}` : `${images.length} 张`}</span>
           <small>{readerModeLabel}</small>
         </div>
-        <button
-          className="icon-button"
+        <IconButton
           type="button"
           disabled={!isGalleryMode || activePageIndex >= images.length - 1}
           onClick={() => setPageIndex((current) => Math.min(images.length - 1, current + 1))}
         >
           <ChevronRight size={18} />
-        </button>
+        </IconButton>
       </footer>
     </main>
   )
