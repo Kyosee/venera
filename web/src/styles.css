@@ -1,46 +1,31 @@
 :root {
-  color-scheme: light;
   font-family:
     "Noto Sans CJK SC", "Noto Sans SC", "Microsoft YaHei", "PingFang SC",
     "Segoe UI", Arial, sans-serif;
   font-size: 16px;
   line-height: 1.5;
   font-weight: 400;
-  color: #1a1c1e;
-  background: #f8f9ff;
-  --bg: #f8f9ff;
-  --surface: #ffffff;
-  --surface-soft: #eef3fa;
-  --text: #1a1c1e;
-  --muted: #6e747d;
-  --border: #d9e2ec;
-  --primary: #0061a4;
-  --primary-soft: #d1e4ff;
-  --secondary-soft: #d7e3f7;
-  --teal: #008f8c;
-  --amber: #a86600;
-  --danger: #b3261e;
-  --shadow: 0 1px 4px rgba(31, 35, 52, 0.08);
+  color: var(--md-sys-color-on-surface, #1a1c1e);
+  background: var(--md-sys-color-surface, #f8f9ff);
+  /* Legacy palette aliased to M3 tokens (set dynamically by ThemeProvider).
+     Existing selectors keep working with --bg/--primary/etc. */
+  --bg: var(--md-sys-color-surface, #f8f9ff);
+  --surface: var(--md-sys-color-surface-container-low, #ffffff);
+  --surface-soft: var(--md-sys-color-surface-container, #eef3fa);
+  --text: var(--md-sys-color-on-surface, #1a1c1e);
+  --muted: var(--md-sys-color-on-surface-variant, #6e747d);
+  --border: var(--md-sys-color-outline-variant, #d9e2ec);
+  --primary: var(--md-sys-color-primary, #0061a4);
+  --primary-soft: var(--md-sys-color-primary-container, #d1e4ff);
+  --secondary-soft: var(--md-sys-color-secondary-container, #d7e3f7);
+  --teal: var(--md-sys-color-tertiary, #008f8c);
+  --amber: var(--md-sys-color-tertiary, #a86600);
+  --danger: var(--md-sys-color-error, #b3261e);
+  --shadow: var(--md-elev-1, 0 1px 4px rgba(31, 35, 52, 0.08));
 }
 
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  color: #e3e2e8;
-  background: #111418;
-  --bg: #111418;
-  --surface: #1a1c20;
-  --surface-soft: #22272e;
-  --text: #e3e2e8;
-  --muted: #c2c7cf;
-  --border: #40484f;
-  --primary: #9ecaff;
-  --primary-soft: #003258;
-  --secondary-soft: #253141;
-  --teal: #4fd1cc;
-  --amber: #e7ad4f;
-  --danger: #ffb4ab;
-  --shadow: 0 1px 4px rgba(0, 0, 0, 0.24);
-}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"]  { color-scheme: dark; }
 
 * {
   box-sizing: border-box;
@@ -1897,25 +1882,37 @@ button {
   }
 }
 
-/* App layout parity overrides — match Flutter Material Design */
-:root,
-:root[data-theme="dark"] {
-  color-scheme: light;
-  color: #171d1b;
-  background: #ffffff;
-  --bg: #ffffff;
-  --surface: #ffffff;
-  --surface-soft: #f0f5f3;
-  --text: #171d1b;
-  --muted: #6b7571;
-  --border: #dfe7e3;
-  --primary: #008f86;
-  --primary-soft: #d8f3ee;
-  --secondary-soft: #e4f3ef;
-  --teal: #008f86;
-  --amber: #9a6700;
-  --danger: #ba1a1a;
-  --shadow: 0 1px 3px rgba(24, 35, 32, 0.08);
+/* App layout parity overrides — static palette removed; M3 tokens are
+   set dynamically by ThemeProvider and aliased to legacy --bg/--surface/etc.
+   at the top of this file. */
+
+.top-actions-mobile { display: contents; }
+@media (min-width: 861px) {
+  /* SideNav is visible on desktop and already shows actionNav (search/tasks/settings).
+     Hide TopBar copies to match Flutter app's NaviPane behavior. */
+  .top-actions-mobile { display: none; }
+}
+
+.color-preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+.color-preset-swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--md-shape-full);
+  border: 2px solid var(--md-sys-color-outline-variant);
+  cursor: pointer;
+  padding: 0;
+  transition: transform var(--md-motion-short-4), border-color var(--md-motion-short-4);
+}
+.color-preset-swatch:hover { transform: scale(1.1); }
+.color-preset-swatch.selected {
+  border-color: var(--md-sys-color-primary);
+  border-width: 3px;
+  transform: scale(1.1);
 }
 
 body,

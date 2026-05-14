@@ -1,0 +1,14 @@
+.tile { position: relative; }
+.trigger { width: 100%; padding: 0; border: none; background: transparent; cursor: pointer; text-align: left; color: inherit; }
+.coverWrap { aspect-ratio: 3/4; border-radius: var(--md-shape-md); overflow: hidden; position: relative;
+             background: var(--md-sys-color-surface-container-highest); }
+.cover { width: 100%; height: 100%; object-fit: cover; display: block; }
+.coverPlaceholder { width: 100%; height: 100%; }
+.badge { position: absolute; top: 8px; right: 8px; background: var(--md-sys-color-primary);
+         color: var(--md-sys-color-on-primary); padding: 2px 8px; border-radius: var(--md-shape-full);
+         font: var(--md-typescale-label-small); }
+.meta { padding: 8px 4px; }
+.title { font: var(--md-typescale-title-small); color: var(--md-sys-color-on-surface);
+         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.subtitle { font: var(--md-typescale-body-small); color: var(--md-sys-color-on-surface-variant);
+            margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

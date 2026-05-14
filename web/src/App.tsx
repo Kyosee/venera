@@ -91,6 +91,20 @@ import {
   deleteFavoriteFolder
 } from './api'
 import { ReloadPrompt } from './ReloadPrompt'
+import { ThemeProvider } from './theme/ThemeProvider'
+import { SnackbarHost } from './ui/Snackbar'
+import { Ripple } from './ui/Ripple'
+import { IconButton } from './ui/IconButton'
+import { CircularProgress, LinearProgress } from './ui/ProgressIndicator'
+import { Switch } from './ui/Switch'
+import { Menu } from './ui/Menu'
+import { TextField } from './ui/TextField'
+import { Button } from './ui/Button'
+import { ComicTile as ComicTilePrimitive } from './components/ComicTile'
+import { AppDataProvider } from './context/AppDataContext'
+import { LibraryProvider } from './context/LibraryContext'
+import { TasksProvider } from './context/TasksContext'
+import { NavigationProvider } from './context/NavigationContext'
 
 type TabKey =
   | 'home'
@@ -263,15 +277,6 @@ function firstPresent(values: Array<string | null | undefined>) {
   return values.find((value) => value != null && value.trim().length > 0) ?? null
 }
 
-function libraryItemMetaRows(item: LibraryItem): ComicMetaRow[] {
-  return [
-    { label: 'Source', value: item.source_key, tone: 'cyan' },
-    { label: 'Authors', value: item.subtitle ?? '', tone: 'blue' },
-    { label: 'Progress', value: item.episode_title ?? '', tone: 'green' },
-    { label: 'Update', value: formatDateOnly(item.updated_at) ?? '', tone: 'orange' }
-  ].filter((row) => row.value.trim().length > 0) as ComicMetaRow[]
-}
-
 function searchComicMetaRows(comic: SearchComic): ComicMetaRow[] {
   return [
     { label: 'Authors', value: comic.subtitle ?? '', tone: 'blue' },
@@ -406,10 +411,6 @@ export default function App() {
     () => normalizeReaderMode(data.settings?.values.readerMode),
     [data.settings]
   )
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = themeMode === 'dark' ? 'dark' : 'light'
-  }, [themeMode])
 
   const setThemeMode = async (value: string) => {
     const next = await updateSettings({ themeMode: value })
@@ -716,9 +717,18 @@ export default function App() {
   )
 
   return (
-    <div className="app-shell">
-      <SideNav activeTab={activePrimaryTab} onSelect={openTab} />
-      <main className="main-area">
+    <AppDataProvider>
+      <LibraryProvider>
+        <TasksProvider>
+          <NavigationProvider>
+            <ThemeProvider
+              colorSetting={typeof data.settings?.values.color === 'string' ? data.settings.values.color : 'blue'}
+              themeMode={(themeMode === 'light' || themeMode === 'dark') ? themeMode : 'system'}
+            >
+              <SnackbarHost>
+                <div className="app-shell">
+                  <SideNav activeTab={activePrimaryTab} onSelect={openTab} />
+                  <main className="main-area">
         {showRootChrome ? (
           <TopBar
             activeTab={activePrimaryTab}
@@ -854,7 +864,13 @@ export default function App() {
       </main>
       {showRootChrome ? <BottomNav activeTab={activePrimaryTab} onSelect={openTab} /> : null}
       <ReloadPrompt />
-    </div>
+        </div>
+              </SnackbarHost>
+            </ThemeProvider>
+          </NavigationProvider>
+        </TasksProvider>
+      </LibraryProvider>
+    </AppDataProvider>
   )
 }
 
@@ -918,8 +934,12 @@ function NavButton({
       onClick={() => onSelect(item.key)}
       title={item.label}
     >
-      <Icon size={22} />
-      <span>{item.label}</span>
+      <Ripple>
+        <span className="nav-button-content">
+          <Icon size={22} />
+          <span>{item.label}</span>
+        </span>
+      </Ripple>
     </button>
   )
 }
@@ -956,26 +976,27 @@ function TopBar({
         <p>{isNormal ? `服务端 ${health.version}` : '服务或数据异常'}</p>
       </div>
       <div className="top-actions">
-        {actionNav.map((item) => {
-          const Icon = item.icon
-          return (
-            <button
-              className="top-action-button"
-              key={item.key}
-              type="button"
-              title={item.label}
-              aria-label={item.label}
-              onClick={() => onSelect(item.key)}
-            >
-              <Icon size={20} />
-            </button>
-          )
-        })}
+        <div className="top-actions-mobile">
+          {actionNav.map((item) => {
+            const Icon = item.icon
+            return (
+              <IconButton
+                key={item.key}
+                type="button"
+                title={item.label}
+                aria-label={item.label}
+                onClick={() => onSelect(item.key)}
+              >
+                <Icon size={20} />
+              </IconButton>
+            )
+          })}
+        </div>
         <StatusPill ok={isNormal} text={isNormal ? '正常' : '异常'} />
         {lastUpdated ? <span className="muted-text">{lastUpdated}</span> : null}
-        <button className="icon-button" type="button" onClick={onRefresh} aria-label="刷新">
-          {loading ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
-        </button>
+        <IconButton type="button" onClick={onRefresh} aria-label="刷新">
+          {loading ? <CircularProgress size={18} /> : <RefreshCw size={18} />}
+        </IconButton>
       </div>
     </header>
   )
@@ -1114,7 +1135,17 @@ function ComicStrip({
   return (
     <div className="comic-strip">
       {items.map((item) => (
-        <ComicTile key={libraryItemKey(item)} item={item} compact onSelect={onSelect} />
+        <ComicTilePrimitive
+          key={libraryItemKey(item)}
+          data={{
+            id: item.comic_id,
+            sourceKey: item.source_key,
+            title: item.title,
+            cover: item.cover ?? null,
+            subtitle: item.subtitle ?? null,
+          }}
+          onOpen={() => onSelect?.(item)}
+        />
       ))}
     </div>
   )
@@ -1140,6 +1171,37 @@ function SourceChips({ sources }: { sources: SourceSummary[] }) {
   )
 }
 
+function ColorPresetRow({ current, onChange }: { current: string; onChange: (value: string) => void }) {
+  const presets: { key: string; label: string; hex: string }[] = [
+    { key: 'system', label: '跟随系统', hex: '#2196F3' },
+    { key: 'red',    label: '红',    hex: '#F44336' },
+    { key: 'pink',   label: '粉',    hex: '#E91E63' },
+    { key: 'purple', label: '紫',    hex: '#9C27B0' },
+    { key: 'blue',   label: '蓝',    hex: '#2196F3' },
+    { key: 'cyan',   label: '青',    hex: '#00BCD4' },
+    { key: 'green',  label: '绿',    hex: '#4CAF50' },
+    { key: 'yellow', label: '黄',    hex: '#FFEB3B' },
+    { key: 'orange', label: '橙',    hex: '#FF9800' },
+  ]
+  return (
+    <div className="color-preset-row" role="radiogroup" aria-label="主题色">
+      {presets.map((p) => (
+        <button
+          key={p.key}
+          type="button"
+          role="radio"
+          aria-checked={current === p.key}
+          aria-label={p.label}
+          title={p.label}
+          className={`color-preset-swatch${current === p.key ? ' selected' : ''}`}
+          style={{ background: p.hex }}
+          onClick={() => onChange(p.key)}
+        />
+      ))}
+    </div>
+  )
+}
+
 function PageHeader({
   title,
   onBack,
@@ -1151,9 +1213,9 @@ function PageHeader({
 }) {
   return (
     <header className="page-header">
-      <button className="icon-button" type="button" aria-label="返回" onClick={onBack}>
+      <IconButton type="button" aria-label="返回" onClick={onBack}>
         <ChevronLeft size={20} />
-      </button>
+      </IconButton>
       <h1>{title}</h1>
       <div className="page-header-actions">{actions ?? <span />}</div>
     </header>
@@ -1189,7 +1251,7 @@ function LoadMoreSentinel({
 
   return (
     <div className="load-more-sentinel" ref={ref}>
-      {loading ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />}
+      {loading ? <CircularProgress size={16} /> : <RefreshCw size={16} />}
       <span>{loading ? '加载中' : label ? `继续加载 ${label}` : '继续加载'}</span>
     </div>
   )
@@ -1380,15 +1442,14 @@ function ComicDetailPage({
           <section className="detail-section">
             <div className="detail-section-header">
               <h3>章节</h3>
-              <button
-                className="icon-button"
+              <IconButton
                 type="button"
                 aria-label="章节排序"
                 title="章节排序"
                 onClick={() => setChaptersReversed((value) => !value)}
               >
                 <ChevronDown className={chaptersReversed ? 'rotated' : ''} size={18} />
-              </button>
+              </IconButton>
             </div>
             {comic.episodes.length === 0 ? (
               <EmptyLine icon={BookOpen} text="暂无章节" />
@@ -1506,47 +1567,45 @@ function ReaderPage({
         ) : null}
       </div>
       <header className={chromeOpen ? 'reader-top open' : 'reader-top'}>
-        <button className="icon-button" type="button" aria-label="返回" onClick={onBack}>
+        <IconButton type="button" aria-label="返回" onClick={onBack}>
           <ChevronLeft size={20} />
-        </button>
+        </IconButton>
         <div>
           <strong>{request.comic.title}</strong>
           <span>{request.episode.title}</span>
         </div>
         <div style={{ display: 'flex', gap: '4px' }}>
           {prevEpisode ? (
-            <button className="icon-button" type="button" aria-label="上一章" title={prevEpisode.title} onClick={goToPrev}>
+            <IconButton type="button" aria-label="上一章" title={prevEpisode.title} onClick={goToPrev}>
               <ChevronLeft size={20} />
-            </button>
+            </IconButton>
           ) : null}
           {nextEpisode ? (
-            <button className="icon-button" type="button" aria-label="下一章" title={nextEpisode.title} onClick={goToNext}>
+            <IconButton type="button" aria-label="下一章" title={nextEpisode.title} onClick={goToNext}>
               <ChevronRight size={20} />
-            </button>
+            </IconButton>
           ) : null}
         </div>
       </header>
       <footer className={chromeOpen ? 'reader-bottom open' : 'reader-bottom'}>
-        <button
-          className="icon-button"
+        <IconButton
           type="button"
           disabled={!isGalleryMode || activePageIndex === 0}
           onClick={() => setPageIndex((current) => Math.max(0, current - 1))}
         >
           <ChevronLeft size={18} />
-        </button>
+        </IconButton>
         <div className="reader-progress">
           <span>{isGalleryMode ? `${activePageIndex + 1}/${images.length || 1}` : `${images.length} 张`}</span>
           <small>{readerModeLabel}</small>
         </div>
-        <button
-          className="icon-button"
+        <IconButton
           type="button"
           disabled={!isGalleryMode || activePageIndex >= images.length - 1}
           onClick={() => setPageIndex((current) => Math.min(images.length - 1, current + 1))}
         >
           <ChevronRight size={18} />
-        </button>
+        </IconButton>
       </footer>
     </main>
   )
@@ -1790,9 +1849,9 @@ function SearchView({
           disabled={enabledSources.length === 0 || searching}
           onChange={(event) => setKeyword(event.target.value)}
         />
-        <button className="primary-button" disabled={!keyword.trim() || searching || enabledSources.length === 0} type="submit">
+        <Button variant="filled" disabled={!keyword.trim() || searching || enabledSources.length === 0} type="submit">
           {searching ? '搜索中' : '搜索'}
-        </button>
+        </Button>
       </form>
 
       {enabledSources.length > 0 ? (
@@ -2146,7 +2205,7 @@ function UpdatesView({
                 disabled={!activeFolder || loading || task != null}
                 onClick={() => void onCheck()}
               >
-                {task ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
+                {task ? <CircularProgress size={18} /> : <Play size={18} />}
               </button>
               <button
                 className="icon-button"
@@ -2166,7 +2225,7 @@ function UpdatesView({
                 disabled={!activeFolder || loading}
                 onClick={() => void onRefresh()}
               >
-                {loading ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
+                {loading ? <CircularProgress size={18} /> : <RefreshCw size={18} />}
               </button>
             </>
           }
@@ -2322,12 +2381,12 @@ function FavoritesView({
                 autoFocus
               />
               <div style={{ display: 'flex', gap: '6px' }}>
-                <button className="primary-button" style={{ minHeight: '32px', fontSize: '13px' }} disabled={!newFolderTitle.trim() || folderBusy} onClick={handleAddFolder}>
+                <Button variant="filled" disabled={!newFolderTitle.trim() || folderBusy} onClick={handleAddFolder}>
                   {folderBusy ? '创建中' : '确定'}
-                </button>
-                <button className="icon-text-button subtle" style={{ minHeight: '32px', fontSize: '13px' }} onClick={() => setAddingFolder(false)}>
+                </Button>
+                <Button variant="text" onClick={() => setAddingFolder(false)}>
                   取消
-                </button>
+                </Button>
               </div>
             </div>
           ) : (
@@ -2444,8 +2503,7 @@ function LibraryView({
       ) : null}
       {standalone ? (
         <section className="search-strip app-page-search" aria-label="搜索">
-          <Search size={20} />
-          <input placeholder="搜索" disabled />
+          <TextField leading={<Search size={20} />} placeholder="搜索" disabled />
         </section>
       ) : null}
       <Panel title={title} action={String(total)}>
@@ -2535,43 +2593,65 @@ function LibraryGrid({
   return (
     <div className="comic-grid">
       {items.map((item) => (
-        <ComicTile key={libraryItemKey(item)} item={item} onSelect={onSelect} />
+        <ComicTilePrimitive
+          key={libraryItemKey(item)}
+          data={{
+            id: item.comic_id,
+            sourceKey: item.source_key,
+            title: item.title,
+            cover: item.cover ?? null,
+            subtitle: item.subtitle ?? null,
+          }}
+          onOpen={() => onSelect?.(item)}
+        />
       ))}
     </div>
   )
 }
 
-function ComicTile({
+function SourceSettingSelectRow({
   item,
-  compact = false,
-  onSelect
+  currentValue,
+  saving,
+  selectedIndex,
+  onSave,
 }: {
-  item: LibraryItem
-  compact?: boolean
-  onSelect?: (item: LibraryItem) => void
+  item: SourceSettingItem
+  currentValue: SourceSettingValue
+  saving: boolean
+  selectedIndex: number
+  onSave: (value: SourceSettingValue) => void
 }) {
-  const rows = libraryItemMetaRows(item)
-  if (compact) {
-    return (
-      <button className="comic-tile compact" type="button" onClick={() => onSelect?.(item)} title={item.title}>
-        <div className="comic-tile-cover">
-          <CoverImage url={item.cover} iconSize={18} />
-        </div>
-        <strong>{item.title}</strong>
-      </button>
-    )
-  }
-
+  const [open, setOpen] = useState(false)
+  const anchorRef = useRef<HTMLButtonElement>(null)
+  const currentText = item.options[selectedIndex]?.text ?? settingValueText(currentValue)
+  const disabled = saving || item.options.length === 0
   return (
-    <button className="comic-tile" type="button" onClick={() => onSelect?.(item)} title={item.title}>
-      <div className="comic-tile-cover">
-        <CoverImage url={item.cover} iconSize={18} />
-      </div>
-      <div className="comic-tile-main">
+    <div className="source-setting-row">
+      <div className="source-setting-main">
         <strong>{item.title}</strong>
-        <ComicMetaRows rows={rows} />
+        <span>{currentText}</span>
       </div>
-    </button>
+      <button
+        ref={anchorRef}
+        type="button"
+        className="source-setting-select"
+        disabled={disabled}
+        onClick={() => setOpen(true)}
+      >
+        {currentText}
+        <ChevronDown size={16} />
+      </button>
+      <Menu
+        anchor={anchorRef.current}
+        open={open}
+        onClose={() => setOpen(false)}
+        items={item.options.map((option) => ({
+          label: option.text,
+          onClick: () => onSave(option.value),
+        }))}
+      />
+    </div>
   )
 }
 
@@ -3193,7 +3273,7 @@ function TaskRow({ task }: { task: TaskSummary }) {
         <span>更新 {updated}</span>
         <span>失败 {failed}</span>
       </div>
-      <progress value={task.progress} max={100} aria-label={title} />
+      <LinearProgress value={Math.min(1, Math.max(0, task.progress / 100))} />
       {task.error ? <small>{task.error}</small> : null}
     </div>
   )
@@ -3209,7 +3289,7 @@ function TaskProgressLine({ task }: { task: TaskSummary }) {
       <span>检查 {checked}/{total}</span>
       <span>更新 {updated}</span>
       <span>失败 {failed}</span>
-      <progress value={task.progress} max={100} aria-label="追更检查进度" />
+      <LinearProgress value={Math.min(1, Math.max(0, task.progress / 100))} />
     </div>
   )
 }
@@ -3289,6 +3369,12 @@ function SettingsView({
                     </button>
                   ))}
                 </div>
+              </SettingRow>
+              <SettingRow title="主题色" subtitle="种子色驱动 Material 3 调色板">
+                <ColorPresetRow
+                  current={typeof settings?.values.color === 'string' ? settings.values.color : 'blue'}
+                  onChange={(value) => void updateSetting('color', value)}
+                />
               </SettingRow>
             </SettingsPart>
           ) : null}
@@ -3611,41 +3697,47 @@ function WebDavPanel({ onImportComplete }: { onImportComplete: () => void | Prom
   return (
     <Panel title="WebDAV" action={config?.endpoint_url ? '已配置' : undefined}>
       <form className="webdav-form" onSubmit={handleSave}>
-        <input
+        <TextField
           value={endpointUrl}
           placeholder="WebDAV 地址"
           onChange={(event) => setEndpointUrl(event.target.value)}
         />
-        <input value={username} placeholder="用户名" onChange={(event) => setUsername(event.target.value)} />
-        <input
+        <TextField
+          value={username}
+          placeholder="用户名"
+          onChange={(event) => setUsername(event.target.value)}
+        />
+        <TextField
           value={password}
           placeholder={config?.password_configured ? '密码已配置' : '密码'}
           type="password"
           onChange={(event) => setPassword(event.target.value)}
         />
-        <input value={rootPath} placeholder="根路径" onChange={(event) => setRootPath(event.target.value)} />
-        <button className="primary-button" type="submit" disabled={busy || !endpointUrl.trim()}>
+        <TextField
+          value={rootPath}
+          placeholder="根路径"
+          onChange={(event) => setRootPath(event.target.value)}
+        />
+        <Button variant="filled" type="submit" disabled={busy || !endpointUrl.trim()}>
           保存
-        </button>
-        <button className="icon-text-button subtle" type="button" disabled={busy} onClick={() => void openPath('')}>
-          <FolderOpen size={16} />
+        </Button>
+        <Button variant="text" type="button" disabled={busy} onClick={() => void openPath('')} leading={<FolderOpen size={16} />}>
           浏览
-        </button>
+        </Button>
       </form>
       <div className="webdav-actions">
-        <button className="icon-text-button subtle" type="button" disabled={busy} onClick={() => void createLocalBackup()}>
-          <Save size={16} />
+        <Button variant="text" type="button" disabled={busy} onClick={() => void createLocalBackup()} leading={<Save size={16} />}>
           创建本地备份
-        </button>
-        <button
-          className="icon-text-button subtle"
+        </Button>
+        <Button
+          variant="text"
           type="button"
           disabled={busy || !config?.endpoint_url}
           onClick={() => void uploadBackup()}
+          leading={<Upload size={16} />}
         >
-          <Upload size={16} />
           备份并上传
-        </button>
+        </Button>
       </div>
       {message ? <div className="data-row">{message}</div> : null}
       {entries.length > 0 || currentPath ? (
@@ -3898,14 +3990,10 @@ function SourceList({
                   }
                 />
                 {onToggle && source.runtime_status === 'registered' ? (
-                  <label className="source-toggle" title={source.enabled ? '停用' : '启用'}>
-                    <input
-                      type="checkbox"
-                      checked={source.enabled}
-                      onChange={(event) => onToggle(source.key, event.target.checked)}
-                    />
-                    <span />
-                  </label>
+                  <Switch
+                    checked={source.enabled}
+                    onChange={(checked) => onToggle(source.key, checked)}
+                  />
                 ) : null}
                 {onDelete ? (
                   <button
@@ -3975,7 +4063,7 @@ function SourceSettingsPanel({
     <div className="source-settings-panel">
       {state.loading && !data ? (
         <div className="source-settings-message">
-          <Loader2 className="spin" size={16} />
+          <CircularProgress size={16} />
           <span>读取设置中</span>
         </div>
       ) : null}
@@ -4039,15 +4127,11 @@ function SourceSettingControl({
           <strong>{item.title}</strong>
           <span>{settingValueText(currentValue)}</span>
         </div>
-        <label className="source-toggle" title={Boolean(currentValue) ? '关闭' : '开启'}>
-          <input
-            type="checkbox"
-            checked={Boolean(currentValue)}
-            disabled={saving}
-            onChange={(event) => onSave(event.target.checked)}
-          />
-          <span />
-        </label>
+        <Switch
+          checked={Boolean(currentValue)}
+          disabled={saving}
+          onChange={(checked) => onSave(checked)}
+        />
       </div>
     )
   }
@@ -4058,27 +4142,13 @@ function SourceSettingControl({
       item.options.findIndex((option) => settingValuesEqual(option.value, currentValue))
     )
     return (
-      <div className="source-setting-row">
-        <div className="source-setting-main">
-          <strong>{item.title}</strong>
-          <span>{item.options[selectedIndex]?.text ?? settingValueText(currentValue)}</span>
-        </div>
-        <select
-          className="source-setting-select"
-          disabled={saving || item.options.length === 0}
-          value={String(selectedIndex)}
-          onChange={(event) => {
-            const option = item.options[Number(event.target.value)]
-            if (option) onSave(option.value)
-          }}
-        >
-          {item.options.map((option, index) => (
-            <option key={`${item.key}:${index}:${settingValueText(option.value)}`} value={String(index)}>
-              {option.text}
-            </option>
-          ))}
-        </select>
-      </div>
+      <SourceSettingSelectRow
+        item={item}
+        currentValue={currentValue}
+        saving={saving}
+        selectedIndex={selectedIndex}
+        onSave={onSave}
+      />
     )
   }
 
@@ -4149,9 +4219,10 @@ function settingValuesEqual(left: SourceSettingValue, right: SourceSettingValue)
 }
 
 function EmptyLine({ icon: Icon, text }: { icon: typeof Home; text: string }) {
+  const isLoader = Icon === Loader2
   return (
     <div className="empty-line">
-      <Icon size={18} />
+      {isLoader ? <CircularProgress size={18} /> : <Icon size={18} />}
       <span>{text}</span>
     </div>
   )
