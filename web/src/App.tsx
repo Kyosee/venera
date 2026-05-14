@@ -97,6 +97,7 @@ import { Ripple } from './ui/Ripple'
 import { IconButton } from './ui/IconButton'
 import { CircularProgress, LinearProgress } from './ui/ProgressIndicator'
 import { Switch } from './ui/Switch'
+import { Menu } from './ui/Menu'
 import { ComicTile as ComicTilePrimitive } from './components/ComicTile'
 import { AppDataProvider } from './context/AppDataContext'
 import { LibraryProvider } from './context/LibraryContext'
@@ -2579,6 +2580,52 @@ function LibraryGrid({
   )
 }
 
+function SourceSettingSelectRow({
+  item,
+  currentValue,
+  saving,
+  selectedIndex,
+  onSave,
+}: {
+  item: SourceSettingItem
+  currentValue: SourceSettingValue
+  saving: boolean
+  selectedIndex: number
+  onSave: (value: SourceSettingValue) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const anchorRef = useRef<HTMLButtonElement>(null)
+  const currentText = item.options[selectedIndex]?.text ?? settingValueText(currentValue)
+  const disabled = saving || item.options.length === 0
+  return (
+    <div className="source-setting-row">
+      <div className="source-setting-main">
+        <strong>{item.title}</strong>
+        <span>{currentText}</span>
+      </div>
+      <button
+        ref={anchorRef}
+        type="button"
+        className="source-setting-select"
+        disabled={disabled}
+        onClick={() => setOpen(true)}
+      >
+        {currentText}
+        <ChevronDown size={16} />
+      </button>
+      <Menu
+        anchor={anchorRef.current}
+        open={open}
+        onClose={() => setOpen(false)}
+        items={item.options.map((option) => ({
+          label: option.text,
+          onClick: () => onSave(option.value),
+        }))}
+      />
+    </div>
+  )
+}
+
 function ComicMetaRows({ rows }: { rows: ComicMetaRow[] }) {
   if (rows.length === 0) return null
   return (
@@ -4054,27 +4101,13 @@ function SourceSettingControl({
       item.options.findIndex((option) => settingValuesEqual(option.value, currentValue))
     )
     return (
-      <div className="source-setting-row">
-        <div className="source-setting-main">
-          <strong>{item.title}</strong>
-          <span>{item.options[selectedIndex]?.text ?? settingValueText(currentValue)}</span>
-        </div>
-        <select
-          className="source-setting-select"
-          disabled={saving || item.options.length === 0}
-          value={String(selectedIndex)}
-          onChange={(event) => {
-            const option = item.options[Number(event.target.value)]
-            if (option) onSave(option.value)
-          }}
-        >
-          {item.options.map((option, index) => (
-            <option key={`${item.key}:${index}:${settingValueText(option.value)}`} value={String(index)}>
-              {option.text}
-            </option>
-          ))}
-        </select>
-      </div>
+      <SourceSettingSelectRow
+        item={item}
+        currentValue={currentValue}
+        saving={saving}
+        selectedIndex={selectedIndex}
+        onSave={onSave}
+      />
     )
   }
 
