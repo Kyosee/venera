@@ -1218,7 +1218,7 @@ function LoadMoreSentinel({
 
   return (
     <div className="load-more-sentinel" ref={ref}>
-      {loading ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />}
+      {loading ? <CircularProgress size={16} /> : <RefreshCw size={16} />}
       <span>{loading ? '加载中' : label ? `继续加载 ${label}` : '继续加载'}</span>
     </div>
   )
@@ -2175,7 +2175,7 @@ function UpdatesView({
                 disabled={!activeFolder || loading || task != null}
                 onClick={() => void onCheck()}
               >
-                {task ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
+                {task ? <CircularProgress size={18} /> : <Play size={18} />}
               </button>
               <button
                 className="icon-button"
@@ -2195,7 +2195,7 @@ function UpdatesView({
                 disabled={!activeFolder || loading}
                 onClick={() => void onRefresh()}
               >
-                {loading ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
+                {loading ? <CircularProgress size={18} /> : <RefreshCw size={18} />}
               </button>
             </>
           }
@@ -4004,7 +4004,7 @@ function SourceSettingsPanel({
     <div className="source-settings-panel">
       {state.loading && !data ? (
         <div className="source-settings-message">
-          <Loader2 className="spin" size={16} />
+          <CircularProgress size={16} />
           <span>读取设置中</span>
         </div>
       ) : null}
