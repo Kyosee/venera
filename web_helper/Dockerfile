@@ -1,6 +1,6 @@
-# syntax=docker/dockerfile:1
-
-# Build the Rust fetch sidecar used by the Node web helper.
+# --- Stage 1: Build the Rust fetch sidecar ---
+# We compile the sidecar against glibc inside Debian (matches the Playwright
+# runtime's libc) so the resulting binary runs without extra runtime deps.
 FROM rust:1.95-slim-bookworm AS sidecar-builder
 WORKDIR /build
 
@@ -17,36 +17,41 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY web_helper/rust-fetch/Cargo.toml web_helper/rust-fetch/Cargo.lock* ./
-COPY web_helper/rust-fetch/.cargo /root/.cargo
+# Pre-cache dependencies with a stub main.rs so changes to the source don't
+# bust the deps cache layer.
+COPY rust-fetch/Cargo.toml rust-fetch/Cargo.lock* ./
+COPY rust-fetch/.cargo /root/.cargo
 RUN mkdir -p src && echo "fn main(){}" > src/main.rs && \
     cargo build --release && \
     rm -rf src target/release/deps/venera_fetch* target/release/venera-fetch
 
-COPY web_helper/rust-fetch/src ./src
+COPY rust-fetch/src ./src
 RUN cargo build --release
 
-# Runtime: Playwright image supplies Node.js and browser dependencies.
+# --- Stage 2: Runtime ---
 FROM mcr.microsoft.com/playwright:v1.59.1-noble
+
 WORKDIR /app
 
 ENV NODE_ENV=production
-ENV PORT=60098
+ENV PORT=8080
 ENV VENERA_STATIC_DIR=/app/public
 ENV VENERA_BROWSER_DATA_DIR=/app/browser-data
 ENV VENERA_COOKIE_JAR_PATH=/app/browser-data/helper-cookies.json
 ENV VENERA_BROWSER_HEADLESS=true
 ENV VENERA_FETCH_SIDECAR=http://127.0.0.1:9876
 
-COPY web_helper/package.json web_helper/server.js ./
+COPY package.json server.js ./
 RUN npm install --omit=dev
 
+# Bring in the compiled sidecar binary
 COPY --from=sidecar-builder /build/target/release/venera-fetch /usr/local/bin/venera-fetch
 RUN chmod +x /usr/local/bin/venera-fetch
 
-COPY web_helper/entrypoint.sh /usr/local/bin/entrypoint.sh
+# Entrypoint runs both processes. The Node helper is the foreground process;
+# if it exits, the container exits (and the sidecar dies with it).
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-VOLUME ["/app/browser-data"]
-EXPOSE 60098
+EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

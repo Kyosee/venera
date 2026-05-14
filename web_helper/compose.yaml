@@ -1,9 +1,6 @@
 services:
-  venera-webpwa:
-    build:
-      context: .
-      dockerfile: Dockerfile.webpwa
-    container_name: venera-webpwa
+  venera-web-helper:
+    build: .
     restart: unless-stopped
     ports:
       - "60098:60098"
@@ -14,8 +11,8 @@ services:
       VENERA_COOKIE_JAR_PATH: /app/browser-data/helper-cookies.json
       VENERA_BROWSER_HEADLESS: "true"
     volumes:
-      - ./build/web:/app/public:ro
-      - webpwa-browser-data:/app/browser-data
+      - ./public:/app/public:ro
+      - browser-data:/app/browser-data
 
 volumes:
-  webpwa-browser-data:
+  browser-data:
