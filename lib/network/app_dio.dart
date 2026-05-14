@@ -2,14 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/services.dart';
-import 'package:rhttp/rhttp.dart' as rhttp;
-import 'package:venera/foundation/appdata.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:venera/foundation/log.dart';
 import 'package:venera/network/cache.dart';
-import 'package:venera/network/proxy.dart';
+import 'package:venera/network/cors_proxy.dart';
 
-import '../foundation/app.dart';
+import 'app_dio_io.dart' if (dart.library.html) 'app_dio_web_stub.dart';
 import 'cloudflare.dart';
 import 'cookie_jar.dart';
 
@@ -137,15 +135,27 @@ class MyLogInterceptor implements Interceptor {
 }
 
 class AppDio with DioMixin {
-  AppDio([BaseOptions? options]) {
+  AppDio([BaseOptions? options]) : this.withInterceptors(options, null);
+
+  AppDio.withInterceptors(
+    BaseOptions? options,
+    List<Interceptor>? interceptors,
+  ) {
     this.options = options ?? BaseOptions();
-    httpClientAdapter = RHttpAdapter();
-    if (App.isInitialized) {
-      interceptors.add(CookieManagerSql(SingleInstanceCookieJar.instance!));
-      interceptors.add(NetworkCacheManager());
-      interceptors.add(CloudflareInterceptor());
-      interceptors.add(MyLogInterceptor());
+    httpClientAdapter = createAppHttpClientAdapter();
+    this.interceptors.addAll(interceptors ?? _buildDefaultInterceptors());
+  }
+
+  static List<Interceptor> _buildDefaultInterceptors() {
+    final list = <Interceptor>[];
+    if (!kIsWeb && SingleInstanceCookieJar.instance != null) {
+      list.add(CookieManagerSql(SingleInstanceCookieJar.instance!));
     }
+    list.add(NetworkCacheManager());
+    list.add(CloudflareInterceptor());
+    if (kIsWeb) list.add(CorsProxyInterceptor());
+    list.add(MyLogInterceptor());
+    return list;
   }
 
   static final Map<String, bool> _requests = {};
@@ -185,108 +195,66 @@ class AppDio with DioMixin {
   }
 }
 
-class RHttpAdapter implements HttpClientAdapter {
-  Future<rhttp.ClientSettings> get settings async {
-    var proxy = await getProxy();
+class CorsProxyInterceptor extends Interceptor {
+  static const _forbiddenRequestHeaders = {
+    'accept-charset',
+    'accept-encoding',
+    'access-control-request-headers',
+    'access-control-request-method',
+    'connection',
+    'content-length',
+    'cookie',
+    'cookie2',
+    'date',
+    'dnt',
+    'expect',
+    'host',
+    'keep-alive',
+    'origin',
+    'referer',
+    'te',
+    'trailer',
+    'transfer-encoding',
+    'upgrade',
+    'user-agent',
+    'via',
+  };
 
-    return rhttp.ClientSettings(
-      proxySettings: proxy == null
-          ? const rhttp.ProxySettings.noProxy()
-          : rhttp.ProxySettings.proxy(proxy),
-      redirectSettings: const rhttp.RedirectSettings.limited(5),
-      timeoutSettings: const rhttp.TimeoutSettings(
-        connectTimeout: Duration(seconds: 15),
-        keepAliveTimeout: Duration(seconds: 60),
-        keepAlivePing: Duration(seconds: 30),
-      ),
-      throwOnStatusCode: false,
-      dnsSettings: rhttp.DnsSettings.static(overrides: _getOverrides()),
-      tlsSettings: rhttp.TlsSettings(
-        sni: appdata.settings['sni'] != false,
-        verifyCertificates: appdata.settings['ignoreBadCertificate'] != true,
-      ),
-    );
-  }
-
-  static Map<String, List<String>> _getOverrides() {
-    if (!appdata.settings['enableDnsOverrides'] == true) {
-      return {};
-    }
-    var config = appdata.settings["dnsOverrides"];
-    var result = <String, List<String>>{};
-    if (config is Map) {
-      for (var entry in config.entries) {
-        if (entry.key is String && entry.value is String) {
-          result[entry.key] = [entry.value];
-        }
-      }
-    }
-    return result;
-  }
+  static const _forbiddenRequestHeaderPrefixes = {'proxy-', 'sec-'};
 
   @override
-  void close({bool force = false}) {}
-
-  @override
-  Future<ResponseBody> fetch(
-    RequestOptions options,
-    Stream<Uint8List>? requestStream,
-    Future<void>? cancelFuture,
-  ) async {
-    if (options.headers['User-Agent'] == null &&
-        options.headers['user-agent'] == null) {
-      options.headers['User-Agent'] = "venera/v${App.version}";
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    final proxyUrl = resolveCorsProxyEndpoint(useSameOriginDefault: true);
+    if (proxyUrl == null) {
+      _removeForbiddenBrowserHeaders(options.headers);
+      handler.next(options);
+      return;
     }
-
-    var res = await rhttp.Rhttp.request(
-      method: rhttp.HttpMethod(options.method),
-      url: options.uri.toString(),
-      settings: await settings,
-      expectBody: rhttp.HttpExpectBody.stream,
-      body: requestStream == null ? null : rhttp.HttpBody.stream(requestStream),
-      headers: rhttp.HttpHeaders.rawMap(
-        Map.fromEntries(
-          options.headers.entries.map(
-            (e) => MapEntry(e.key, e.value.toString().trim()),
-          ),
-        ),
-      ),
-    );
-    if (res is! rhttp.HttpStreamResponse) {
-      throw Exception("Invalid response type: ${res.runtimeType}");
+    final originalUri = options.uri.toString();
+    if (originalUri.startsWith(proxyUrl)) {
+      _removeForbiddenBrowserHeaders(options.headers);
+      handler.next(options);
+      return;
     }
-    var headers = <String, List<String>>{};
-    for (var entry in res.headers) {
-      var key = entry.$1.toLowerCase();
-      headers[key] ??= [];
-      headers[key]!.add(entry.$2);
+    if (!originalUri.startsWith('http://') &&
+        !originalUri.startsWith('https://')) {
+      _removeForbiddenBrowserHeaders(options.headers);
+      handler.next(options);
+      return;
     }
-    return ResponseBody(
-      res.body,
-      res.statusCode,
-      statusMessage: _getStatusMessage(res.statusCode),
-      isRedirect: false,
-      headers: headers,
-    );
+    preserveCorsProxySourceHeaders(options.headers);
+    _removeForbiddenBrowserHeaders(options.headers);
+    final proxied = buildCorsProxyUrl(proxyUrl, options.uri);
+    options.path = proxied;
+    options.baseUrl = '';
+    handler.next(options);
   }
 
-  static String _getStatusMessage(int statusCode) {
-    return switch (statusCode) {
-      200 => "OK",
-      201 => "Created",
-      202 => "Accepted",
-      204 => "No Content",
-      206 => "Partial Content",
-      301 => "Moved Permanently",
-      302 => "Found",
-      400 => "Invalid Status Code 400: The Request is invalid.",
-      401 => "Invalid Status Code 401: The Request is unauthorized.",
-      403 =>
-        "Invalid Status Code 403: No permission to access the resource. Check your account or network.",
-      404 => "Invalid Status Code 404: Not found.",
-      429 =>
-        "Invalid Status Code 429: Too many requests. Please try again later.",
-      _ => "Invalid Status Code $statusCode",
-    };
+  void _removeForbiddenBrowserHeaders(Map<String, dynamic> headers) {
+    headers.removeWhere((key, value) {
+      final lower = key.toString().toLowerCase();
+      return _forbiddenRequestHeaders.contains(lower) ||
+          _forbiddenRequestHeaderPrefixes.any(lower.startsWith);
+    });
   }
 }
