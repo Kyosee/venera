@@ -95,7 +95,7 @@ import { ThemeProvider } from './theme/ThemeProvider'
 import { SnackbarHost } from './ui/Snackbar'
 import { Ripple } from './ui/Ripple'
 import { IconButton } from './ui/IconButton'
-import { CircularProgress } from './ui/ProgressIndicator'
+import { CircularProgress, LinearProgress } from './ui/ProgressIndicator'
 import { AppDataProvider } from './context/AppDataContext'
 import { LibraryProvider } from './context/LibraryContext'
 import { TasksProvider } from './context/TasksContext'
@@ -3222,7 +3222,7 @@ function TaskRow({ task }: { task: TaskSummary }) {
         <span>更新 {updated}</span>
         <span>失败 {failed}</span>
       </div>
-      <progress value={task.progress} max={100} aria-label={title} />
+      <LinearProgress value={Math.min(1, Math.max(0, task.progress / 100))} />
       {task.error ? <small>{task.error}</small> : null}
     </div>
   )
@@ -3238,7 +3238,7 @@ function TaskProgressLine({ task }: { task: TaskSummary }) {
       <span>检查 {checked}/{total}</span>
       <span>更新 {updated}</span>
       <span>失败 {failed}</span>
-      <progress value={task.progress} max={100} aria-label="追更检查进度" />
+      <LinearProgress value={Math.min(1, Math.max(0, task.progress / 100))} />
     </div>
   )
 }
