@@ -99,6 +99,7 @@ import { CircularProgress, LinearProgress } from './ui/ProgressIndicator'
 import { Switch } from './ui/Switch'
 import { Menu } from './ui/Menu'
 import { TextField } from './ui/TextField'
+import { Button } from './ui/Button'
 import { ComicTile as ComicTilePrimitive } from './components/ComicTile'
 import { AppDataProvider } from './context/AppDataContext'
 import { LibraryProvider } from './context/LibraryContext'
@@ -1820,9 +1821,9 @@ function SearchView({
           disabled={enabledSources.length === 0 || searching}
           onChange={(event) => setKeyword(event.target.value)}
         />
-        <button className="primary-button" disabled={!keyword.trim() || searching || enabledSources.length === 0} type="submit">
+        <Button variant="filled" disabled={!keyword.trim() || searching || enabledSources.length === 0} type="submit">
           {searching ? '搜索中' : '搜索'}
-        </button>
+        </Button>
       </form>
 
       {enabledSources.length > 0 ? (
@@ -2352,9 +2353,9 @@ function FavoritesView({
                 autoFocus
               />
               <div style={{ display: 'flex', gap: '6px' }}>
-                <button className="primary-button" style={{ minHeight: '32px', fontSize: '13px' }} disabled={!newFolderTitle.trim() || folderBusy} onClick={handleAddFolder}>
+                <Button variant="filled" disabled={!newFolderTitle.trim() || folderBusy} onClick={handleAddFolder}>
                   {folderBusy ? '创建中' : '确定'}
-                </button>
+                </Button>
                 <button className="icon-text-button subtle" style={{ minHeight: '32px', fontSize: '13px' }} onClick={() => setAddingFolder(false)}>
                   取消
                 </button>
@@ -3683,9 +3684,9 @@ function WebDavPanel({ onImportComplete }: { onImportComplete: () => void | Prom
           placeholder="根路径"
           onChange={(event) => setRootPath(event.target.value)}
         />
-        <button className="primary-button" type="submit" disabled={busy || !endpointUrl.trim()}>
+        <Button variant="filled" type="submit" disabled={busy || !endpointUrl.trim()}>
           保存
-        </button>
+        </Button>
         <button className="icon-text-button subtle" type="button" disabled={busy} onClick={() => void openPath('')}>
           <FolderOpen size={16} />
           浏览
