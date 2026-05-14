@@ -512,3 +512,109 @@ test("server-db history write APIs upsert, delete and clear rows", async () => {
     await rm(serverDataDir, { recursive: true, force: true });
   }
 });
+
+test("server-db upload builds WebDAV backup from helper-side databases", async () => {
+  const serverDataDir = await mkdtemp(join(tmpdir(), "venera-server-db-"));
+  let uploaded = null;
+  const seenRequests = [];
+
+  const upstream = createHttpServer(async (req, res) => {
+    seenRequests.push(`${req.method} ${req.url}`);
+    assert.equal(req.headers.authorization, "Basic dXNlcjpwYXNz");
+
+    if (req.method === "PUT" && req.url === "/1700000000200.venera") {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      uploaded = Buffer.concat(chunks);
+      res.writeHead(201);
+      res.end();
+      return;
+    }
+
+    if (req.method === "PROPFIND") {
+      res.writeHead(207, { "Content-Type": "application/xml" });
+      res.end(`<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response><d:href>/1700000000200.venera</d:href></d:response>
+</d:multistatus>`);
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  const upstreamUrl = await listen(upstream);
+  const helper = createServer({ serverDataDir });
+  const helperUrl = await listen(helper);
+
+  const post = (path, body) =>
+    fetch(`${helperUrl}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile: "reader", ...body }),
+    });
+
+  try {
+    const emptyUploadResponse = await post("/api/server-db/upload/webdav", {
+      url: upstreamUrl,
+      user: "user",
+      pass: "pass",
+      fileName: "1700000000200.venera",
+      appdata: { settings: {} },
+    });
+    assert.equal(emptyUploadResponse.status, 409);
+
+    await post("/api/server-db/history/upsert", {
+      history: {
+        id: "comic-1",
+        title: "uploaded history",
+        time: 2000,
+        type: 1,
+      },
+    });
+
+    const uploadResponse = await post("/api/server-db/upload/webdav", {
+      url: upstreamUrl,
+      user: "user",
+      pass: "pass",
+      fileName: "1700000000200.venera",
+      appdata: { settings: { theme: "dark" } },
+    });
+    assert.equal(uploadResponse.status, 200);
+    const uploadPayload = await uploadResponse.json();
+    assert.equal(uploadPayload.ok, true);
+    assert.equal(uploadPayload.databaseCount, 1);
+    assert.equal(uploadPayload.entries.includes("appdata.json"), true);
+    assert.equal(uploadPayload.entries.includes("history.db"), true);
+    assert.equal(uploadPayload.fileName, "1700000000200.venera");
+    assert.equal(Buffer.isBuffer(uploaded), true);
+    assert.equal(uploaded.includes(Buffer.from('"theme": "dark"')), true);
+
+    const extractResponse = await fetch(`${helperUrl}/sync/webdav/extract-db`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dataBase64: uploaded.toString("base64") }),
+    });
+    assert.equal(extractResponse.status, 200);
+    const extractPayload = await extractResponse.json();
+    assert.equal(
+      extractPayload.databases["history.db"].tables[0].rows[0][1],
+      "uploaded history",
+    );
+
+    const statusPayload = await (
+      await fetch(`${helperUrl}/api/server-db/status?profile=reader`)
+    ).json();
+    assert.equal(statusPayload.metadata.dirty, false);
+    assert.equal(statusPayload.metadata.remoteFileName, "1700000000200.venera");
+    assert.deepEqual(seenRequests, [
+      "PUT /1700000000200.venera",
+      "PROPFIND /",
+    ]);
+  } finally {
+    await close(helper);
+    await close(upstream);
+    await rm(serverDataDir, { recursive: true, force: true });
+  }
+});

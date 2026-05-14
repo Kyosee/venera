@@ -1957,6 +1957,77 @@ function extractZipEntries(zipBuf, namePredicate) {
   return result;
 }
 
+const crc32Table = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < table.length; i++) {
+    let value = i;
+    for (let bit = 0; bit < 8; bit++) {
+      value = (value & 1) ? (0xedb88320 ^ (value >>> 1)) : (value >>> 1);
+    }
+    table[i] = value >>> 0;
+  }
+  return table;
+})();
+
+function crc32(buffer) {
+  let value = 0xffffffff;
+  for (const byte of buffer) {
+    value = crc32Table[(value ^ byte) & 0xff] ^ (value >>> 8);
+  }
+  return (value ^ 0xffffffff) >>> 0;
+}
+
+function buildStoredZip(entries) {
+  const localParts = [];
+  const centralParts = [];
+  let localOffset = 0;
+
+  for (const entry of entries) {
+    const nameBytes = Buffer.from(entry.name, "utf8");
+    const data = Buffer.from(entry.data);
+    const checksum = crc32(data);
+
+    const localHeader = Buffer.alloc(30);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(0, 6);
+    localHeader.writeUInt16LE(0, 8);
+    localHeader.writeUInt16LE(0, 10);
+    localHeader.writeUInt16LE(0, 12);
+    localHeader.writeUInt32LE(checksum, 14);
+    localHeader.writeUInt32LE(data.length, 18);
+    localHeader.writeUInt32LE(data.length, 22);
+    localHeader.writeUInt16LE(nameBytes.length, 26);
+    localParts.push(localHeader, nameBytes, data);
+
+    const centralHeader = Buffer.alloc(46);
+    centralHeader.writeUInt32LE(0x02014b50, 0);
+    centralHeader.writeUInt16LE(20, 4);
+    centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt16LE(0, 8);
+    centralHeader.writeUInt16LE(0, 10);
+    centralHeader.writeUInt16LE(0, 12);
+    centralHeader.writeUInt16LE(0, 14);
+    centralHeader.writeUInt32LE(checksum, 16);
+    centralHeader.writeUInt32LE(data.length, 20);
+    centralHeader.writeUInt32LE(data.length, 24);
+    centralHeader.writeUInt16LE(nameBytes.length, 28);
+    centralHeader.writeUInt32LE(localOffset, 42);
+    centralParts.push(centralHeader, nameBytes);
+
+    localOffset += localHeader.length + nameBytes.length + data.length;
+  }
+
+  const centralDirectory = Buffer.concat(centralParts);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(centralDirectory.length, 12);
+  eocd.writeUInt32LE(localOffset, 16);
+  return Buffer.concat([...localParts, centralDirectory, eocd]);
+}
+
 const SQLITE_HEADER = Buffer.from("SQLite format 3\0");
 
 function looksLikeSqliteBuffer(buf) {
@@ -2436,6 +2507,52 @@ function writeServerDbBackup(profileRoot, entries) {
   };
 }
 
+function writeServerDbAppdata(profileRoot, data) {
+  mkdirSync(profileRoot, { recursive: true });
+  const appdataBytes = Buffer.isBuffer(data)
+    ? data
+    : Buffer.from(JSON.stringify(data || {}, null, 2));
+  writeFileSync(join(profileRoot, "appdata.json"), appdataBytes);
+  return appdataBytes;
+}
+
+function buildServerDbBackup(profileRoot, appdataPayload) {
+  const entries = [];
+  let databaseCount = 0;
+  let appdataBytes = null;
+
+  if (appdataPayload && typeof appdataPayload === "object") {
+    appdataBytes = writeServerDbAppdata(profileRoot, appdataPayload);
+  } else {
+    const appdataPath = join(profileRoot, "appdata.json");
+    if (existsSync(appdataPath)) {
+      appdataBytes = readFileSync(appdataPath);
+    }
+  }
+
+  if (appdataBytes) {
+    entries.push({ name: "appdata.json", data: appdataBytes });
+  }
+
+  for (const entryName of serverDbEntryNames) {
+    const filePath = serverDbEntryPath(profileRoot, entryName);
+    if (!existsSync(filePath)) continue;
+    const data = readFileSync(filePath);
+    if (data.length === 0) continue;
+    entries.push({ name: entryName, data });
+    databaseCount += 1;
+  }
+
+  if (databaseCount === 0) {
+    throw createHttpError(409, "Server DB is not initialized");
+  }
+  return {
+    buffer: buildStoredZip(entries),
+    databaseCount,
+    entryNames: entries.map((entry) => entry.name),
+  };
+}
+
 function historyRowsFromServerDb(profileRoot, { limit = 100, offset = 0 } = {}) {
   const filePath = serverDbEntryPath(profileRoot, "history.db");
   if (!existsSync(filePath)) {
@@ -2794,6 +2911,80 @@ async function handleServerDbRoute({
     });
     markServerDbDirty(profileRoot, "history-clear");
     sendJson(res, 200, { ok: true, profile: profileId });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/upload/webdav") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const config = resolveWebDavConfig(payload, webDavConfigPath);
+    const fileName = normalizeWebDavBackupName(payload.fileName, {
+      required: true,
+    });
+    const removeFileNames = Array.isArray(payload.removeFileNames)
+      ? payload.removeFileNames
+          .map((name) => normalizeWebDavBackupName(name, { required: false }))
+          .filter((name) => name != null && name !== "latest.venera")
+      : [];
+    const backup = buildServerDbBackup(profileRoot, payload.appdata);
+
+    await webDavRequest({
+      config,
+      path: fileName,
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Content-Length": String(backup.buffer.length),
+      },
+      body: backup.buffer,
+      cookieJar,
+      persistCookieJar,
+      recordProxyRequest,
+    });
+
+    for (const removeName of removeFileNames) {
+      try {
+        await webDavRequest({
+          config,
+          path: removeName,
+          method: "DELETE",
+          cookieJar,
+          persistCookieJar,
+          recordProxyRequest,
+        });
+      } catch (error) {
+        if (Number(error?.statusCode || 0) !== 404) {
+          throw error;
+        }
+      }
+    }
+
+    const files = await listWebDavBackupFiles({
+      config,
+      cookieJar,
+      persistCookieJar,
+      recordProxyRequest,
+    });
+    writeServerDbMetadata(profileRoot, {
+      ...readServerDbMetadata(profileRoot),
+      dirty: false,
+      uploadedAt: new Date().toISOString(),
+      remoteFileName: fileName,
+      sha256: backupSha256(backup.buffer),
+      size: backup.buffer.length,
+    });
+    sendJson(res, 200, {
+      ok: true,
+      profile: profileId,
+      fileName,
+      size: backup.buffer.length,
+      sha256: backupSha256(backup.buffer),
+      databaseCount: backup.databaseCount,
+      entries: backup.entryNames,
+      files: sortBackupFiles(files, true),
+    });
     return true;
   }
 

@@ -120,6 +120,20 @@ class DataSync with ChangeNotifier {
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 
+  Map<String, dynamic> _appdataJsonForSync() {
+    final data = jsonDecode(jsonEncode(appdata.toJson())) as Map<String, dynamic>;
+    final settings = data['settings'];
+    if (settings is Map) {
+      final disabledFields = appdata.splitField(
+        appdata.settings['disableSyncFields'] as String,
+      );
+      for (final field in disabledFields) {
+        settings.remove(field);
+      }
+    }
+    return data;
+  }
+
   Map<String, dynamic> _webDavPayload(List<String> config) {
     if (_serverWebDavConfig != null) {
       return {};
@@ -383,23 +397,19 @@ class DataSync with ChangeNotifier {
         return const Res(true);
       }
 
-      File? data;
       final previousVersion = _dataVersion();
       final nextVersion = previousVersion + 1;
       try {
         appdata.settings['dataVersion'] = nextVersion;
         await appdata.saveData(false);
-        data = await exportAppData(
-          appdata.settings['disableSyncFields'].toString().isNotEmpty,
-        );
-        final bytes = await data.readAsBytes();
         final daysSinceEpoch =
             DateTime.now().millisecondsSinceEpoch ~/ 86400000;
         final fileName = '$daysSinceEpoch-$nextVersion.venera';
-        final uploadResult = await _callHelper('upload', {
+        final uploadResult = await _postHelper('/api/server-db/upload/webdav', {
           ..._webDavPayload(config),
+          'profile': _serverDbProfile,
           'fileName': fileName,
-          'dataBase64': base64Encode(bytes),
+          'appdata': _appdataJsonForSync(),
         });
         var files =
             (uploadResult['files'] as List?)
@@ -426,8 +436,6 @@ class DataSync with ChangeNotifier {
         Log.error("Upload Data", e, s);
         _lastError = _formatError(e);
         return Res.error(_lastError!);
-      } finally {
-        data?.deleteIgnoreError();
       }
     } finally {
       _isUploading = false;
