@@ -101,25 +101,30 @@ jobs:
           architecture: x64
       - name: Verify Android signing secrets
         env:
-          STORE_FILE: ${{ secrets.ANDROID_KEYSTORE }}
-          PROPERTY_FILE: ${{ secrets.ANDROID_KEY_PROPERTIES }}
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
             set -euo pipefail
-            test -n "$STORE_FILE" || { echo "ANDROID_KEYSTORE secret is missing"; exit 1; }
-            test -n "$PROPERTY_FILE" || { echo "ANDROID_KEY_PROPERTIES secret is missing"; exit 1; }
-            for key in storeFile storePassword keyAlias keyPassword; do
-              printf '%s\n' "$PROPERTY_FILE" | grep -Eq "^${key}=" || {
-                echo "ANDROID_KEY_PROPERTIES is missing ${key}";
-                exit 1;
-              }
-            done
+            test -n "$KEYSTORE_BASE64" || { echo "ANDROID_KEYSTORE_BASE64 secret is missing"; exit 1; }
+            test -n "$KEYSTORE_PASSWORD" || { echo "ANDROID_KEYSTORE_PASSWORD secret is missing"; exit 1; }
+            test -n "$KEY_ALIAS" || { echo "ANDROID_KEY_ALIAS secret is missing"; exit 1; }
+            test -n "$KEY_PASSWORD" || { echo "ANDROID_KEY_PASSWORD secret is missing"; exit 1; }
       - name: Decode and install Android signing files
         env:
-          STORE_FILE: ${{ secrets.ANDROID_KEYSTORE }}
-          PROPERTY_FILE: ${{ secrets.ANDROID_KEY_PROPERTIES }}
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-            echo "$STORE_FILE" | base64 --decode > android/keystore.jks
-            echo "$PROPERTY_FILE" > android/key.properties
+            printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/keystore.jks
+            {
+              printf 'storeFile=keystore.jks\n'
+              printf 'storePassword=%s\n' "$KEYSTORE_PASSWORD"
+              printf 'keyAlias=%s\n' "$KEY_ALIAS"
+              printf 'keyPassword=%s\n' "$KEY_PASSWORD"
+            } > android/key.properties
       - uses: actions/setup-java@v4
         with:
           distribution: 'oracle'
