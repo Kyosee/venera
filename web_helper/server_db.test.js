@@ -1659,6 +1659,15 @@ test("server-db upload builds WebDAV backup from helper-side databases", async (
     seenRequests.length = 0;
     uploaded = null;
 
+    const profileDbDir = join(serverDataDir, "profiles", "reader", "db");
+    const compressibleDbBytes = Buffer.concat([
+      Buffer.from("SQLite format 3\0"),
+      Buffer.alloc(256 * 1024, 0x20),
+    ]);
+    await mkdir(join(profileDbDir, "data"), { recursive: true });
+    await writeFile(join(profileDbDir, "data", "venera.db"), compressibleDbBytes);
+    await writeFile(join(profileDbDir, "local_favorite.db"), compressibleDbBytes);
+
     await post("/api/server-db/history/upsert", {
       history: {
         id: "comic-1",
@@ -1673,7 +1682,7 @@ test("server-db upload builds WebDAV backup from helper-side databases", async (
       user: "user",
       pass: "pass",
       fileName: "1700000000200.venera",
-      appdata: { settings: { theme: "dark" } },
+      appdata: { settings: { theme: "dark" }, filler: "x".repeat(8192) },
       comicSources: [
         {
           name: "demo.js",
@@ -1688,23 +1697,35 @@ test("server-db upload builds WebDAV backup from helper-side databases", async (
     assert.equal(uploadResponse.status, 200);
     const uploadPayload = await uploadResponse.json();
     assert.equal(uploadPayload.ok, true);
-    assert.equal(uploadPayload.databaseCount, 1);
+    assert.equal(uploadPayload.databaseCount, 3);
     assert.equal(uploadPayload.entries.includes("appdata.json"), true);
+    assert.equal(uploadPayload.entries.includes("data/venera.db"), true);
     assert.equal(uploadPayload.entries.includes("history.db"), true);
+    assert.equal(uploadPayload.entries.includes("local_favorite.db"), true);
     assert.equal(uploadPayload.entries.includes("comic_source/demo.js"), true);
     assert.equal(uploadPayload.entries.includes("comic_source/demo.data"), true);
     assert.equal(uploadPayload.fileName, "1700000000200.venera");
     assert.equal(Buffer.isBuffer(uploaded), true);
     const zipEntries = zipCentralEntries(uploaded);
     assert.equal(zipEntries.has("appdata.json"), true);
+    assert.equal(zipEntries.has("data/venera.db"), true);
     assert.equal(zipEntries.has("history.db"), true);
+    assert.equal(zipEntries.has("local_favorite.db"), true);
     assert.equal(zipEntries.has("comic_source/demo.js"), true);
     assert.equal(zipEntries.has("comic_source/demo.data"), true);
-    assert.equal(zipEntries.get("history.db").compression, 8);
-    assert.ok(
-      zipEntries.get("history.db").compressedSize <
-        zipEntries.get("history.db").uncompressedSize,
-    );
+    for (const entryName of [
+      "appdata.json",
+      "data/venera.db",
+      "history.db",
+      "local_favorite.db",
+    ]) {
+      const entry = zipEntries.get(entryName);
+      assert.equal(entry.compression, 8, `${entryName} should use DEFLATE`);
+      assert.ok(
+        entry.compressedSize < entry.uncompressedSize,
+        `${entryName} should be smaller after compression`,
+      );
+    }
 
     const extractResponse = await fetch(`${helperUrl}/sync/webdav/extract-db`, {
       method: "POST",

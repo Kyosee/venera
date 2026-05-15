@@ -56,7 +56,7 @@ class ComicSourceManager with ChangeNotifier, Init {
     await JsEngine().ensureInit();
     final path = "${App.dataPath}/comic_source";
     if (!(await Directory(path).exists())) {
-      Directory(path).create();
+      await Directory(path).create(recursive: true);
       return;
     }
     await for (var entity in Directory(path).list()) {
