@@ -5,6 +5,9 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: write
+
 jobs:
   Build_MacOS:
     runs-on: macos-15
@@ -23,6 +26,12 @@ jobs:
           CERTIFICATE: ${{ secrets.CERTIFICATE }}
           CERTIFICATE_PASSWORD: ${{ secrets.CERTIFICATE_PASSWORD }}
         run: |
+          if [ -z "$CERTIFICATE" ] && [ -z "$CERTIFICATE_PASSWORD" ]; then
+            echo "macOS signing secrets are not configured; building unsigned macOS app."
+            exit 0
+          fi
+          test -n "$CERTIFICATE" || { echo "CERTIFICATE secret is missing"; exit 1; }
+          test -n "$CERTIFICATE_PASSWORD" || { echo "CERTIFICATE_PASSWORD secret is missing"; exit 1; }
           echo "$CERTIFICATE" | base64 --decode > signing_certificate.p12
           security import signing_certificate.p12 -k ~/Library/Keychains/login.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
 
@@ -242,4 +251,4 @@ jobs:
             outputs/*.zst
             outputs/*.AppImage
         env:
-          GITHUB_TOKEN: ${{ secrets.ACTION_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
