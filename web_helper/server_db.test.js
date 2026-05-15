@@ -378,6 +378,49 @@ test("WebDAV sync can persist and reuse helper-side configuration", async () => 
   }
 });
 
+test("static web assets use gzip and revalidation headers", async () => {
+  const staticDir = await mkdtemp(join(tmpdir(), "venera-static-"));
+  const js = "console.log('venera');\n".repeat(200);
+  const wasm = "wasm\n".repeat(300);
+  await writeFile(join(staticDir, "main.dart.js"), js);
+  await writeFile(join(staticDir, "sqlite3.wasm"), wasm);
+  await writeFile(join(staticDir, "index.html"), "<!doctype html>");
+  const helper = createServer({ staticDir, browserFactory: false });
+  const helperUrl = await listen(helper);
+
+  try {
+    const response = await fetch(`${helperUrl}/main.dart.js`, {
+      headers: { "Accept-Encoding": "gzip" },
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-encoding"), "gzip");
+    assert.equal(response.headers.get("cache-control"), "no-cache");
+    assert.equal(await response.text(), js);
+
+    const lastModified = response.headers.get("last-modified");
+    assert.ok(lastModified);
+    const cachedResponse = await fetch(`${helperUrl}/main.dart.js`, {
+      headers: {
+        "Accept-Encoding": "gzip",
+        "If-Modified-Since": lastModified,
+      },
+    });
+    assert.equal(cachedResponse.status, 304);
+    assert.equal(cachedResponse.headers.get("vary"), "Accept-Encoding");
+
+    const wasmResponse = await fetch(`${helperUrl}/sqlite3.wasm`, {
+      headers: { "Accept-Encoding": "gzip;q=0" },
+    });
+    assert.equal(wasmResponse.status, 200);
+    assert.equal(wasmResponse.headers.get("cache-control"), "no-cache");
+    assert.equal(wasmResponse.headers.get("content-encoding"), null);
+    assert.equal(await wasmResponse.text(), wasm);
+  } finally {
+    await close(helper);
+    await rm(staticDir, { recursive: true, force: true });
+  }
+});
+
 test("server-db sync stores WebDAV backup on helper disk", async () => {
   const serverDataDir = await mkdtemp(join(tmpdir(), "venera-server-db-"));
   const historyDb = buildMinimalHistoryDb("server stored history");

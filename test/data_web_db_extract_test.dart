@@ -6,6 +6,8 @@ import 'package:archive/archive.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:venera/foundation/app.dart';
+import 'package:venera/foundation/comic_type.dart';
+import 'package:venera/foundation/history.dart';
 import 'package:venera/utils/data_web.dart';
 
 void main() {
@@ -144,8 +146,91 @@ void main() {
     expect(favorites['merged'], isFalse);
   });
 
+  test('importWebServerDbDumps refreshes HistoryManager cache', () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'venera-history-import-',
+    );
+    final previousDataPath = App.dataPath;
+    final previousHistoryManager = HistoryManager.cache;
+    App.dataPath = tempDir.path;
+    HistoryManager.cache = null;
+    addTearDown(() async {
+      HistoryManager.cache?.close();
+      HistoryManager.cache = previousHistoryManager;
+      App.dataPath = previousDataPath;
+      await tempDir.delete(recursive: true);
+    });
+
+    final manager = HistoryManager();
+    await manager.init();
+    expect(manager.find('demo', ComicType.local), isNull);
+
+    final status = await importWebServerDbDumps({
+      'history.db': {
+        'ok': true,
+        'tables': [
+          {
+            'name': 'history',
+            'sql': '''
+              create table history (
+                id text,
+                title text,
+                subtitle text,
+                cover text,
+                time int,
+                type int,
+                ep int,
+                page int,
+                readEpisode text,
+                max_page int,
+                chapter_group int,
+                primary key (id, type)
+              );
+            ''',
+            'columns': [
+              'id',
+              'title',
+              'subtitle',
+              'cover',
+              'time',
+              'type',
+              'ep',
+              'page',
+              'readEpisode',
+              'max_page',
+              'chapter_group',
+            ],
+            'rows': [
+              [
+                'demo',
+                'Demo',
+                'Sub',
+                'cover',
+                DateTime.utc(2026, 5, 15).millisecondsSinceEpoch,
+                ComicType.local.value,
+                3,
+                8,
+                '1,2,3',
+                20,
+                null,
+              ],
+            ],
+          },
+        ],
+      },
+    }, now: DateTime.utc(2026, 5, 15));
+
+    final history = HistoryManager().find('demo', ComicType.local);
+    expect((status!['entries'] as Map)['history.db']['merged'], isTrue);
+    expect(history, isNotNull);
+    expect(history!.page, 8);
+    expect(history.readEpisode, {'1', '2', '3'});
+  });
+
   test('importWebServerComicSources restores comic source files', () async {
-    final tempDir = await Directory.systemTemp.createTemp('venera-comic-source-');
+    final tempDir = await Directory.systemTemp.createTemp(
+      'venera-comic-source-',
+    );
     final previousDataPath = App.dataPath;
     final previousIsInitialized = App.isInitialized;
     App.dataPath = tempDir.path;

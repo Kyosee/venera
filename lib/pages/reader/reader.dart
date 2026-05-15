@@ -274,6 +274,11 @@ class _ReaderState extends State<Reader>
     if (isFullscreen) {
       fullscreen();
     }
+    if (_updateHistoryTimer != null && history != null) {
+      _updateHistoryTimer!.cancel();
+      _updateHistoryTimer = null;
+      unawaited(HistoryManager().addHistoryAsync(history!));
+    }
     autoPageTurningTimer?.cancel();
     focusNode.dispose();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -621,8 +626,16 @@ abstract mixin class _ReaderLocation {
 
   void update();
 
-  bool enablePageAnimation(String cid, ComicType type) => appdata.settings
-      .getReaderSetting(cid, type.sourceKey, 'enablePageAnimation');
+  bool enablePageAnimation(String cid, ComicType type) {
+    if (App.isWeb) {
+      return false;
+    }
+    return appdata.settings.getReaderSetting(
+      cid,
+      type.sourceKey,
+      'enablePageAnimation',
+    );
+  }
 
   _ImageViewController? _imageViewController;
 

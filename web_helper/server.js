@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { deflateRawSync, inflateRawSync } from "node:zlib";
+import { createGzip, deflateRawSync, inflateRawSync } from "node:zlib";
 import {
   createReadStream,
   existsSync,
@@ -1094,6 +1094,23 @@ const staticContentTypes = {
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
 };
+
+const gzipStaticExtensions = new Set([".css", ".js", ".json", ".svg", ".wasm"]);
+
+function staticCacheControl(filePath) {
+  return "no-cache";
+}
+
+function acceptsGzipEncoding(value) {
+  return String(value || "")
+    .split(",")
+    .some((part) => {
+      const [encoding, ...params] = part.trim().split(";").map((p) => p.trim());
+      if (encoding.toLowerCase() !== "gzip") return false;
+      const q = params.find((param) => param.toLowerCase().startsWith("q="));
+      return !q || Number.parseFloat(q.slice(2)) > 0;
+    });
+}
 
 function writeCorsHeaders(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -4960,9 +4977,36 @@ function tryServeStatic(req, res, parsedUrl, staticDir) {
   if (!existsSync(filePath) || statSync(filePath).isDirectory()) {
     filePath = join(root, "index.html");
   }
-  if (!existsSync(filePath) || statSync(filePath).isDirectory()) return false;
-  const contentType = staticContentTypes[extname(filePath).toLowerCase()];
+  if (!existsSync(filePath)) return false;
+  const stat = statSync(filePath);
+  if (stat.isDirectory()) return false;
+  const extension = extname(filePath).toLowerCase();
+  const contentType = staticContentTypes[extension];
   if (contentType) res.setHeader("Content-Type", contentType);
+  res.setHeader("Cache-Control", staticCacheControl(filePath));
+  res.setHeader("Last-Modified", stat.mtime.toUTCString());
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  const canGzip = stat.size > 1024 && gzipStaticExtensions.has(extension);
+  if (canGzip) res.setHeader("Vary", "Accept-Encoding");
+  if (req.headers["if-modified-since"]) {
+    const since = new Date(String(req.headers["if-modified-since"]));
+    if (
+      !Number.isNaN(since.valueOf()) &&
+      Math.floor(stat.mtimeMs / 1000) <= Math.floor(since.valueOf() / 1000)
+    ) {
+      res.writeHead(304);
+      res.end();
+      return true;
+    }
+  }
+  const shouldGzip =
+    canGzip && acceptsGzipEncoding(req.headers["accept-encoding"]);
+  if (shouldGzip) {
+    res.setHeader("Content-Encoding", "gzip");
+    createReadStream(filePath).pipe(createGzip({ level: 6 })).pipe(res);
+    return true;
+  }
+  res.setHeader("Content-Length", String(stat.size));
   createReadStream(filePath).pipe(res);
   return true;
 }

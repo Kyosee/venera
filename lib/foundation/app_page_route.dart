@@ -59,7 +59,8 @@ mixin _AppRouteTransitionMixin<T> on PageRoute<T> {
   Widget buildContent(BuildContext context);
 
   @override
-  Duration get transitionDuration => const Duration(milliseconds: 240);
+  Duration get transitionDuration =>
+      Duration(milliseconds: App.isWeb ? 180 : 240);
 
   @override
   Color? get barrierColor => null;
@@ -129,14 +130,16 @@ mixin _AppRouteTransitionMixin<T> on PageRoute<T> {
       builder = SlidePageTransitionBuilder();
     }
 
+    final enableEdgeBackGesture = enableIOSGesture && (App.isIOS || App.isWeb);
+
     return builder.buildTransitions(
       this,
       context,
       animation,
       secondaryAnimation,
-      enableIOSGesture && App.isIOS
+      enableEdgeBackGesture
           ? IOSBackGestureDetector(
-              gestureWidth: _kBackGestureWidth,
+              gestureWidth: App.isWeb ? 32.0 : _kBackGestureWidth,
               enabledCallback: () => _isPopGestureEnabled<T>(this),
               onStartPopGesture: () => _startPopGesture(this),
               child: child,
@@ -385,6 +388,10 @@ class _BackSwipeRecognizer extends OneSequenceGestureRecognizer {
 
   @override
   void addPointer(PointerDownEvent event) {
+    if (App.isWeb && event.kind == PointerDeviceKind.mouse) {
+      resolve(GestureDisposition.rejected);
+      return;
+    }
     startTrackingPointer(event.pointer);
     _startGlobal = event.position;
     _accepted = false;
@@ -413,7 +420,9 @@ class _BackSwipeRecognizer extends OneSequenceGestureRecognizer {
 
         final isRight = dx > 0;
         final isHorizontal = dx.abs() > dy * 1.5;
-        final bool eligible = _startedNearLeftEdge || (!_startedInHorizontal);
+        final bool eligible = App.isWeb
+            ? _startedNearLeftEdge
+            : _startedNearLeftEdge || (!_startedInHorizontal);
 
         if (isRight && isHorizontal && eligible) {
           _accepted = true;
@@ -495,6 +504,16 @@ class SlidePageTransitionBuilder extends PageTransitionsBuilder {
         ? secondaryAnimation
         : CurvedAnimation(parent: secondaryAnimation, curve: Curves.ease);
 
+    final wrappedChild = App.isWeb
+        ? Material(child: child)
+        : PhysicalModel(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.zero,
+            clipBehavior: Clip.hardEdge,
+            elevation: 6,
+            child: Material(child: child),
+          );
+
     return SlideTransition(
       position: Tween<Offset>(
         begin: const Offset(1, 0),
@@ -505,13 +524,7 @@ class SlidePageTransitionBuilder extends PageTransitionsBuilder {
           begin: Offset.zero,
           end: const Offset(-0.4, 0),
         ).animate(secondaryCurve),
-        child: PhysicalModel(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.zero,
-          clipBehavior: Clip.hardEdge,
-          elevation: 6,
-          child: Material(child: child),
-        ),
+        child: wrappedChild,
       ),
     );
   }

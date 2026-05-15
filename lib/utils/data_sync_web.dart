@@ -25,7 +25,7 @@ class DataSync with ChangeNotifier {
   DataSync._() {
     unawaited(_bootstrapWebDavConfig());
     if (isEnabled) {
-      downloadData(hydrateLocalCache: false);
+      unawaited(downloadData(hydrateLocalCache: true));
     }
     LocalFavoritesManager().addListener(onDataChanged);
     ComicSourceManager().addListener(onDataChanged);
@@ -54,15 +54,18 @@ class DataSync with ChangeNotifier {
 
   bool? _serverWebDavAutoSync;
 
+  String? _serverWebDavDisableSyncFields;
+
   String? get lastError => _lastError;
 
   bool get isEnabled {
     var config = appdata.settings['webdav'];
     var autoSync =
-        appdata.implicitData['webdavAutoSync'] ?? _serverWebDavAutoSync ?? false;
+        appdata.implicitData['webdavAutoSync'] ??
+        _serverWebDavAutoSync ??
+        false;
     return autoSync &&
-        ((config is List && config.isNotEmpty) ||
-            _serverWebDavConfig != null);
+        ((config is List && config.isNotEmpty) || _serverWebDavConfig != null);
   }
 
   void onDataChanged() {
@@ -98,7 +101,7 @@ class DataSync with ChangeNotifier {
     try {
       final config = await loadWebDavConfig(force: true);
       if (config != null && (config['autoSync'] == true)) {
-        await downloadData(hydrateLocalCache: false);
+        await downloadData(hydrateLocalCache: true);
       }
     } catch (e, s) {
       Log.error('WebDAV Config', e, s);
@@ -129,7 +132,8 @@ class DataSync with ChangeNotifier {
   }
 
   Map<String, dynamic> _appdataJsonForSync() {
-    final data = jsonDecode(jsonEncode(appdata.toJson())) as Map<String, dynamic>;
+    final data =
+        jsonDecode(jsonEncode(appdata.toJson())) as Map<String, dynamic>;
     final implicitData = appdata.implicitDataForSync();
     if (implicitData.isNotEmpty) {
       data['implicitData'] = jsonDecode(jsonEncode(implicitData));
@@ -223,12 +227,15 @@ class DataSync with ChangeNotifier {
         'user': _serverWebDavConfig![1],
         'pass': _serverWebDavConfig![2],
         'autoSync': _serverWebDavAutoSync ?? false,
+        'disableSyncFields': _serverWebDavDisableSyncFields ?? '',
       };
     }
     final data = await _callHelper('config/get', const <String, dynamic>{});
     if (data['configured'] != true) {
       _serverWebDavConfig = null;
       _serverWebDavAutoSync = false;
+      _serverWebDavDisableSyncFields = null;
+      notifyListeners();
       return null;
     }
     final url = data['url']?.toString().trim() ?? '';
@@ -237,10 +244,15 @@ class DataSync with ChangeNotifier {
     if (url.isEmpty || user.isEmpty) {
       _serverWebDavConfig = null;
       _serverWebDavAutoSync = false;
+      _serverWebDavDisableSyncFields = null;
+      notifyListeners();
       return null;
     }
     _serverWebDavConfig = [url, user, pass];
     _serverWebDavAutoSync = data['autoSync'] == true;
+    _serverWebDavDisableSyncFields =
+        data['disableSyncFields']?.toString() ?? '';
+    notifyListeners();
     return data;
   }
 
@@ -262,12 +274,17 @@ class DataSync with ChangeNotifier {
       data['pass']?.toString() ?? config[2],
     ];
     _serverWebDavAutoSync = data['autoSync'] == true;
+    _serverWebDavDisableSyncFields =
+        data['disableSyncFields']?.toString() ?? disableSyncFields;
+    notifyListeners();
   }
 
   Future<void> clearWebDavConfig() async {
     await _callHelper('config/clear', const <String, dynamic>{});
     _serverWebDavConfig = null;
     _serverWebDavAutoSync = false;
+    _serverWebDavDisableSyncFields = null;
+    notifyListeners();
   }
 
   String get _serverDbProfile {
@@ -366,15 +383,16 @@ class DataSync with ChangeNotifier {
     try {
       final comicSourcesResponse = await _postHelper(
         '/api/server-db/comic-sources',
-        {
-          'profile': _serverDbProfile,
-        },
+        {'profile': _serverDbProfile},
       );
       final items = comicSourcesResponse['items'];
       if (items is List) {
         final imported = await importWebServerComicSources(items);
         if (imported > 0) {
-          Log.info('Data Sync', 'Imported $imported comic sources from server DB');
+          Log.info(
+            'Data Sync',
+            'Imported $imported comic sources from server DB',
+          );
         }
       }
     } on DioException catch (e) {

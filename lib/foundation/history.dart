@@ -38,6 +38,32 @@ abstract mixin class HistoryMixin {
   HistoryType get historyType;
 }
 
+int _historyInt(Object? value, [int fallback = 0]) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return int.tryParse(value?.toString() ?? '') ?? fallback;
+}
+
+int? _historyNullableInt(Object? value) {
+  if (value == null) return null;
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return int.tryParse(value.toString());
+}
+
+Set<String> _readEpisodeSet(Object? value) {
+  if (value is String) {
+    return value.split(',').where((element) => element.isNotEmpty).toSet();
+  }
+  if (value is Iterable) {
+    return value
+        .map((element) => element?.toString() ?? '')
+        .where((element) => element.isNotEmpty)
+        .toSet();
+  }
+  return <String>{};
+}
+
 class History implements Comic {
   HistoryType type;
 
@@ -90,19 +116,17 @@ class History implements Comic {
        time = time ?? DateTime.now();
 
   History.fromMap(Map<String, dynamic> map)
-    : type = HistoryType(map["type"]),
-      time = DateTime.fromMillisecondsSinceEpoch(map["time"]),
-      title = map["title"],
-      subtitle = map["subtitle"],
-      cover = map["cover"],
-      ep = map["ep"],
-      page = map["page"],
-      id = map["id"],
-      readEpisode = Set<String>.from(
-        (map["readEpisode"] as List<dynamic>?)?.toSet() ?? const <String>{},
-      ),
-      maxPage = map["max_page"] {
-    group = map["chapter_group"];
+    : type = HistoryType(_historyInt(map["type"])),
+      time = DateTime.fromMillisecondsSinceEpoch(_historyInt(map["time"])),
+      title = map["title"]?.toString() ?? '',
+      subtitle = map["subtitle"]?.toString() ?? '',
+      cover = map["cover"]?.toString() ?? '',
+      ep = _historyInt(map["ep"]),
+      page = _historyInt(map["page"]),
+      id = map["id"]?.toString() ?? '',
+      readEpisode = _readEpisodeSet(map["readEpisode"]),
+      maxPage = _historyNullableInt(map["max_page"]) {
+    group = _historyNullableInt(map["chapter_group"]);
   }
 
   @override
@@ -204,6 +228,7 @@ class HistoryManager with ChangeNotifier {
     if (isInitialized) {
       return;
     }
+    _clearCache();
     _dbPath = "${App.dataPath}/history.db";
     _db = openSqliteDatabase(_dbPath);
 
@@ -401,6 +426,11 @@ class HistoryManager with ChangeNotifier {
     }
   }
 
+  void _clearCache() {
+    _cachedHistoryIds = null;
+    cachedHistories.clear();
+  }
+
   bool _haveAsyncTask = false;
 
   /// Create a isolate to add history to prevent blocking the UI thread.
@@ -412,7 +442,11 @@ class HistoryManager with ChangeNotifier {
 
     _haveAsyncTask = true;
     if (kIsWeb) {
-      await _upsertServerHistory(newItem);
+      final pendingServerWrite = _upsertServerHistory(
+        newItem,
+      ).then<void>((_) {});
+      _trackServerHistoryWrite(pendingServerWrite);
+      await pendingServerWrite;
       _writeLocalHistory(newItem);
     } else {
       await _addHistoryAsync(_dbPath, newItem);
@@ -594,6 +628,7 @@ class HistoryManager with ChangeNotifier {
   }
 
   void close() {
+    _clearCache();
     if (!isInitialized) return;
     isInitialized = false;
     _db.dispose();
