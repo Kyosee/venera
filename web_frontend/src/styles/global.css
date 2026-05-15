@@ -1,0 +1,32 @@
+:root {
+  --color-primary: #4f6ef7;
+  --color-primary-container: rgba(79, 110, 247, 0.12);
+  --color-secondary-container: #e8eaf6;
+  --color-surface: #ffffff;
+  --color-surface-container: #f5f5f5;
+  --color-outline-variant: #e0e0e0;
+  --color-text: #1a1a1a;
+  --color-text-secondary: #666666;
+  --color-text-tertiary: #999999;
+  --safe-area-top: env(safe-area-inset-top);
+  --safe-area-bottom: env(safe-area-inset-bottom);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body, #app { height: 100%; width: 100%; overflow: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans SC', sans-serif;
+  color: var(--color-text);
+  background: var(--color-surface);
+  -webkit-tap-highlight-color: transparent;
+  font-size: 14px;
+  line-height: 1.5;
+}
+img { display: block; }
+a { color: inherit; text-decoration: none; }
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #aaa; }
+::-webkit-scrollbar-track { background: transparent; }
