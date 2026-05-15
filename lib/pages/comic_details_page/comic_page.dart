@@ -466,7 +466,7 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
                   onPressed: read,
                   iconColor: context.useTextColor(Colors.orange),
                 ),
-              if (!isMobile && !isDownloaded)
+              if (!App.isWeb && !isMobile && !isDownloaded)
                 _ActionButton(
                   icon: const Icon(Icons.download),
                   text: 'Download'.tl,
@@ -514,13 +514,15 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
           if (isMobile)
             Row(
               children: [
-                Expanded(
-                  child: FilledButton.tonal(
-                    onPressed: download,
-                    child: Text("Download".tl),
+                if (!App.isWeb) ...[
+                  Expanded(
+                    child: FilledButton.tonal(
+                      onPressed: download,
+                      child: Text("Download".tl),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 16),
+                  const SizedBox(width: 16),
+                ],
                 Expanded(
                   child: hasHistory
                       ? FilledButton(

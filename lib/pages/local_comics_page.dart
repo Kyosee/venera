@@ -134,7 +134,7 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
           addFavorite(selectedComics.keys.toList());
         },
       ),
-      if (selectedComics.length == 1)
+      if (!App.isWeb && selectedComics.length == 1)
         MenuEntry(
           icon: Icons.folder_open,
           text: "Open Folder".tl,
@@ -216,15 +216,16 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
           onPressed: sort,
         ),
       ),
-      Tooltip(
-        message: "Downloading".tl,
-        child: IconButton(
-          icon: const Icon(Icons.download),
-          onPressed: () {
-            showPopUpWidget(context, const DownloadingPage());
-          },
+      if (!App.isWeb)
+        Tooltip(
+          message: "Downloading".tl,
+          child: IconButton(
+            icon: const Icon(Icons.download),
+            onPressed: () {
+              showPopUpWidget(context, const DownloadingPage());
+            },
+          ),
         ),
-      ),
     ];
 
     var body = Scaffold(
@@ -324,13 +325,14 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
             },
             menuBuilder: (c) {
               return [
-                MenuEntry(
-                  icon: Icons.folder_open,
-                  text: "Open Folder".tl,
-                  onClick: () {
-                    openComicFolder(c as LocalComic);
-                  },
-                ),
+                if (!App.isWeb)
+                  MenuEntry(
+                    icon: Icons.folder_open,
+                    text: "Open Folder".tl,
+                    onClick: () {
+                      openComicFolder(c as LocalComic);
+                    },
+                  ),
                 MenuEntry(
                   icon: Icons.delete,
                   text: "Delete".tl,
@@ -543,6 +545,12 @@ typedef ExportComicFunc = Future<File> Function(
 
 /// Opens the folder containing the comic in the system file explorer
 Future<void> openComicFolder(LocalComic comic) async {
+  if (App.isWeb) {
+    App.rootContext.showMessage(
+      message: "Open folder is not supported on WebPWA".tl,
+    );
+    return;
+  }
   try {
     final folderPath = comic.baseDir;
 

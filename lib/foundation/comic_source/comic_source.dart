@@ -64,9 +64,13 @@ class ComicSourceManager with ChangeNotifier, Init {
             await entity.readAsString(),
             entity.absolute.path,
           );
-          _sources.add(source);
+          _addParsedSource(source, entity.name);
         } catch (e, s) {
-          Log.error("ComicSource", "$e\n$s");
+          if (e is ComicSourceParseException && e.isRecoverable) {
+            Log.warning("ComicSource", "Skipped ${entity.name}: $e");
+          } else {
+            Log.error("ComicSource", e, s);
+          }
         }
       }
     }
@@ -80,8 +84,21 @@ class ComicSourceManager with ChangeNotifier, Init {
   }
 
   void add(ComicSource source) {
+    if (_addParsedSource(source, source.filePath)) {
+      notifyListeners();
+    }
+  }
+
+  bool _addParsedSource(ComicSource source, String sourceName) {
+    if (find(source.key) != null) {
+      Log.warning(
+        "ComicSource",
+        "Skipped $sourceName: key(${source.key}) already exists",
+      );
+      return false;
+    }
     _sources.add(source);
-    notifyListeners();
+    return true;
   }
 
   void remove(String key) {

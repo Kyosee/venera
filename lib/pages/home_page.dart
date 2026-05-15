@@ -418,8 +418,10 @@ class _LocalState extends State<_Local> {
                       child: Text(count.toString(), style: ts.s12),
                     ),
                     const Spacer(),
-                    _LocalImportButton(onPressed: import),
-                    const SizedBox(width: 8),
+                    if (!App.isWeb) ...[
+                      _LocalImportButton(onPressed: import),
+                      const SizedBox(width: 8),
+                    ],
                     const Icon(Icons.arrow_right),
                   ],
                 ),
@@ -450,7 +452,7 @@ class _LocalState extends State<_Local> {
                     },
                   ),
                 ).paddingHorizontal(8),
-              if (LocalManager().downloadingTasks.isNotEmpty)
+              if (!App.isWeb && LocalManager().downloadingTasks.isNotEmpty)
                 Row(
                   children: [
                     Button.outlined(
@@ -482,6 +484,12 @@ class _LocalState extends State<_Local> {
   }
 
   void import() {
+    if (App.isWeb) {
+      App.rootContext.showMessage(
+        message: "Import is not supported on WebPWA".tl,
+      );
+      return;
+    }
     showDialog(
       barrierDismissible: false,
       context: App.rootContext,

@@ -491,17 +491,19 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
             onPressed: openChapterDrawer,
           ),
         ),
-      Tooltip(
-        message: "Save Image".tl,
-        child: IconButton(
-          icon: const Icon(Icons.download),
-          onPressed: saveCurrentImage,
+      if (!App.isWeb) ...[
+        Tooltip(
+          message: "Save Image".tl,
+          child: IconButton(
+            icon: const Icon(Icons.download),
+            onPressed: saveCurrentImage,
+          ),
         ),
-      ),
-      Tooltip(
-        message: "Share".tl,
-        child: IconButton(icon: const Icon(Icons.share), onPressed: share),
-      ),
+        Tooltip(
+          message: "Share".tl,
+          child: IconButton(icon: const Icon(Icons.share), onPressed: share),
+        ),
+      ],
     ];
 
     Widget child = SizedBox(
@@ -674,6 +676,10 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
   }
 
   void saveCurrentImage() async {
+    if (App.isWeb) {
+      context.showMessage(message: "Save image is not supported on WebPWA".tl);
+      return;
+    }
     var result = await selectImageToData();
     if (result == null) {
       return;
@@ -688,6 +694,10 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
   }
 
   void share() async {
+    if (App.isWeb) {
+      context.showMessage(message: "Share is not supported on WebPWA".tl);
+      return;
+    }
     var result = await selectImageToData();
     if (result == null) {
       return;

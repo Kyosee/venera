@@ -419,19 +419,22 @@ class ImageFavoriteManager with ChangeNotifier {
   }
 
   static Future<ImageFavoritesComputed> computeImageFavorites() {
-    var token = ServicesBinding.rootIsolateToken!;
     var count = ImageFavoriteManager().length;
     if (count == 0) {
       return Future.value(ImageFavoritesComputed([], [], [], 0));
-    } else if (count > 100) {
+    } else if (kIsWeb || count <= 100) {
+      return Future.value(_computeImageFavorites());
+    } else {
+      final token = ServicesBinding.rootIsolateToken;
+      if (token == null) {
+        return Future.value(_computeImageFavorites());
+      }
       return Isolate.run(() async {
         BackgroundIsolateBinaryMessenger.ensureInitialized(token);
         await App.init();
         await HistoryManager().init();
         return _computeImageFavorites();
       });
-    } else {
-      return Future.value(_computeImageFavorites());
     }
   }
 

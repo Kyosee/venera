@@ -14,85 +14,87 @@ class _AppSettingsState extends State<AppSettings> {
       slivers: [
         SliverAppbar(title: Text("App".tl)),
         _SettingPartTitle(title: "Data".tl, icon: Icons.storage),
-        ListTile(
-          title: Text("Storage Path for local comics".tl),
-          subtitle: Text(LocalManager().path, softWrap: false),
-          trailing: IconButton(
-            icon: const Icon(Icons.copy),
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: LocalManager().path));
-              context.showMessage(message: "Path copied to clipboard".tl);
-            },
-          ),
-        ).toSliver(),
-        _CallbackSetting(
-          title: "Set New Storage Path".tl,
-          actionTitle: "Set".tl,
-          callback: () async {
-            String? result;
-            if (App.isAndroid) {
-              var picker = DirectoryPicker();
-              result = (await picker.pickDirectory())?.path;
-            } else if (App.isIOS) {
-              result = await selectDirectoryIOS();
-            } else {
-              result = await selectDirectory();
-            }
-            if (result == null) return;
-            var loadingDialog = showLoadingDialog(
-              App.rootContext,
-              barrierDismissible: false,
-              allowCancel: false,
-            );
-            var res = await LocalManager().setNewPath(result);
-            loadingDialog.close();
-            if (res != null) {
-              context.showMessage(message: res);
-            } else {
-              context.showMessage(message: "Path set successfully".tl);
-              setState(() {});
-            }
-          },
-        ).toSliver(),
-        ListTile(
-          title: Text("Cache Size".tl),
-          subtitle: Text(bytesToReadableString(CacheManager().currentSize)),
-        ).toSliver(),
-        _CallbackSetting(
-          title: "Clear Cache".tl,
-          actionTitle: "Clear".tl,
-          callback: () async {
-            var loadingDialog = showLoadingDialog(
-              App.rootContext,
-              barrierDismissible: false,
-              allowCancel: false,
-            );
-            await CacheManager().clear();
-            loadingDialog.close();
-            context.showMessage(message: "Cache cleared".tl);
-            setState(() {});
-          },
-        ).toSliver(),
-        _CallbackSetting(
-          title: "Cache Limit".tl,
-          subtitle: "${appdata.settings['cacheSize']} MB",
-          callback: () {
-            showInputDialog(
-              context: context,
-              title: "Set Cache Limit".tl,
-              hintText: "Size in MB".tl,
-              inputValidator: RegExp(r"^\d+$"),
-              onConfirm: (value) {
-                appdata.settings['cacheSize'] = int.parse(value);
-                appdata.saveData();
-                setState(() {});
-                CacheManager().setLimitSize(appdata.settings['cacheSize']);
-                return null;
+        if (!App.isWeb) ...[
+          ListTile(
+            title: Text("Storage Path for local comics".tl),
+            subtitle: Text(LocalManager().path, softWrap: false),
+            trailing: IconButton(
+              icon: const Icon(Icons.copy),
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: LocalManager().path));
+                context.showMessage(message: "Path copied to clipboard".tl);
               },
-            );
-          },
-          actionTitle: 'Set'.tl,
-        ).toSliver(),
+            ),
+          ).toSliver(),
+          _CallbackSetting(
+            title: "Set New Storage Path".tl,
+            actionTitle: "Set".tl,
+            callback: () async {
+              String? result;
+              if (App.isAndroid) {
+                var picker = DirectoryPicker();
+                result = (await picker.pickDirectory())?.path;
+              } else if (App.isIOS) {
+                result = await selectDirectoryIOS();
+              } else {
+                result = await selectDirectory();
+              }
+              if (result == null) return;
+              var loadingDialog = showLoadingDialog(
+                App.rootContext,
+                barrierDismissible: false,
+                allowCancel: false,
+              );
+              var res = await LocalManager().setNewPath(result);
+              loadingDialog.close();
+              if (res != null) {
+                context.showMessage(message: res);
+              } else {
+                context.showMessage(message: "Path set successfully".tl);
+                setState(() {});
+              }
+            },
+          ).toSliver(),
+          ListTile(
+            title: Text("Cache Size".tl),
+            subtitle: Text(bytesToReadableString(CacheManager().currentSize)),
+          ).toSliver(),
+          _CallbackSetting(
+            title: "Clear Cache".tl,
+            actionTitle: "Clear".tl,
+            callback: () async {
+              var loadingDialog = showLoadingDialog(
+                App.rootContext,
+                barrierDismissible: false,
+                allowCancel: false,
+              );
+              await CacheManager().clear();
+              loadingDialog.close();
+              context.showMessage(message: "Cache cleared".tl);
+              setState(() {});
+            },
+          ).toSliver(),
+          _CallbackSetting(
+            title: "Cache Limit".tl,
+            subtitle: "${appdata.settings['cacheSize']} MB",
+            callback: () {
+              showInputDialog(
+                context: context,
+                title: "Set Cache Limit".tl,
+                hintText: "Size in MB".tl,
+                inputValidator: RegExp(r"^\d+$"),
+                onConfirm: (value) {
+                  appdata.settings['cacheSize'] = int.parse(value);
+                  appdata.saveData();
+                  setState(() {});
+                  CacheManager().setLimitSize(appdata.settings['cacheSize']);
+                  return null;
+                },
+              );
+            },
+            actionTitle: 'Set'.tl,
+          ).toSliver(),
+        ],
         _CallbackSetting(
           title: "Export App Data".tl,
           callback: () async {
@@ -107,7 +109,9 @@ class _AppSettingsState extends State<AppSettings> {
           title: "Import App Data".tl,
           callback: () async {
             var controller = showLoadingDialog(context);
-            var file = await selectFile(ext: ['venera', 'picadata']);
+            var file = await selectFile(
+              ext: App.isWeb ? ['venera'] : ['venera', 'picadata'],
+            );
             if (file != null) {
               var cacheFile = File(
                 FilePath.join(App.cachePath, "import_data_temp"),
@@ -115,7 +119,13 @@ class _AppSettingsState extends State<AppSettings> {
               await file.saveTo(cacheFile.path);
               try {
                 if (file.name.endsWith('picadata')) {
-                  await importPicaData(cacheFile);
+                  if (App.isWeb) {
+                    context.showMessage(
+                      message: "Pica data import is not supported on WebPWA".tl,
+                    );
+                  } else {
+                    await importPicaData(cacheFile);
+                  }
                 } else {
                   await importAppData(cacheFile);
                 }

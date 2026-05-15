@@ -615,11 +615,12 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                         );
                       },
                     ),
-                  MenuEntry(
-                    icon: Icons.download,
-                    text: "Download".tl,
-                    onClick: downloadSelected,
-                  ),
+                  if (!App.isWeb)
+                    MenuEntry(
+                      icon: Icons.download,
+                      text: "Download".tl,
+                      onClick: downloadSelected,
+                    ),
                   MenuEntry(
                     icon: Icons.move_up_outlined,
                     text: "Migrate Source".tl,
@@ -750,19 +751,16 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                     });
                   },
                 ),
-                MenuEntry(
-                  icon: Icons.download,
-                  text: "Download".tl,
-                  onClick: () {
-                    if (downloadComic(c as FavoriteItem)) {
-                      context.showMessage(message: "Download started".tl);
-                    } else if (App.isWeb) {
-                      context.showMessage(
-                        message: "Download is not supported on WebPWA".tl,
-                      );
-                    }
-                  },
-                ),
+                if (!App.isWeb)
+                  MenuEntry(
+                    icon: Icons.download,
+                    text: "Download".tl,
+                    onClick: () {
+                      if (downloadComic(c as FavoriteItem)) {
+                        context.showMessage(message: "Download started".tl);
+                      }
+                    },
+                  ),
                 MenuEntry(
                   icon: Icons.move_up_outlined,
                   text: "Migrate Source".tl,

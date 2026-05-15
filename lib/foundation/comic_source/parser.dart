@@ -42,7 +42,9 @@ bool compareSemVer(String ver1, String ver2) {
 class ComicSourceParseException implements Exception {
   final String message;
 
-  ComicSourceParseException(this.message);
+  final bool isRecoverable;
+
+  ComicSourceParseException(this.message, {this.isRecoverable = false});
 
   @override
   String toString() {
@@ -91,7 +93,7 @@ class ComicSourceParser {
     if (line1 == null ||
         !line1.startsWith("class ") ||
         !line1.contains("extends ComicSource")) {
-      throw ComicSourceParseException("Invalid Content");
+      throw ComicSourceParseException("Invalid Content", isRecoverable: true);
     }
     var className = line1.split("class")[1].split("extends ComicSource").first;
     className = className.trim();
@@ -121,7 +123,10 @@ class ComicSourceParser {
     }
     for (var source in ComicSource.all()) {
       if (source.key == key) {
-        throw ComicSourceParseException("key($key) already exists");
+        throw ComicSourceParseException(
+          "key($key) already exists",
+          isRecoverable: true,
+        );
       }
     }
     _key = key;
