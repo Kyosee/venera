@@ -5,11 +5,23 @@
 [![stars](https://img.shields.io/github/stars/kyosee/venera?style=flat)](https://github.com/kyosee/venera/stargazers)
 [![Download](https://img.shields.io/github/v/release/kyosee/venera)](https://github.com/kyosee/venera/releases)
 
-Venera 是一款基于 Flutter 的漫画阅读器，支持本地阅读、网络阅读、收藏、下载、历史记录、追更、WebDAV 同步和 Headless 模式。
 
 这是个人维护版本。下面只列当前分支相对原版 `v1.6.3` 的主要变化，基础阅读能力不重复展开。
 
-## 相比原版 v1.6.3
+## 警告
+
+## 禁止部署在公网
+## 禁止部署在公网 
+## 禁止部署在公网
+## Web/PWA 只适合个人自用环境，请放在内网、VPN 或有强认证保护的环境中
+## 直接暴露到互联网可能导致服务器被攻击、流量被滥用，以及 Cookie、WebDAV 配置和个人数据泄露 
+## 禁止把 Web/PWA 当作公共阅读站、分发服务或盈利入口使用，由此产生的法律和安全风险自行承担
+
+## 迁移提示
+
+如果你是从 [venera-app/venera](https://github.com/venera-app/venera) 迁移过来的，请给 WebDAV 同步重新指定一个独立目录，不要继续和原项目共用同一目录。迁移前建议先备份旧同步目录和本地数据。
+
+## 更新
 
 | 类型 | 变化 |
 |------|------|
@@ -31,9 +43,6 @@ docker compose -f docker-compose.webpwa.yml up -d --build
 |------|--------|
 | 访问地址 | `http://localhost:60098` |
 
-## 迁移提示
-
-如果你是从 [venera-app/venera](https://github.com/venera-app/venera) 迁移过来的，请给 WebDAV 同步重新指定一个独立目录，不要继续和原项目共用同一目录。迁移前建议先备份旧同步目录和本地数据。
 
 ## Build from source
 
