@@ -16,6 +16,7 @@ export interface History {
 }
 
 export interface FavoriteItem {
+  folder?: string
   id: string
   name: string
   author: string
@@ -25,6 +26,7 @@ export interface FavoriteItem {
   time: string
   lastUpdateTime?: string
   hasNewUpdate?: boolean
+  status?: string
   displayOrder?: number
   sourceKey?: string
 }
@@ -40,13 +42,17 @@ export interface Comic {
   cover: string
   id: string
   subtitle?: string
-  tags?: string[]
+  tags?: string[] | Record<string, unknown>
   description: string
   sourceKey: string
   maxPage?: number
   stars?: number
   language?: string
   favoriteId?: string
+  status?: string
+  updateTime?: string
+  pagesText?: string
+  sourceName?: string
 }
 
 export interface Chapter {
@@ -76,6 +82,9 @@ export interface ComicSource {
   key: string
   version: string
   url: string
+  canonicalKey?: string | null
+  displayName?: string
+  sourceName?: string
 }
 
 export interface SyncStatus {

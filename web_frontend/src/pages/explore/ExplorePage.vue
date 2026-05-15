@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { apiPost, imageProxyUrl } from '@/services/api'
+import { apiPost } from '@/services/api'
 import { getComicSources } from '@/services/server-db'
+import { useSettingsStore } from '@/stores/settings'
+import ComicTile from '@/components/ComicTile.vue'
 import type { ComicSource } from '@/types'
 
 interface ExploreComic {
@@ -13,6 +15,7 @@ interface ExploreComic {
 }
 
 const router = useRouter()
+const settingsStore = useSettingsStore()
 const sources = ref<ComicSource[]>([])
 const activeTab = ref(0)
 const comics = ref<Record<string, ExploreComic[]>>({})
@@ -25,6 +28,18 @@ let lastScrollTop = 0
 let scrollEl: HTMLElement | null = null
 
 const currentSourceKey = computed(() => sources.value[activeTab.value]?.key ?? '')
+const gridStyle = computed(() => {
+  const scale = Number(settingsStore.settings.thumbnailSize || 1)
+  return settingsStore.settings.thumbnailMode === 'brief'
+    ? {
+        '--tile-scale': String(scale),
+        gridTemplateColumns: `repeat(auto-fill, minmax(96px, ${Math.round(192 * scale)}px))`,
+      }
+    : {
+        '--tile-scale': String(scale),
+        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))',
+      }
+})
 
 async function loadComics(sourceKey: string, page = 1, append = false) {
   if (!sourceKey) return
@@ -84,6 +99,7 @@ function goComic(sourceKey: string, comic: ExploreComic) {
 }
 
 onMounted(async () => {
+  await settingsStore.loadSettings()
   const list = await getComicSources()
   sources.value = list
   if (list.length > 0) {
@@ -120,7 +136,7 @@ onUnmounted(() => {
         <van-pull-refresh v-model="refreshing" @refresh="onRefresh">
           <div class="explore-content" @scroll="onScroll">
             <!-- Skeleton loading -->
-            <div v-if="loading[source.key] && !comics[source.key]?.length" class="comic-grid">
+            <div v-if="loading[source.key] && !comics[source.key]?.length" class="comic-grid" :style="gridStyle">
               <div v-for="n in 12" :key="n" class="comic-card skeleton-card">
                 <div class="skeleton-cover"></div>
                 <div class="skeleton-title"></div>
@@ -128,22 +144,15 @@ onUnmounted(() => {
             </div>
 
             <!-- Comic grid -->
-            <div v-else class="comic-grid">
-              <div
+            <div v-else class="comic-grid" :style="gridStyle">
+              <ComicTile
                 v-for="comic in comics[source.key] ?? []"
                 :key="comic.id"
+                :comic="{ ...comic, sourceKey: source.key }"
+                :source-name="source.name"
                 class="comic-card"
                 @click="goComic(source.key, comic)"
-              >
-                <img
-                  class="comic-cover"
-                  :src="imageProxyUrl(comic.cover)"
-                  :alt="comic.title"
-                  loading="lazy"
-                />
-                <div class="comic-title">{{ comic.title }}</div>
-                <div v-if="comic.subtitle" class="comic-subtitle">{{ comic.subtitle }}</div>
-              </div>
+              />
             </div>
 
             <!-- Load more -->

@@ -486,6 +486,24 @@ test("server-db appdata returns native empty payload for new profile", async () 
     assert.equal(payload.ok, true);
     assert.equal(payload.profile, "fresh");
     assert.deepEqual(payload.data, { settings: {}, searchHistory: [] });
+
+    const saveResponse = await fetch(`${helperUrl}/api/server-db/appdata/save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        profile: "another-fresh",
+        data: { settings: { theme: "dark" }, searchHistory: [] },
+      }),
+    });
+    assert.equal(saveResponse.status, 200);
+
+    const savedResponse = await fetch(`${helperUrl}/api/server-db/appdata`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile: "another-fresh" }),
+    });
+    assert.equal(savedResponse.status, 200);
+    assert.equal((await savedResponse.json()).data.settings.theme, "dark");
   } finally {
     await close(helper);
     await rm(serverDataDir, { recursive: true, force: true });
@@ -1855,6 +1873,98 @@ class DemoSource extends ComicSource {
   }
 });
 
+test("server-db source runtime supports app network helpers", async () => {
+  const serverDataDir = await mkdtemp(join(tmpdir(), "venera-server-db-"));
+  const sourceDir = join(serverDataDir, "profiles", "reader", "comic_source");
+  await mkdir(sourceDir, { recursive: true });
+  const seenRequests = [];
+
+  const upstream = createHttpServer(async (req, res) => {
+    seenRequests.push({
+      method: req.method,
+      url: req.url,
+      source: req.headers["x-source"] || "",
+      cookie: req.headers.cookie || "",
+      body: await new Promise((resolve) => {
+        const chunks = [];
+        req.on("data", (chunk) => chunks.push(chunk));
+        req.on("end", () => resolve(Buffer.concat(chunks).toString()));
+      }),
+    });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ title: "Runtime OK" }));
+  });
+
+  const upstreamUrl = await listen(upstream);
+  await writeFile(
+    join(sourceDir, "runtime.js"),
+    `
+class RuntimeSource extends ComicSource {
+  key = "runtime";
+  name = "Runtime";
+  get endpoint() { return this.loadSetting("endpoint"); }
+  async getComicInfo(id) {
+    const uuid = createUuid();
+    if (!/^[0-9a-f-]{36}$/i.test(uuid)) throw "bad uuid";
+    const host = new URL(this.endpoint).hostname;
+    Network.setCookies(this.endpoint, [
+      new Cookie({ name: "sid", value: "abc", domain: host })
+    ]);
+    const cookies = Network.getCookies(this.endpoint);
+    if (!cookies.find((item) => item.name === "sid" && item.value === "abc")) {
+      throw "missing cookie";
+    }
+    const res = await Network.sendRequest(
+      "POST",
+      this.endpoint + "/detail",
+      { "X-Source": "runtime" },
+      "id=" + id
+    );
+    Network.deleteCookies(this.endpoint);
+    return {
+      id,
+      title: JSON.parse(res.body).title,
+      description: String(Network.getCookies(this.endpoint).length),
+      chapters: ["one"]
+    };
+  }
+}
+`,
+  );
+  await writeFile(
+    join(sourceDir, "runtime.data"),
+    JSON.stringify({ settings: { endpoint: upstreamUrl } }),
+  );
+
+  const helper = createServer({ serverDataDir });
+  const helperUrl = await listen(helper);
+  const post = (path, body) =>
+    fetch(`${helperUrl}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile: "reader", ...body }),
+    });
+
+  try {
+    const detailResponse = await post("/api/server-db/comic/detail", {
+      sourceKey: "runtime",
+      comicId: "comic-1",
+    });
+    assert.equal(detailResponse.status, 200);
+    const detailPayload = await detailResponse.json();
+    assert.equal(detailPayload.comic.title, "Runtime OK");
+    assert.equal(detailPayload.comic.description, "0");
+    assert.equal(seenRequests[0].method, "POST");
+    assert.equal(seenRequests[0].source, "runtime");
+    assert.equal(seenRequests[0].cookie.includes("sid=abc"), true);
+    assert.equal(seenRequests[0].body, "id=comic-1");
+  } finally {
+    await close(helper);
+    await close(upstream);
+    await rm(serverDataDir, { recursive: true, force: true });
+  }
+});
+
 test("server-db source runtime supports canonical fallback and Map chapters", async () => {
   const serverDataDir = await mkdtemp(join(tmpdir(), "venera-server-db-"));
   const sourceDir = join(serverDataDir, "profiles", "reader", "comic_source");
@@ -1884,7 +1994,7 @@ test("server-db source runtime supports canonical fallback and Map chapters", as
     `
 class CopyManga extends ComicSource {
   key = "copy_manga";
-  name = "Copy Manga";
+  name = "拷贝漫画";
   get endpoint() { return this.loadSetting("endpoint"); }
   async getComicInfo(id) {
     const secret = Convert.encodeBase64(Convert.encodeUtf8("secret"));
@@ -1930,6 +2040,16 @@ class CopyManga extends ComicSource {
     });
 
   try {
+    const createFolderResponse = await post("/api/server-db/favorites/folder/create", {
+      name: "默认",
+    });
+    assert.equal(createFolderResponse.status, 200);
+    const addFavoriteResponse = await post("/api/server-db/favorites/add", {
+      folder: "默认",
+      item: { id: "comic-1", type: 557997769, name: "章节 Map" },
+    });
+    assert.equal(addFavoriteResponse.status, 200);
+
     const detailResponse = await post("/api/server-db/comic/detail", {
       sourceKey: "copy_manga(0)",
       comicId: "comic-1",
@@ -1937,6 +2057,8 @@ class CopyManga extends ComicSource {
     assert.equal(detailResponse.status, 200);
     const detailPayload = await detailResponse.json();
     assert.equal(detailPayload.comic.sourceKey, "copy_manga(0)");
+    assert.equal(detailPayload.comic.favoriteId, "默认:comic-1");
+    assert.equal(detailPayload.sourceName, "拷贝漫画");
     assert.deepEqual(
       detailPayload.chapters.find((item) => item.title === "卷一"),
       { title: "卷一", chapters: [{ id: "chapter-1", title: "第一话" }] },
@@ -1959,6 +2081,13 @@ class CopyManga extends ComicSource {
     assert.equal(seenRequests[1].method, "POST");
     assert.equal(seenRequests[1].sig, "native-order");
     assert.equal(seenRequests[1].body, "chapter=chapter-1");
+
+    const sourcesResponse = await post("/api/server-db/comic-sources", {});
+    assert.equal(sourcesResponse.status, 200);
+    const sourcesPayload = await sourcesResponse.json();
+    const sourceItem = sourcesPayload.items.find((item) => item.name === "copy_manga(1).js");
+    assert.equal(sourceItem.sourceName, "拷贝漫画");
+    assert.equal(sourceItem.canonicalKey, "copy_manga");
 
     const sourceData = JSON.parse(
       await readFile(join(sourceDir, "copy_manga.data"), "utf8"),

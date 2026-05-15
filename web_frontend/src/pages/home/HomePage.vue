@@ -5,11 +5,13 @@ import { imageProxyUrl } from '@/services/api'
 import { listHistory, getComicSources, listFavorites } from '@/services/server-db'
 import { getSyncStatus, type WebDavSyncStatus } from '@/services/sync'
 import { useSyncStore } from '@/stores/sync'
+import { useSettingsStore } from '@/stores/settings'
 import type { History, ComicSource, FavoriteItem } from '@/types'
 import { resolveSourceKey } from '@/utils/source'
 
 const router = useRouter()
 const syncStore = useSyncStore()
+const settingsStore = useSettingsStore()
 const histories = ref<History[]>([])
 const historyTotal = ref(0)
 const favorites = ref<FavoriteItem[]>([])
@@ -21,9 +23,12 @@ const syncStatus = ref<WebDavSyncStatus>({
 const syncBusy = ref(false)
 const downloadTaskCount = ref(0)
 
-const updateCount = computed(
-  () => favorites.value.filter(f => f.hasNewUpdate).length
-)
+const followUpdateItems = computed(() => {
+  const folder = settingsStore.settings.followUpdatesFolder
+  const items = folder ? favorites.value.filter(item => item.folder === folder) : favorites.value
+  return items.filter(item => item.hasNewUpdate)
+})
+const updateCount = computed(() => followUpdateItems.value.length)
 
 async function refreshHomeData() {
   const [h, s, f, ss] = await Promise.allSettled([
@@ -56,6 +61,7 @@ async function refreshSyncStatus() {
 
 onMounted(async () => {
   await syncStore.bootstrapAutoDownload()
+  await settingsStore.loadSettings()
   await refreshHomeData()
 })
 
@@ -171,17 +177,17 @@ function goSources() { router.push('/explore') }
 
     <!-- Follow Updates Section -->
     <div class="section-card">
-      <div class="section-header" @click="router.push('/favorites')">
+      <div class="section-header" @click="router.push('/follow-updates')">
         <div class="section-header-left">
           <span class="section-title">追更</span>
-          <span class="count-badge">{{ favorites.length }}</span>
+          <span class="count-badge">{{ updateCount }}</span>
           <span class="update-info" v-if="updateCount > 0">{{ updateCount }} 项更新</span>
         </div>
         <van-icon name="arrow" class="section-arrow" />
       </div>
-      <div class="cover-scroll" v-if="favorites.length">
+      <div class="cover-scroll" v-if="followUpdateItems.length">
         <div
-          v-for="item in favorites"
+          v-for="item in followUpdateItems"
           :key="item.id"
           class="cover-item"
           @click="goFavoriteComic(item)"
@@ -380,9 +386,9 @@ function goSources() { router.push('/explore') }
 .cover-scroll {
   display: flex;
   overflow-x: auto;
-  padding: 0 8px 8px;
-  gap: 8px;
-  height: 136px;
+  padding: 0 8px 16px;
+  gap: 16px;
+  height: 154px;
 }
 
 .cover-scroll::-webkit-scrollbar {
@@ -391,7 +397,7 @@ function goSources() { router.push('/explore') }
 
 .cover-item {
   flex-shrink: 0;
-  width: 80px;
+  width: 98px;
   cursor: pointer;
 }
 
@@ -401,10 +407,10 @@ function goSources() { router.push('/explore') }
 }
 
 .cover-img {
-  width: 80px;
-  height: 125px;
+  width: 98px;
+  height: 136px;
   object-fit: cover;
-  border-radius: 4px;
+  border-radius: 8px;
   background: #f0f0f0;
 }
 

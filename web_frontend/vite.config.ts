@@ -3,7 +3,7 @@ import vue from '@vitejs/plugin-vue'
 import Components from 'unplugin-vue-components/vite'
 import { VantResolver } from '@vant/auto-import-resolver'
 
-const helperTarget = process.env.VENERA_WEB_HELPER_URL || 'http://localhost:8080'
+const helperTarget = process.env.VENERA_WEB_HELPER_URL || 'http://localhost:60098'
 
 export default defineConfig({
   base: '/',
@@ -23,6 +23,8 @@ export default defineConfig({
     }
   },
   server: {
+    port: 5173,
+    strictPort: true,
     proxy: {
       '/api': helperTarget,
       '/sync': helperTarget,

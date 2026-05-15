@@ -2729,10 +2729,18 @@ function readServerDbComicSourceEntries(profileRoot) {
 }
 
 function readServerDbComicSourcePayload(profileRoot) {
-  return readServerDbComicSourceEntries(profileRoot).map((entry) => ({
-    name: entry.name.replace("comic_source/", ""),
-    dataBase64: entry.data.toString("base64"),
-  }));
+  return readServerDbComicSourceEntries(profileRoot).map((entry) => {
+    const fileName = entry.name.replace("comic_source/", "");
+    const sourceKey = fileName.replace(/\.(?:js|data)$/i, "");
+    const metadata = fileName.toLowerCase().endsWith(".js")
+      ? extractComicSourceMetadata(entry.data.toString("utf8"), sourceKey)
+      : {};
+    return {
+      name: fileName,
+      ...metadata,
+      dataBase64: entry.data.toString("base64"),
+    };
+  });
 }
 
 function ensureEmptySqliteDbSchema(db) {
@@ -3660,6 +3668,71 @@ function canonicalComicSourceKey(sourceKey) {
     .replace(/\s*\(\d+\)$/u, "");
 }
 
+function firstRegexGroup(text, patterns) {
+  for (const pattern of patterns) {
+    const match = String(text || "").match(pattern);
+    if (match?.[1]) return match[1].trim();
+  }
+  return "";
+}
+
+function extractComicSourceMetadata(sourceCode, fallbackKey) {
+  const text = String(sourceCode || "");
+  const key =
+    firstRegexGroup(text, [
+      /\bthis\.key\s*=\s*["'`]([^"'`]+)["'`]/u,
+      /\bkey\s*=\s*["'`]([^"'`]+)["'`]/u,
+      /\bkey\s*:\s*["'`]([^"'`]+)["'`]/u,
+      /\bget\s+key\s*\(\)\s*\{\s*return\s*["'`]([^"'`]+)["'`]/u,
+    ]) || fallbackKey;
+  const name =
+    firstRegexGroup(text, [
+      /\bthis\.name\s*=\s*["'`]([^"'`]+)["'`]/u,
+      /\bname\s*=\s*["'`]([^"'`]+)["'`]/u,
+      /\bname\s*:\s*["'`]([^"'`]+)["'`]/u,
+      /\bget\s+name\s*\(\)\s*\{\s*return\s*["'`]([^"'`]+)["'`]/u,
+      /\bdisplayName\s*[:=]\s*["'`]([^"'`]+)["'`]/u,
+      /\btitle\s*[:=]\s*["'`]([^"'`]+)["'`]/u,
+    ]) || fallbackKey;
+  const version = firstRegexGroup(text, [
+    /\bthis\.version\s*=\s*["'`]([^"'`]+)["'`]/u,
+    /\bversion\s*[:=]\s*["'`]([^"'`]+)["'`]/u,
+    /\bget\s+version\s*\(\)\s*\{\s*return\s*["'`]([^"'`]+)["'`]/u,
+  ]);
+  const url = firstRegexGroup(text, [
+    /\bthis\.url\s*=\s*["'`]([^"'`]+)["'`]/u,
+    /\burl\s*[:=]\s*["'`]([^"'`]+)["'`]/u,
+    /\bwebsite\s*[:=]\s*["'`]([^"'`]+)["'`]/u,
+    /\bbaseUrl\s*[:=]\s*["'`]([^"'`]+)["'`]/u,
+  ]);
+  return {
+    key,
+    canonicalKey: canonicalComicSourceKey(key),
+    displayName: name,
+    sourceName: name,
+    version,
+    url,
+  };
+}
+
+function comicSourceMetadataForKey(profileRoot, sourceKey) {
+  try {
+    const sourceDir = join(profileRoot, "comic_source");
+    const sourceInfo = resolveComicSourceFiles(sourceDir, sourceKey);
+    const sourceCode = readFileSync(sourceInfo.sourceFile, "utf8");
+    return extractComicSourceMetadata(sourceCode, sourceInfo.selectedKey);
+  } catch {
+    return {
+      key: canonicalComicSourceKey(sourceKey),
+      canonicalKey: canonicalComicSourceKey(sourceKey),
+      displayName: String(sourceKey || ""),
+      sourceName: String(sourceKey || ""),
+      version: "",
+      url: "",
+    };
+  }
+}
+
 function resolveComicSourceFiles(sourceDir, sourceKey) {
   const key = validateComicSourceKey(sourceKey).replace(/\.js$/i, "");
   const candidates = [];
@@ -3769,9 +3842,56 @@ function normalizeComicPages(result) {
   return [];
 }
 
+const legacySourceTypesByKey = new Map([
+  ["local", 0],
+  ["ehentai", 1],
+  ["jm", 769844263],
+  ["hitomi", 258019538],
+  ["wnacg", 823512256],
+  ["nhentai", 264196719],
+  ["hot_manga", 29663848],
+  ["manwaba", 42816288],
+  ["zaimanhua", 150465061],
+  ["baozi", 233488852],
+  ["hcomic", 236897507],
+  ["shonen_jump_plus", 331263271],
+  ["goda", 550146035],
+  ["picacg", 553570794],
+  ["copy_manga", 557997769],
+  ["mh1234", 577341847],
+  ["manga_dex", 577718694],
+  ["manhuaren", 631413104],
+  ["Komiic", 637999886],
+  ["ikmmh", 716010982],
+  ["jcomic", 740690276],
+  ["mxs", 771282371],
+  ["mh18", 778108598],
+  ["ykmh", 798816513],
+  ["ccc", 807338462],
+  ["comick", 964788560],
+  ["happy", 977805693],
+  ["ManHuaGui", 981441865],
+]);
+
+function sourceTypeCandidates(sourceKey) {
+  const candidates = new Set();
+  const raw = String(sourceKey || "").trim();
+  const canonical = canonicalComicSourceKey(raw);
+  for (const key of [raw, canonical]) {
+    if (!key) continue;
+    const numeric = Number(key);
+    if (Number.isInteger(numeric)) candidates.add(numeric);
+    const legacy = legacySourceTypesByKey.get(key);
+    if (Number.isInteger(legacy)) candidates.add(legacy);
+  }
+  return [...candidates];
+}
+
 async function findFavoriteId(profileRoot, comicId, sourceKey) {
-  const favDbPath = join(profileRoot, "favorites.db");
+  const favDbPath = serverDbEntryPath(profileRoot, "local_favorite.db");
   if (!existsSync(favDbPath)) return null;
+  const typeCandidates = sourceTypeCandidates(sourceKey);
+  if (typeCandidates.length === 0) return null;
   try {
     const sqlite = await import("node:sqlite");
     const db = new sqlite.DatabaseSync(favDbPath);
@@ -3780,14 +3900,14 @@ async function findFavoriteId(profileRoot, comicId, sourceKey) {
         .prepare("SELECT name FROM sqlite_master WHERE type='table';")
         .all()
         .map((r) => r.name)
-        .filter((n) => n !== "sqlite_sequence");
+        .filter((n) => !nonFavoriteTableNames.has(n) && !String(n || "").startsWith("sqlite_"));
       for (const table of tables) {
         try {
+          const columns = favoriteColumnNames(db, table);
+          if (!columns.has("id") || !columns.has("type")) continue;
           const row = db
-            .prepare(
-              `SELECT id FROM "${table}" WHERE id = ? AND type = ? LIMIT 1;`,
-            )
-            .get(comicId, sourceKey);
+            .prepare(`SELECT id FROM ${sqliteIdentifier(table)} WHERE id = ? AND type IN (${typeCandidates.map(() => "?").join(",")}) LIMIT 1;`)
+            .get(comicId, ...typeCandidates);
           if (row) return `${table}:${comicId}`;
         } catch { /* table may not have expected columns */ }
       }
@@ -3852,72 +3972,96 @@ async function executeSourceMethod({
     return { headers: {}, body: firstArg, options: {} };
   }
 
+  function normalizeNetworkBody(body, headers = {}) {
+    if (body == null) return undefined;
+    if (Buffer.isBuffer(body)) return body;
+    if (body instanceof ArrayBuffer) return Buffer.from(body);
+    if (ArrayBuffer.isView(body)) {
+      return Buffer.from(body.buffer, body.byteOffset, body.byteLength);
+    }
+    if (typeof body === "object") {
+      if (!headers["Content-Type"] && !headers["content-type"]) {
+        headers["Content-Type"] = "application/json";
+      }
+      return JSON.stringify(body);
+    }
+    return body;
+  }
+
+  async function sendNetworkRequest(method, url, headers = {}, body = undefined, bytes = false) {
+    const requestHeaders = headers || {};
+    const response = await proxyFetch({
+      url,
+      method,
+      headers: requestHeaders,
+      body: normalizeNetworkBody(body, requestHeaders),
+      cookieJar,
+      persistCookieJar,
+      recordProxyRequest,
+    });
+    const responseBody = Buffer.from(await response.arrayBuffer());
+    return {
+      status: response.status,
+      headers: Object.fromEntries(response.headers.entries()),
+      body: bytes ? responseBody.buffer.slice(
+        responseBody.byteOffset,
+        responseBody.byteOffset + responseBody.byteLength,
+      ) : responseBody.toString(),
+    };
+  }
+
+  function Cookie({ name, value, domain, path, expires, maxAge, secure, httpOnly } = {}) {
+    this.name = name;
+    this.value = value;
+    this.domain = domain;
+    this.path = path;
+    this.expires = expires;
+    this.maxAge = maxAge;
+    this.secure = secure;
+    this.httpOnly = httpOnly;
+  }
+
   function createNetworkObj() {
     return {
+      async fetchBytes(method, url, headers = {}, data = undefined, extra = undefined) {
+        return sendNetworkRequest(method, url, headers, data, true, extra);
+      },
+      async sendRequest(method, url, headers = {}, data = undefined, extra = undefined) {
+        return sendNetworkRequest(method, url, headers, data, false, extra);
+      },
       async get(url, options = {}) {
-        const headers = normalizeNetworkGetHeaders(options);
-        const response = await proxyFetch({
-          url,
-          method: "GET",
-          headers,
-          cookieJar,
-          persistCookieJar,
-          recordProxyRequest,
-        });
-        const body = await response.text();
-        return {
-          status: response.status,
-          headers: Object.fromEntries(response.headers.entries()),
-          body,
-        };
+        return this.sendRequest("GET", url, normalizeNetworkGetHeaders(options));
       },
       async post(url, firstArg, secondArg = undefined) {
         const { headers, body } = normalizeNetworkPost(firstArg, secondArg);
-        let requestBody = body;
-        if (
-          requestBody != null &&
-          typeof requestBody === "object" &&
-          !Buffer.isBuffer(requestBody)
-        ) {
-          requestBody = JSON.stringify(requestBody);
-          if (!headers["Content-Type"] && !headers["content-type"]) {
-            headers["Content-Type"] = "application/json";
-          }
-        }
-        const response = await proxyFetch({
-          url,
-          method: "POST",
-          headers,
-          body: requestBody,
-          cookieJar,
-          persistCookieJar,
-          recordProxyRequest,
-        });
-        const respBody = await response.text();
-        return {
-          status: response.status,
-          headers: Object.fromEntries(response.headers.entries()),
-          body: respBody,
-        };
+        return this.sendRequest("POST", url, headers, body);
+      },
+      async put(url, headers = {}, data = undefined, extra = undefined) {
+        return this.sendRequest("PUT", url, headers, data, extra);
+      },
+      async patch(url, headers = {}, data = undefined, extra = undefined) {
+        return this.sendRequest("PATCH", url, headers, data, extra);
+      },
+      async delete(url, headers = {}, extra = undefined) {
+        return this.sendRequest("DELETE", url, headers, undefined, extra);
       },
       async request(url, options = {}) {
-        const reqMethod = options.method || "GET";
-        const headers = normalizeNetworkGetHeaders(options);
-        const response = await proxyFetch({
+        return this.sendRequest(
+          options.method || "GET",
           url,
-          method: reqMethod,
-          headers,
-          body: options.body,
-          cookieJar,
-          persistCookieJar,
-          recordProxyRequest,
-        });
-        const respBody = await response.text();
-        return {
-          status: response.status,
-          headers: Object.fromEntries(response.headers.entries()),
-          body: respBody,
-        };
+          normalizeNetworkGetHeaders(options),
+          options.body,
+        );
+      },
+      setCookies(url, cookies) {
+        return importCookies(cookieJar, url, cookies || [], persistCookieJar);
+      },
+      getCookies(url) {
+        return exportCookies(cookieJar, url);
+      },
+      deleteCookies(url) {
+        deleteCookiesForUrl(cookieJar, url, persistCookieJar);
+        return true;
       },
     };
   }
@@ -4112,6 +4256,17 @@ async function executeSourceMethod({
       }
       return Math.floor(Math.random() * (high - low + 1)) + low;
     },
+    randomDouble(min, max) {
+      const low = Number(min);
+      const high = Number(max);
+      if (!Number.isFinite(low) || !Number.isFinite(high) || high < low) {
+        return 0;
+      }
+      return Math.random() * (high - low) + low;
+    },
+    createUuid() {
+      return randomUUID();
+    },
     fetch(url, options = {}) {
       return proxyFetch({
         url: String(url),
@@ -4127,10 +4282,41 @@ async function executeSourceMethod({
     URLSearchParams: globalThis.URLSearchParams,
     Network: networkObj,
     Convert: convertObj,
+    Cookie,
     HtmlDom: createHtmlDom,
     APP: { locale: "zh_CN", version: "web" },
     sendMessage(payload = {}) {
       const methodName = payload?.method;
+      if (methodName === "uuid") return randomUUID();
+      if (methodName === "random") {
+        return payload?.type === "double"
+          ? this.randomDouble(payload.min, payload.max)
+          : this.randomInt(payload.min, payload.max);
+      }
+      if (methodName === "http") {
+        return payload?.bytes
+          ? networkObj.fetchBytes(
+              payload.http_method || "GET",
+              payload.url,
+              payload.headers || {},
+              payload.data,
+              payload.extra,
+            )
+          : networkObj.sendRequest(
+              payload.http_method || "GET",
+              payload.url,
+              payload.headers || {},
+              payload.data,
+              payload.extra,
+            );
+      }
+      if (methodName === "cookie") {
+        if (payload.function === "set") {
+          return networkObj.setCookies(payload.url, payload.cookies || []);
+        }
+        if (payload.function === "get") return networkObj.getCookies(payload.url);
+        if (payload.function === "delete") return networkObj.deleteCookies(payload.url);
+      }
       if (methodName === "load_data") return sourceData?.[payload.data_key] ?? null;
       if (methodName === "load_setting") {
         return sourceData?.settings?.[payload.setting_key] ?? null;
@@ -5483,8 +5669,7 @@ async function handleServerDbRoute({
     if (!data || typeof data !== "object") {
       throw createHttpError(400, "Invalid appdata payload");
     }
-    const appdataPath = join(profileRoot, "appdata.json");
-    writeFileSync(appdataPath, JSON.stringify(data, null, 2));
+    writeServerDbAppdata(profileRoot, data);
     sendJson(res, 200, { ok: true });
     return true;
   }
@@ -5596,7 +5781,8 @@ async function handleServerDbRoute({
       comic.favoriteId = favoriteId;
       comic.sourceKey = sourceKey;
     }
-    sendJson(res, 200, { comic, chapters, comments });
+    const source = comicSourceMetadataForKey(profileRoot, sourceKey);
+    sendJson(res, 200, { comic, chapters, comments, source, sourceName: source.sourceName });
     return true;
   }
 

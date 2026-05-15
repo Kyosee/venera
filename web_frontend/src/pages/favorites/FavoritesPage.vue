@@ -6,12 +6,14 @@ import {
   createFolder, deleteFolder, renameFolder, reorderFolders,
   batchDeleteFavorites, batchMoveFavorites
 } from '@/services/server-db'
-import { imageProxyUrl } from '@/services/api'
 import type { FavoriteItem, FavoriteFolder, ComicSource } from '@/types'
 import { showDialog, showConfirmDialog, showToast } from 'vant'
 import { resolveSourceKey } from '@/utils/source'
+import { useSettingsStore } from '@/stores/settings'
+import ComicTile from '@/components/ComicTile.vue'
 
 const router = useRouter()
+const settingsStore = useSettingsStore()
 const folders = ref<FavoriteFolder[]>([])
 const sources = ref<ComicSource[]>([])
 const favorites = ref<FavoriteItem[]>([])
@@ -32,7 +34,7 @@ function handleResize() {
   isDesktop.value = window.innerWidth >= 720
   if (isDesktop.value) showDrawer.value = false
 }
-onMounted(() => { window.addEventListener('resize', handleResize); loadData() })
+onMounted(() => { window.addEventListener('resize', handleResize); settingsStore.loadSettings(); loadData() })
 onUnmounted(() => { window.removeEventListener('resize', handleResize) })
 
 async function loadData() {
@@ -73,6 +75,24 @@ const filteredFavorites = computed(() => {
 })
 
 const selectedFavorites = computed(() => favorites.value.filter(item => selectedIds.value.has(item.id)))
+const gridStyle = computed(() => {
+  const scale = Number(settingsStore.settings.thumbnailSize || 1)
+  return settingsStore.settings.thumbnailMode === 'brief'
+    ? {
+        '--tile-scale': String(scale),
+        gridTemplateColumns: `repeat(auto-fill, minmax(96px, ${Math.round(192 * scale)}px))`,
+      }
+    : {
+        '--tile-scale': String(scale),
+        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))',
+      }
+})
+
+function sourceNameFor(item: FavoriteItem) {
+  const key = resolveSourceKey(item, sources.value)
+  const source = sources.value.find(s => s.key === key || s.canonicalKey === key)
+  return source?.name || source?.sourceName || source?.displayName || key
+}
 
 function escapeHtmlAttribute(value: string): string {
   return value
@@ -396,7 +416,7 @@ async function handleBatchMove(targetFolderId: string) {
         </div>
 
         <van-loading v-if="loading && !favorites.length" class="loading-state" />
-        <div v-else-if="filteredFavorites.length" class="comic-grid">
+        <div v-else-if="filteredFavorites.length" class="comic-grid" :style="gridStyle">
           <div
             v-for="item in filteredFavorites"
             :key="item.id"
@@ -404,17 +424,17 @@ async function handleBatchMove(targetFolderId: string) {
             :class="{ selected: selectedIds.has(item.id) }"
             @click="navigateToComic(item)"
           >
-            <div class="comic-cover">
-              <img :src="imageProxyUrl(item.coverPath)" :alt="item.name" loading="lazy" />
-              <div v-if="multiSelectMode" class="checkbox-overlay">
-                <van-checkbox
-                  :model-value="selectedIds.has(item.id)"
-                  @click.stop="toggleSelect(item.id)"
-                  shape="square"
-                />
-              </div>
+            <ComicTile
+              :comic="{ ...item, title: item.name, cover: item.coverPath, sourceKey: resolveSourceKey(item, sources) }"
+              :source-name="sourceNameFor(item)"
+            />
+            <div v-if="multiSelectMode" class="checkbox-overlay">
+              <van-checkbox
+                :model-value="selectedIds.has(item.id)"
+                @click.stop="toggleSelect(item.id)"
+                shape="square"
+              />
             </div>
-            <div class="comic-title">{{ item.name }}</div>
           </div>
         </div>
         <van-empty v-else description="暂无收藏" />
@@ -627,9 +647,9 @@ async function handleBatchMove(targetFolderId: string) {
 
 .comic-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 12px;
   padding: 16px;
+  justify-content: center;
 }
 
 .comic-card {
@@ -640,24 +660,10 @@ async function handleBatchMove(targetFolderId: string) {
 
 .comic-card:hover { transform: translateY(-2px); }
 
-.comic-card.selected .comic-cover {
+.comic-card.selected {
   outline: 2px solid #4f6ef7;
-  outline-offset: -2px;
-  border-radius: 6px;
-}
-
-.comic-cover {
-  aspect-ratio: 0.64;
-  border-radius: 6px;
-  overflow: hidden;
-  background: #f0f0f0;
-  position: relative;
-}
-
-.comic-cover img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  outline-offset: 2px;
+  border-radius: 8px;
 }
 
 .checkbox-overlay {
@@ -665,15 +671,6 @@ async function handleBatchMove(targetFolderId: string) {
   top: 6px;
   left: 6px;
   z-index: 2;
-}
-
-.comic-title {
-  margin-top: 6px;
-  font-size: 14px;
-  line-height: 1.3;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .move-popup {

@@ -4,12 +4,14 @@ import { useRoute, useRouter } from 'vue-router'
 import { apiPost } from '@/services/api'
 import { addFavorite, deleteFavorite, getComicSources, listFavorites, listFolders, listHistory } from '@/services/server-db'
 import { resolveSourceKey, sourceTypeFromKey } from '@/utils/source'
+import { useSettingsStore } from '@/stores/settings'
 import ProxiedImage from '@/components/ProxiedImage.vue'
 import { showToast } from 'vant'
 import type { Comic, Chapter, ChapterGroup, Comment, ComicSource, History } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
+const settingsStore = useSettingsStore()
 const sourceKey = computed(() => decodeURIComponent(route.params.sourceKey as string))
 const comicId = computed(() => decodeURIComponent(route.params.id as string))
 
@@ -37,6 +39,7 @@ const relatedComics = ref<{ id: string; title: string; cover: string; subtitle?:
 const relatedLoading = ref(false)
 const detailNotice = ref('')
 const sources = ref<ComicSource[]>([])
+const detailSourceName = ref('')
 
 const isGrouped = computed(() => {
   if (!chapters.value.length) return false
@@ -68,6 +71,14 @@ const lastReadInfo = computed(() => {
   const groupName = groupTitles.value[lastReadGroup.value ?? 0] || '默認'
   return { group: groupName, chapter: ch?.title || lastReadChapterId.value, page: lastReadPage.value }
 })
+const comicTags = computed(() => normalizeTags(comic.value?.tags))
+const sourceDisplayName = computed(() => {
+  const source = sources.value.find(item => {
+    const canonical = item.canonicalKey || item.key
+    return item.key === sourceKey.value || canonical === sourceKey.value || item.key === detailSourceName.value
+  })
+  return detailSourceName.value || source?.sourceName || source?.displayName || source?.name || sourceKey.value
+})
 
 function parseReadEpisode(raw: History['readEpisode']): string[] {
   if (Array.isArray(raw)) return raw.map(String).filter(Boolean)
@@ -79,6 +90,15 @@ function parseReadEpisode(raw: History['readEpisode']): string[] {
     if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean)
   } catch {}
   return text.split(',').map(s => s.trim()).filter(Boolean)
+}
+
+function normalizeTags(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.map(String).filter(Boolean)
+  if (!raw || typeof raw !== 'object') return []
+  const values = Object.values(raw as Record<string, unknown>)
+  return values.flatMap(value => Array.isArray(value) ? value.map(String) : String(value || '').split(','))
+    .map(item => item.trim())
+    .filter(Boolean)
 }
 
 function latestReadChapterId(entry: History): string | null {
@@ -174,6 +194,8 @@ async function fetchDetail() {
       comic: Comic
       chapters: Chapter[] | ChapterGroup[]
       comments?: Comment[]
+      source?: Partial<ComicSource>
+      sourceName?: string
       error?: string
     }>('/api/server-db/comic/detail', {
       sourceKey: sourceKey.value,
@@ -187,12 +209,13 @@ async function fetchDetail() {
       error.value = '返回数据格式错误: 缺少 comic 字段'
       return
     }
-    comic.value = res.comic
+    detailSourceName.value = res.sourceName || res.source?.sourceName || res.source?.displayName || ''
+    comic.value = { ...res.comic, tags: normalizeTags(res.comic.tags), sourceName: detailSourceName.value }
     chapters.value = res.chapters || []
     const detailComments = Array.isArray(res.comments) ? res.comments : []
     comments.value = detailComments
     commentsHasMore.value = detailComments.length >= 20
-    await refreshFavoriteState()
+    void refreshFavoriteState()
   } catch (e: any) {
     const message = e.message || '加载失败'
     const recovered = await hydrateFromHistoryFallback(message)
@@ -272,7 +295,7 @@ async function toggleFavorite() {
         type,
         name: comic.value.title,
         author: comic.value.subtitle || '',
-        tags: comic.value.tags || [],
+        tags: comicTags.value,
         coverPath: comic.value.cover,
         time: favoriteTime(),
         title: comic.value.title,
@@ -349,11 +372,22 @@ function scrollToComments() {
 function toggleSort() { sortAsc.value = !sortAsc.value }
 function onBack() { router.back() }
 
-onMounted(() => {
-  fetchDetail()
-  fetchHistory()
-  fetchThumbnails()
-  fetchRelated()
+onMounted(async () => {
+  await settingsStore.loadSettings()
+  sortAsc.value = !settingsStore.settings.reverseChapters
+  void loadSources()
+  await fetchDetail()
+  void fetchHistory()
+  const loadOptional = () => {
+    void fetchThumbnails()
+    void fetchRelated()
+  }
+  const requestIdle = (window as any).requestIdleCallback
+  if (typeof requestIdle === 'function') {
+    requestIdle(loadOptional, { timeout: 1500 })
+  } else {
+    setTimeout(loadOptional, 300)
+  }
 })
 </script>
 <template>
@@ -403,12 +437,12 @@ onMounted(() => {
           </div>
           <div class="meta-row">
             <span class="meta-label">来源:</span>
-            <span class="meta-value">{{ sourceKey }}</span>
+            <span class="meta-value">{{ sourceDisplayName }}</span>
           </div>
-          <div class="meta-row" v-if="comic.tags?.length">
+          <div class="meta-row" v-if="comicTags.length">
             <span class="meta-label">标签:</span>
             <span class="tags-inline">
-              <span v-for="tag in comic.tags" :key="tag" class="tag-link" @click="onTagClick(tag)">{{ tag }}</span>
+              <span v-for="tag in comicTags" :key="tag" class="tag-link" @click="onTagClick(tag)">{{ tag }}</span>
             </span>
           </div>
           <div class="meta-row" v-if="comic.language">

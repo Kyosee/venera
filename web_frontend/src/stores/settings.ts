@@ -30,6 +30,10 @@ export interface SettingsData {
   preloadCount: number
   showPageNum: boolean
   showChapterComments: boolean
+  showChapterCommentsAtEnd: boolean
+  showSingleImageOnFirstPage: boolean
+  readerScreenPicNumberForLandscape: number
+  readerScreenPicNumberForPortrait: number
   themeMode: string
   themeColor: string
   showLocalFirst: boolean
@@ -41,6 +45,7 @@ export interface SettingsData {
   language: string
   downloadThreads: number
   ignoreCertErrors: boolean
+  followUpdatesFolder: string | null
 }
 
 const STORAGE_KEY = 'venera_settings'
@@ -73,6 +78,10 @@ const DEFAULTS: SettingsData = {
   preloadCount: 4,
   showPageNum: true,
   showChapterComments: true,
+  showChapterCommentsAtEnd: false,
+  showSingleImageOnFirstPage: false,
+  readerScreenPicNumberForLandscape: 1,
+  readerScreenPicNumberForPortrait: 1,
   themeMode: 'system',
   themeColor: 'system',
   showLocalFirst: true,
@@ -84,6 +93,7 @@ const DEFAULTS: SettingsData = {
   language: 'system',
   downloadThreads: 5,
   ignoreCertErrors: false,
+  followUpdatesFolder: null,
 }
 
 const nativeToWeb: Record<string, keyof SettingsData> = {
@@ -113,6 +123,10 @@ const nativeToWeb: Record<string, keyof SettingsData> = {
   preloadImageCount: 'preloadCount',
   showPageNumberInReader: 'showPageNum',
   showChapterComments: 'showChapterComments',
+  showChapterCommentsAtEnd: 'showChapterCommentsAtEnd',
+  showSingleImageOnFirstPage: 'showSingleImageOnFirstPage',
+  readerScreenPicNumberForLandscape: 'readerScreenPicNumberForLandscape',
+  readerScreenPicNumberForPortrait: 'readerScreenPicNumberForPortrait',
   theme_mode: 'themeMode',
   color: 'themeColor',
   localFavoritesFirst: 'showLocalFirst',
@@ -124,6 +138,7 @@ const nativeToWeb: Record<string, keyof SettingsData> = {
   language: 'language',
   downloadThreads: 'downloadThreads',
   ignoreBadCertificate: 'ignoreCertErrors',
+  followUpdatesFolder: 'followUpdatesFolder',
 }
 
 const webToNative = Object.fromEntries(

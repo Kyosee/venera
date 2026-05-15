@@ -61,6 +61,36 @@ const LEGACY_SOURCE_KEYS: Record<number, string> = {
   981441865: 'ManHuaGui',
 }
 
+const SOURCE_DISPLAY_NAMES: Record<string, string> = {
+  copy_manga: '拷贝漫画',
+  ehentai: 'E-Hentai',
+  jm: '禁漫天堂',
+  hitomi: 'Hitomi',
+  wnacg: '绅士漫画',
+  nhentai: 'NHentai',
+  hot_manga: 'Hot Manga',
+  manwaba: '漫蛙',
+  zaimanhua: '再漫画',
+  baozi: '包子漫画',
+  hcomic: 'H-Comic',
+  shonen_jump_plus: '少年 Jump+',
+  goda: 'Goda',
+  picacg: '哔咔漫画',
+  mh1234: '漫画1234',
+  manga_dex: 'MangaDex',
+  manhuaren: '漫画人',
+  Komiic: 'Komiic',
+  ikmmh: '爱看漫',
+  jcomic: 'JComic',
+  mxs: '漫小肆',
+  mh18: 'MH18',
+  ykmh: '优酷漫画',
+  ccc: 'CCC',
+  comick: 'Comick',
+  happy: '快乐漫画',
+  ManHuaGui: '漫画柜',
+}
+
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
@@ -89,8 +119,17 @@ function sourceLegacyType(source: SourceKeySource): number | null {
 }
 
 function sourceDisplayName(source: Record<string, unknown>): string {
-  const name = stringValue(source.name)
+  const name = stringValue(source.sourceName) || stringValue(source.displayName) || stringValue(source.name)
   return name.replace(/^comic_source[\\/]/, '').replace(/\.js$/i, '').replace(/\s*\(\d+\)$/i, '')
+}
+
+function normalizeSourceKeyText(value: string): string {
+  return value.replace(/^comic_source[\\/]/, '').replace(/\.js$/i, '').replace(/\s*\(\d+\)$/i, '')
+}
+
+function displayNameFromKey(value: string): string {
+  const normalized = normalizeSourceKeyText(value)
+  return SOURCE_DISPLAY_NAMES[normalized] || SOURCE_DISPLAY_NAMES[value] || ''
 }
 
 function decodeBase64Text(value: unknown): string {
@@ -145,9 +184,18 @@ export function normalizeComicSource(item: unknown): NormalizedComicSource | nul
   const key = executableKey || canonicalKey
   if (!key) return null
 
-  const name = rawName && !rawName.toLowerCase().endsWith('.js')
-    ? rawName
-    : stringValue(scriptMeta.name) || derivedName || key
+  const metadataName =
+    stringValue(source.sourceName) || stringValue(source.displayName) || stringValue(scriptMeta.name)
+  const normalizedMetadataName = normalizeSourceKeyText(metadataName)
+  const fallbackName = displayNameFromKey(canonicalKey) || displayNameFromKey(key) || displayNameFromKey(derivedName) || derivedName || key
+  const rawNameIsTechnical =
+    !rawName ||
+    rawName.toLowerCase().endsWith('.js') ||
+    normalizeSourceKeyText(rawName) === canonicalKey ||
+    /^[a-z][a-z0-9_]*(\(\d+\))?$/i.test(rawName)
+  const name = rawNameIsTechnical
+    ? displayNameFromKey(normalizedMetadataName) || metadataName || fallbackName
+    : rawName
   return {
     ...source,
     name,

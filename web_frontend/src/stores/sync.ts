@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { getWebDavConfig, saveWebDavConfig as apiSaveConfig, triggerDownload, triggerUpload } from '../services/sync'
+import { useSettingsStore } from './settings'
 
 interface SyncConfig {
   url: string
@@ -52,6 +53,7 @@ export const useSyncStore = defineStore('sync', () => {
     lastError.value = null
     try {
       await triggerDownload()
+      await useSettingsStore().loadSettings()
     } catch (error) {
       lastError.value = errorMessage(error)
       throw error

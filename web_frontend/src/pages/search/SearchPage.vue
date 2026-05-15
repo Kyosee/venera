@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { imageProxyUrl } from '@/services/api'
 import { getComicSources, searchComics } from '@/services/server-db'
+import { useSettingsStore } from '@/stores/settings'
+import ComicTile from '@/components/ComicTile.vue'
 import type { ComicSource } from '@/types'
 
 interface SearchResult {
@@ -23,6 +24,7 @@ interface SourceResults {
 
 const router = useRouter()
 const route = useRoute()
+const settingsStore = useSettingsStore()
 const searchText = ref('')
 const sources = ref<ComicSource[]>([])
 const selectedSourceKey = ref('')
@@ -66,6 +68,18 @@ const hasMore = computed(() => {
 })
 
 const hasSearched = ref(false)
+const gridStyle = computed(() => {
+  const scale = Number(settingsStore.settings.thumbnailSize || 1)
+  return settingsStore.settings.thumbnailMode === 'brief'
+    ? {
+        '--tile-scale': String(scale),
+        gridTemplateColumns: `repeat(auto-fill, minmax(96px, ${Math.round(192 * scale)}px))`,
+      }
+    : {
+        '--tile-scale': String(scale),
+        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))',
+      }
+})
 
 function loadHistory() {
   try {
@@ -186,9 +200,16 @@ function goComic(comic: SearchResult) {
   router.push(`/comic/${encodeURIComponent(sourceKey)}/${encodeURIComponent(comic.id)}`)
 }
 
+function sourceNameFor(key: string | undefined) {
+  if (!key) return ''
+  const source = sources.value.find(item => item.key === key || item.canonicalKey === key)
+  return source?.name || source?.sourceName || source?.displayName || key
+}
+
 function onBack() { router.back() }
 
 onMounted(async () => {
+  await settingsStore.loadSettings()
   loadHistory()
   const initialKeyword = queryString(route.query.keyword).trim()
   const initialSource = queryString(route.query.source).trim()
@@ -292,22 +313,15 @@ onMounted(async () => {
 
       <!-- Results grid -->
       <div v-if="currentResults.length" class="results-section">
-        <div class="comic-grid">
-          <div
+        <div class="comic-grid" :style="gridStyle">
+          <ComicTile
             v-for="comic in currentResults"
             :key="`${comic.sourceKey || selectedSourceKey}:${comic.id}`"
+            :comic="{ ...comic, sourceKey: comic.sourceKey || selectedSourceKey }"
+            :source-name="sourceNameFor(comic.sourceKey || selectedSourceKey)"
             class="comic-card"
             @click="goComic(comic)"
-          >
-            <img
-              class="comic-cover"
-              :src="imageProxyUrl(comic.cover)"
-              :alt="comic.title"
-              loading="lazy"
-            />
-            <div class="comic-title">{{ comic.title }}</div>
-            <div v-if="comic.subtitle" class="comic-subtitle">{{ comic.subtitle }}</div>
-          </div>
+          />
         </div>
 
         <!-- Load more -->

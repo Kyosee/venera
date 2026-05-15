@@ -1,8 +1,15 @@
 import { apiPost } from './api'
+import { useSyncStore } from '../stores/sync'
 import type { History, FavoriteItem, FavoriteFolder, ComicSource } from '../types'
 import { normalizeComicSources, sourceKeyFromType } from '../utils/source'
 
 type FavoritePayloadItem = Pick<FavoriteItem, 'id' | 'type'> & { folder?: string }
+
+function queueAutoUpload() {
+  try {
+    useSyncStore().queueAutoUpload()
+  } catch { /* Pinia may not be active during isolated service tests. */ }
+}
 
 function normalizeHistory(item: any): History {
   const type = Number(item?.type ?? 0)
@@ -28,14 +35,17 @@ export async function listHistory(limit = 500, offset = 0): Promise<{ items: His
 
 export async function upsertHistory(data: Partial<History>): Promise<void> {
   await apiPost('/api/server-db/history/upsert', { history: data })
+  queueAutoUpload()
 }
 
 export async function deleteHistory(id: string, type: number): Promise<void> {
   await apiPost('/api/server-db/history/delete', { id, type })
+  queueAutoUpload()
 }
 
 export async function clearHistory(): Promise<void> {
   await apiPost('/api/server-db/history/clear')
+  queueAutoUpload()
 }
 
 export async function listFolders(): Promise<FavoriteFolder[]> {
@@ -53,36 +63,54 @@ export async function listFavorites(folder?: string): Promise<FavoriteItem[]> {
     const pages = await Promise.all(folders.map(item => listFavorites(item.name)))
     return pages.flat()
   }
-  const res = await apiPost<any>('/api/server-db/favorites/list', { folder })
-  return res?.items ?? res?.favorites ?? res ?? []
+
+  const items: FavoriteItem[] = []
+  let offset = 0
+  let total = Number.POSITIVE_INFINITY
+  while (offset < total) {
+    const res = await apiPost<any>('/api/server-db/favorites/list', { folder, limit: 500, offset })
+    const pageItems = res?.items ?? res?.favorites ?? res ?? []
+    total = Number(res?.total ?? offset + pageItems.length)
+    items.push(...pageItems)
+    if (pageItems.length === 0 || pageItems.length < 500) break
+    offset += pageItems.length
+  }
+  return items
 }
 
 export async function addFavorite(data: Partial<FavoriteItem>): Promise<void> {
   await apiPost('/api/server-db/favorites/add', { folder: (data as any).folder, item: data })
+  queueAutoUpload()
 }
 
 export async function deleteFavorite(folder: string, id: string, type: number): Promise<void> {
   await apiPost('/api/server-db/favorites/delete', { folder, id, type })
+  queueAutoUpload()
 }
 
 export async function moveFavorite(sourceFolder: string, targetFolder: string, id: string, type: number): Promise<void> {
   await apiPost('/api/server-db/favorites/move', { sourceFolder, targetFolder, id, type })
+  queueAutoUpload()
 }
 
 export async function createFolder(name: string): Promise<void> {
   await apiPost('/api/server-db/favorites/folder/create', { name })
+  queueAutoUpload()
 }
 
 export async function deleteFolder(name: string): Promise<void> {
   await apiPost('/api/server-db/favorites/folder/delete', { name })
+  queueAutoUpload()
 }
 
 export async function renameFolder(before: string, after: string): Promise<void> {
   await apiPost('/api/server-db/favorites/folder/rename', { before, after })
+  queueAutoUpload()
 }
 
 export async function reorderFolders(folders: string[]): Promise<void> {
   await apiPost('/api/server-db/favorites/folder/order', { folders })
+  queueAutoUpload()
 }
 
 function favoritePayloadItems(items: FavoritePayloadItem[]) {
@@ -93,9 +121,11 @@ export async function batchDeleteFavorites(items: FavoritePayloadItem[], folder?
   const payloadItems = favoritePayloadItems(items)
   if (folder) {
     await apiPost('/api/server-db/favorites/batch-delete', { folder, items: payloadItems })
+    queueAutoUpload()
     return
   }
   await apiPost('/api/server-db/favorites/batch-delete-all', { items: payloadItems })
+  queueAutoUpload()
 }
 
 export async function batchMoveFavorites(items: FavoritePayloadItem[], targetFolder: string, sourceFolder?: string): Promise<void> {
@@ -105,6 +135,7 @@ export async function batchMoveFavorites(items: FavoritePayloadItem[], targetFol
       targetFolder,
       items: favoritePayloadItems(items),
     })
+    queueAutoUpload()
     return
   }
 
@@ -120,6 +151,7 @@ export async function batchMoveFavorites(items: FavoritePayloadItem[], targetFol
       items: favoritePayloadItems(folderItems),
     }),
   ))
+  queueAutoUpload()
 }
 
 export async function getAppdata(): Promise<Record<string, any>> {

@@ -53,19 +53,43 @@ function splitDisableSyncFields(value: string | undefined): string[] {
     .filter(Boolean)
 }
 
+function appdataSettings(appdata: Record<string, any>) {
+  if (!appdata.settings || typeof appdata.settings !== 'object') {
+    const existing = Object.keys(appdata).length ? { ...appdata } : {}
+    appdata.settings = existing
+  }
+  if (!Array.isArray(appdata.searchHistory)) appdata.searchHistory = []
+  return appdata.settings as Record<string, any>
+}
+
+const FIXED_DISABLE_SYNC_FIELDS = [
+  'proxy',
+  'authorizationRequired',
+  'customImageProcessing',
+  'webdav',
+  'disableSyncFields',
+  'deviceId',
+]
+
 function appdataForUpload(appdata: Record<string, any>, dataVersion: number, disableSyncFields?: string) {
   const next = cloneRecord(appdata)
-  const settings = next.settings && typeof next.settings === 'object' ? next.settings : next
+  const hadNestedSettings = next.settings && typeof next.settings === 'object'
+  const settings = appdataSettings(next)
   settings.dataVersion = dataVersion
+  for (const field of FIXED_DISABLE_SYNC_FIELDS) {
+    delete settings[field]
+    delete next[field]
+  }
   for (const field of splitDisableSyncFields(disableSyncFields)) {
     delete settings[field]
+    if (!hadNestedSettings) delete next[field]
   }
   return next
 }
 
 function appdataForLocalSave(appdata: Record<string, any>, dataVersion: number) {
   const next = cloneRecord(appdata)
-  const settings = next.settings && typeof next.settings === 'object' ? next.settings : next
+  const settings = appdataSettings(next)
   settings.dataVersion = dataVersion
   return next
 }

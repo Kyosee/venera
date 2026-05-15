@@ -15,6 +15,7 @@ const router = createRouter({
         { path: 'settings', component: () => import('../pages/settings/SettingsPage.vue') },
         { path: 'tasks', component: () => import('../pages/tasks/TasksPage.vue') },
         { path: 'history', component: () => import('../pages/history/HistoryPage.vue') },
+        { path: 'follow-updates', component: () => import('../pages/follow-updates/FollowUpdatesPage.vue') },
         { path: 'image-favorites', component: () => import('../pages/image-favorites/ImageFavoritesPage.vue') },
       ]
     },

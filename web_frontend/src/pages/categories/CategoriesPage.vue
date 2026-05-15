@@ -3,6 +3,8 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { apiPost, imageProxyUrl } from '@/services/api'
 import { getComicSources } from '@/services/server-db'
+import { useSettingsStore } from '@/stores/settings'
+import ComicTile from '@/components/ComicTile.vue'
 import type { ComicSource } from '@/types'
 
 interface CategoryItem {
@@ -20,6 +22,7 @@ interface CategoryComic {
 
 const router = useRouter()
 const route = useRoute()
+const settingsStore = useSettingsStore()
 const sources = ref<ComicSource[]>([])
 const activeTab = ref(0)
 const categories = ref<Record<string, CategoryItem[]>>({})
@@ -36,7 +39,20 @@ const comicsError = ref<string | null>(null)
 const comicsHasMore = ref(false)
 
 const currentSourceKey = computed(() => sources.value[activeTab.value]?.key ?? '')
+const currentSourceName = computed(() => sources.value[activeTab.value]?.name ?? currentSourceKey.value)
 const showComicsList = computed(() => selectedCategory.value !== null)
+const gridStyle = computed(() => {
+  const scale = Number(settingsStore.settings.thumbnailSize || 1)
+  return settingsStore.settings.thumbnailMode === 'brief'
+    ? {
+        '--tile-scale': String(scale),
+        gridTemplateColumns: `repeat(auto-fill, minmax(96px, ${Math.round(192 * scale)}px))`,
+      }
+    : {
+        '--tile-scale': String(scale),
+        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))',
+      }
+})
 
 watch(() => route.query.cat, (val) => {
   if (val && typeof val === 'string') {
@@ -130,6 +146,7 @@ async function retryComics() {
 }
 
 onMounted(async () => {
+  await settingsStore.loadSettings()
   try {
     const list = await getComicSources()
     sources.value = list
@@ -161,22 +178,15 @@ onMounted(async () => {
           <van-button type="primary" size="small" @click="retryComics">Retry</van-button>
         </div>
 
-        <div v-if="comics.length" class="comic-grid">
-          <div
+        <div v-if="comics.length" class="comic-grid" :style="gridStyle">
+          <ComicTile
             v-for="comic in comics"
             :key="comic.id"
+            :comic="{ ...comic, sourceKey: currentSourceKey }"
+            :source-name="currentSourceName"
             class="comic-card"
             @click="goComic(comic)"
-          >
-            <img
-              class="comic-cover"
-              :src="imageProxyUrl(comic.cover)"
-              :alt="comic.title"
-              loading="lazy"
-            />
-            <div class="comic-title">{{ comic.title }}</div>
-            <div v-if="comic.subtitle" class="comic-subtitle">{{ comic.subtitle }}</div>
-          </div>
+          />
         </div>
 
         <div v-if="comics.length && comicsHasMore" class="load-more">
