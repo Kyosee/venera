@@ -2842,6 +2842,237 @@ async function withFavoriteDb(profileRoot, callback) {
   }
 }
 
+const favoriteFolderColumnDefinitions = [
+  ["id", "text"],
+  ["name", "text"],
+  ["author", "text"],
+  ["type", "int"],
+  ["tags", "text"],
+  ["cover_path", "text"],
+  ["time", "text"],
+  ["display_order", "int"],
+  ["translated_tags", "text"],
+  ["last_update_time", "text"],
+  ["has_new_update", "int"],
+  ["last_check_time", "int"],
+];
+
+function normalizeFavoriteFolderName(value, fieldName = "folder") {
+  const name = String(value || "").trim();
+  if (
+    !name ||
+    name.toLowerCase().startsWith("sqlite_") ||
+    nonFavoriteTableNames.has(name)
+  ) {
+    throw createHttpError(400, `Invalid favorites ${fieldName}`);
+  }
+  return name;
+}
+
+function favoriteTagsValue(value) {
+  if (Array.isArray(value)) {
+    const tags = value.map((item) => String(item).trim()).filter(Boolean);
+    return tags.length === 0 ? "" : `${tags.join(",")},`;
+  }
+  return String(value || "");
+}
+
+function ensureFavoriteDbSchema(db) {
+  db.exec(`
+    create table if not exists folder_order (
+      folder_name text primary key,
+      order_value int
+    );
+    create table if not exists folder_sync (
+      folder_name text primary key,
+      source_key text,
+      source_folder text
+    );
+  `);
+}
+
+function favoriteColumnNames(db, folderName) {
+  const quotedTable = sqliteIdentifier(folderName);
+  return new Set(
+    db
+      .prepare(`PRAGMA table_info(${quotedTable});`)
+      .all()
+      .map((column) => String(column.name || "")),
+  );
+}
+
+function ensureFavoriteFolderTable(db, folderName) {
+  const quotedTable = sqliteIdentifier(folderName);
+  if (!tableExists(db, folderName)) {
+    db.exec(`
+      create table ${quotedTable} (
+        id text,
+        name text,
+        author text,
+        type int,
+        tags text,
+        cover_path text,
+        time text,
+        display_order int,
+        translated_tags text,
+        last_update_time text,
+        has_new_update int,
+        last_check_time int,
+        primary key (id, type)
+      );
+    `);
+    return;
+  }
+  const columns = favoriteColumnNames(db, folderName);
+  if (!columns.has("id") || !columns.has("type")) {
+    throw createHttpError(422, "Favorites folder schema is invalid");
+  }
+  for (const [name, type] of favoriteFolderColumnDefinitions) {
+    if (!columns.has(name)) {
+      db.exec(
+        `alter table ${quotedTable} add column ${sqliteIdentifier(name)} ${type};`,
+      );
+    }
+  }
+}
+
+async function withWritableFavoriteDb(profileRoot, callback) {
+  const filePath = serverDbEntryPath(profileRoot, "local_favorite.db");
+  const db = await openWritableSqliteDatabase(filePath);
+  try {
+    ensureFavoriteDbSchema(db);
+    return callback(db);
+  } finally {
+    db.close();
+  }
+}
+
+function nextFavoriteFolderName(db, name) {
+  if (!tableExists(db, name)) return name;
+  let index = 1;
+  while (tableExists(db, `${name} (${index})`)) {
+    index += 1;
+  }
+  return `${name} (${index})`;
+}
+
+function normalizeFavoriteWriteItem(payload) {
+  const item = payload?.item;
+  if (!item || typeof item !== "object") {
+    throw createHttpError(400, "Missing favorite item");
+  }
+  const id = String(item.id || "").trim();
+  const type = Number(item.type);
+  if (!id || !Number.isInteger(type)) {
+    throw createHttpError(400, "Invalid favorite item");
+  }
+  const nullableNumber = (value) => {
+    if (value == null || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  };
+  return {
+    id,
+    name: String(item.name ?? item.title ?? ""),
+    author: String(item.author || ""),
+    type,
+    tags: favoriteTagsValue(item.tags),
+    coverPath: String(item.coverPath ?? item.cover_path ?? item.cover ?? ""),
+    time: String(item.time ?? payload.updateTime ?? ""),
+    displayOrder:
+      nullableNumber(payload.order) ??
+      nullableNumber(item.displayOrder) ??
+      nullableNumber(item.display_order) ??
+      0,
+    translatedTags: favoriteTagsValue(
+      item.translatedTags ?? item.translated_tags,
+    ),
+    lastUpdateTime:
+      item.lastUpdateTime == null && item.last_update_time == null
+        ? null
+        : String(item.lastUpdateTime ?? item.last_update_time),
+    hasNewUpdate: item.hasNewUpdate ?? item.has_new_update,
+    lastCheckTime:
+      nullableNumber(item.lastCheckTime) ?? nullableNumber(item.last_check_time),
+  };
+}
+
+function favoriteWriteValue(item, column) {
+  switch (column) {
+    case "id":
+      return item.id;
+    case "name":
+      return item.name;
+    case "author":
+      return item.author;
+    case "type":
+      return item.type;
+    case "tags":
+      return item.tags;
+    case "cover_path":
+      return item.coverPath;
+    case "time":
+      return item.time;
+    case "display_order":
+      return item.displayOrder;
+    case "translated_tags":
+      return item.translatedTags;
+    case "last_update_time":
+      return item.lastUpdateTime;
+    case "has_new_update":
+      return item.hasNewUpdate ? 1 : 0;
+    case "last_check_time":
+      return item.lastCheckTime;
+    default:
+      return null;
+  }
+}
+
+function writeFavoriteItem(db, folderName, item) {
+  ensureFavoriteFolderTable(db, folderName);
+  const columns = favoriteFolderColumnDefinitions.map(([name]) => name);
+  const quotedColumns = columns.map(sqliteIdentifier).join(", ");
+  const placeholders = columns.map(() => "?").join(", ");
+  const quotedTable = sqliteIdentifier(folderName);
+  db.prepare(
+    `insert or replace into ${quotedTable} (${quotedColumns}) values (${placeholders});`,
+  ).run(...columns.map((column) => favoriteWriteValue(item, column)));
+}
+
+function favoriteItemFromRow(row) {
+  return {
+    id: String(row.id || ""),
+    name: String(row.name || ""),
+    author: String(row.author || ""),
+    type: Number(row.type || 0),
+    tags: row.tags == null ? "" : String(row.tags),
+    coverPath: String(row.cover_path || ""),
+    time: String(row.time || ""),
+    displayOrder: Number(row.display_order || 0),
+    translatedTags:
+      row.translated_tags == null ? "" : String(row.translated_tags),
+    lastUpdateTime:
+      row.last_update_time == null ? null : String(row.last_update_time),
+    hasNewUpdate: Number(row.has_new_update || 0) === 1,
+    lastCheckTime:
+      row.last_check_time == null ? null : Number(row.last_check_time),
+  };
+}
+
+function copyFavoriteItem(db, sourceFolder, targetFolder, id, type) {
+  ensureFavoriteFolderTable(db, sourceFolder);
+  ensureFavoriteFolderTable(db, targetFolder);
+  const row = db
+    .prepare(
+      `select * from ${sqliteIdentifier(sourceFolder)} where id = ? and type = ?;`,
+    )
+    .get(id, type);
+  if (!row) {
+    throw createHttpError(404, "Favorite item not found");
+  }
+  writeFavoriteItem(db, targetFolder, favoriteItemFromRow(row));
+}
+
 function favoriteFoldersFromDb(db) {
   const tables = favoriteTableNames(db);
   const orders = new Map();
@@ -3177,6 +3408,141 @@ async function handleServerDbRoute({
     return true;
   }
 
+  if (parsedUrl.pathname === "/api/server-db/favorites/folder/create") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const renameWhenInvalidName = Boolean(payload.renameWhenInvalidName);
+    let name = normalizeFavoriteFolderName(payload.name, "folder name");
+    await withWritableFavoriteDb(profileRoot, (db) => {
+      ensureFavoriteDbSchema(db);
+      if (tableExists(db, name)) {
+        if (!renameWhenInvalidName) {
+          throw createHttpError(409, "Favorites folder already exists");
+        }
+        name = nextFavoriteFolderName(db, name);
+      }
+      ensureFavoriteFolderTable(db, name);
+      db.prepare(
+        "insert or ignore into folder_order(folder_name, order_value) values (?, ?);",
+      ).run(name, 0);
+    });
+    markServerDbDirty(profileRoot, "favorites-folder-create");
+    sendJson(res, 200, { ok: true, profile: profileId, name });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/favorites/folder/delete") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const name = normalizeFavoriteFolderName(payload.name, "folder name");
+    await withWritableFavoriteDb(profileRoot, (db) => {
+      if (!tableExists(db, name)) {
+        throw createHttpError(404, "Favorites folder not found");
+      }
+      const quotedTable = sqliteIdentifier(name);
+      db.exec(`drop table ${quotedTable};`);
+      db.prepare("delete from folder_order where folder_name = ?;").run(name);
+      db.prepare("delete from folder_sync where folder_name = ?;").run(name);
+    });
+    markServerDbDirty(profileRoot, "favorites-folder-delete");
+    sendJson(res, 200, { ok: true, profile: profileId });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/favorites/folder/rename") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const before = normalizeFavoriteFolderName(payload.before, "folder name");
+    const after = normalizeFavoriteFolderName(payload.after, "folder name");
+    await withWritableFavoriteDb(profileRoot, (db) => {
+      if (!tableExists(db, before)) {
+        throw createHttpError(404, "Favorites folder not found");
+      }
+      if (before !== after && tableExists(db, after)) {
+        throw createHttpError(409, "Favorites folder already exists");
+      }
+      if (before !== after) {
+        const beforeQuoted = sqliteIdentifier(before);
+        const afterQuoted = sqliteIdentifier(after);
+        db.exec(`alter table ${beforeQuoted} rename to ${afterQuoted};`);
+        if (tableExists(db, "folder_order")) {
+          db.prepare(
+            "update folder_order set folder_name = ? where folder_name = ?;",
+          ).run(after, before);
+        }
+        if (tableExists(db, "folder_sync")) {
+          db.prepare(
+            "update folder_sync set folder_name = ? where folder_name = ?;",
+          ).run(after, before);
+        }
+      }
+    });
+    markServerDbDirty(profileRoot, "favorites-folder-rename");
+    sendJson(res, 200, { ok: true, profile: profileId, name: after });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/favorites/folder/link") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const folder = normalizeFavoriteFolderName(payload.folder, "folder");
+    const source = String(payload.source || "").trim();
+    const networkFolder = String(payload.networkFolder || "").trim();
+    if (!source || !networkFolder) {
+      throw createHttpError(400, "Invalid favorites folder link payload");
+    }
+    await withWritableFavoriteDb(profileRoot, (db) => {
+      if (!tableExists(db, folder)) {
+        throw createHttpError(404, "Favorites folder not found");
+      }
+      db.prepare(
+        "insert or replace into folder_sync(folder_name, source_key, source_folder) values (?, ?, ?);",
+      ).run(folder, source, networkFolder);
+    });
+    markServerDbDirty(profileRoot, "favorites-folder-link");
+    sendJson(res, 200, { ok: true, profile: profileId });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/favorites/folder/order") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const folders = Array.isArray(payload.folders) ? payload.folders : [];
+    await withWritableFavoriteDb(profileRoot, (db) => {
+      ensureFavoriteDbSchema(db);
+      db.exec("BEGIN TRANSACTION;");
+      try {
+        const statement = db.prepare(
+          "insert or replace into folder_order(folder_name, order_value) values (?, ?);",
+        );
+        folders.forEach((folderName, index) => {
+          const name = normalizeFavoriteFolderName(folderName, "folder name");
+          if (!tableExists(db, name)) {
+            throw createHttpError(404, "Favorites folder not found");
+          }
+          statement.run(name, index);
+        });
+        db.exec("COMMIT;");
+      } catch (err) {
+        db.exec("ROLLBACK;");
+        throw err;
+      }
+    });
+    markServerDbDirty(profileRoot, "favorites-folder-order");
+    sendJson(res, 200, { ok: true, profile: profileId });
+    return true;
+  }
+
   if (parsedUrl.pathname === "/api/server-db/favorites/list") {
     const folder = String(payload.folder || "").trim();
     if (!folder) {
@@ -3202,6 +3568,296 @@ async function handleServerDbRoute({
       return { total, items };
     });
     sendJson(res, 200, { ok: true, profile: profileId, folder, ...data });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/favorites/add") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const folder = normalizeFavoriteFolderName(payload.folder, "folder");
+    const item = normalizeFavoriteWriteItem(payload);
+    await withWritableFavoriteDb(profileRoot, (db) => {
+      writeFavoriteItem(db, folder, item);
+    });
+    markServerDbDirty(profileRoot, "favorites-add");
+    sendJson(res, 200, { ok: true, profile: profileId });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/favorites/info") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const folder = normalizeFavoriteFolderName(payload.folder, "folder");
+    const item = payload?.item;
+    const id = String(item?.id || "").trim();
+    const type = Number(item?.type);
+    if (!id || !Number.isInteger(type)) {
+      throw createHttpError(400, "Invalid favorites info payload");
+    }
+    await withWritableFavoriteDb(profileRoot, (db) => {
+      if (!tableExists(db, folder)) {
+        throw createHttpError(404, "Favorites folder not found");
+      }
+      ensureFavoriteFolderTable(db, folder);
+      const result = db
+        .prepare(
+          `update ${sqliteIdentifier(folder)}
+           set name = ?, author = ?, cover_path = ?, tags = ?, translated_tags = ?
+           where id = ? and type = ?;`,
+        )
+        .run(
+          String(item.name ?? item.title ?? ""),
+          String(item.author || ""),
+          String(item.coverPath ?? item.cover_path ?? item.cover ?? ""),
+          favoriteTagsValue(item.tags),
+          favoriteTagsValue(item.translatedTags ?? item.translated_tags),
+          id,
+          type,
+        );
+      if (Number(result?.changes || 0) === 0) {
+        throw createHttpError(404, "Favorite item not found");
+      }
+    });
+    markServerDbDirty(profileRoot, "favorites-info");
+    sendJson(res, 200, { ok: true, profile: profileId });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/favorites/delete") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const folder = normalizeFavoriteFolderName(payload.folder, "folder");
+    const id = String(payload.id || "").trim();
+    const type = Number(payload.type);
+    if (!id || !Number.isInteger(type)) {
+      throw createHttpError(400, "Invalid favorites delete payload");
+    }
+    await withWritableFavoriteDb(profileRoot, (db) => {
+      if (!tableExists(db, folder)) {
+        throw createHttpError(404, "Favorites folder not found");
+      }
+      db.prepare(
+        `delete from ${sqliteIdentifier(folder)} where id = ? and type = ?;`,
+      ).run(id, type);
+    });
+    markServerDbDirty(profileRoot, "favorites-delete");
+    sendJson(res, 200, { ok: true, profile: profileId });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/favorites/batch-delete") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const folder = normalizeFavoriteFolderName(payload.folder, "folder");
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    await withWritableFavoriteDb(profileRoot, (db) => {
+      if (!tableExists(db, folder)) {
+        throw createHttpError(404, "Favorites folder not found");
+      }
+      const statement = db.prepare(
+        `delete from ${sqliteIdentifier(folder)} where id = ? and type = ?;`,
+      );
+      db.exec("BEGIN TRANSACTION;");
+      try {
+        for (const entry of items) {
+          const id = String(entry?.id || "").trim();
+          const type = Number(entry?.type);
+          if (!id || !Number.isInteger(type)) continue;
+          statement.run(id, type);
+        }
+        db.exec("COMMIT;");
+      } catch (err) {
+        db.exec("ROLLBACK;");
+        throw err;
+      }
+    });
+    markServerDbDirty(profileRoot, "favorites-batch-delete");
+    sendJson(res, 200, { ok: true, profile: profileId });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/favorites/move") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const sourceFolder = normalizeFavoriteFolderName(
+      payload.sourceFolder,
+      "source folder",
+    );
+    const targetFolder = normalizeFavoriteFolderName(
+      payload.targetFolder,
+      "target folder",
+    );
+    const id = String(payload.id || "").trim();
+    const type = Number(payload.type);
+    if (!id || !Number.isInteger(type)) {
+      throw createHttpError(400, "Invalid favorites move payload");
+    }
+    await withWritableFavoriteDb(profileRoot, (db) => {
+      copyFavoriteItem(db, sourceFolder, targetFolder, id, type);
+      db.prepare(
+        `delete from ${sqliteIdentifier(sourceFolder)} where id = ? and type = ?;`,
+      ).run(id, type);
+    });
+    markServerDbDirty(profileRoot, "favorites-move");
+    sendJson(res, 200, { ok: true, profile: profileId });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/favorites/batch-move") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const sourceFolder = normalizeFavoriteFolderName(
+      payload.sourceFolder,
+      "source folder",
+    );
+    const targetFolder = normalizeFavoriteFolderName(
+      payload.targetFolder,
+      "target folder",
+    );
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    await withWritableFavoriteDb(profileRoot, (db) => {
+      ensureFavoriteFolderTable(db, sourceFolder);
+      ensureFavoriteFolderTable(db, targetFolder);
+      db.exec("BEGIN TRANSACTION;");
+      try {
+        const deleteStatement = db.prepare(
+          `delete from ${sqliteIdentifier(sourceFolder)} where id = ? and type = ?;`,
+        );
+        for (const entry of items) {
+          const id = String(entry?.id || "").trim();
+          const type = Number(entry?.type);
+          if (!id || !Number.isInteger(type)) continue;
+          copyFavoriteItem(db, sourceFolder, targetFolder, id, type);
+          deleteStatement.run(id, type);
+        }
+        db.exec("COMMIT;");
+      } catch (err) {
+        db.exec("ROLLBACK;");
+        throw err;
+      }
+    });
+    markServerDbDirty(profileRoot, "favorites-batch-move");
+    sendJson(res, 200, { ok: true, profile: profileId });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/favorites/batch-copy") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const sourceFolder = normalizeFavoriteFolderName(
+      payload.sourceFolder,
+      "source folder",
+    );
+    const targetFolder = normalizeFavoriteFolderName(
+      payload.targetFolder,
+      "target folder",
+    );
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    await withWritableFavoriteDb(profileRoot, (db) => {
+      ensureFavoriteFolderTable(db, sourceFolder);
+      ensureFavoriteFolderTable(db, targetFolder);
+      db.exec("BEGIN TRANSACTION;");
+      try {
+        for (const entry of items) {
+          const id = String(entry?.id || "").trim();
+          const type = Number(entry?.type);
+          if (!id || !Number.isInteger(type)) continue;
+          copyFavoriteItem(db, sourceFolder, targetFolder, id, type);
+        }
+        db.exec("COMMIT;");
+      } catch (err) {
+        db.exec("ROLLBACK;");
+        throw err;
+      }
+    });
+    markServerDbDirty(profileRoot, "favorites-batch-copy");
+    sendJson(res, 200, { ok: true, profile: profileId });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/favorites/reorder") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const folder = normalizeFavoriteFolderName(payload.folder, "folder");
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    await withWritableFavoriteDb(profileRoot, (db) => {
+      if (!tableExists(db, folder)) {
+        throw createHttpError(404, "Favorites folder not found");
+      }
+      ensureFavoriteFolderTable(db, folder);
+      const statement = db.prepare(
+        `update ${sqliteIdentifier(folder)} set display_order = ? where id = ? and type = ?;`,
+      );
+      db.exec("BEGIN TRANSACTION;");
+      try {
+        for (const entry of items) {
+          const id = String(entry?.id || "").trim();
+          const type = Number(entry?.type);
+          const order = Number(entry?.order);
+          if (!id || !Number.isInteger(type) || !Number.isFinite(order)) {
+            continue;
+          }
+          statement.run(order, id, type);
+        }
+        db.exec("COMMIT;");
+      } catch (err) {
+        db.exec("ROLLBACK;");
+        throw err;
+      }
+    });
+    markServerDbDirty(profileRoot, "favorites-reorder");
+    sendJson(res, 200, { ok: true, profile: profileId });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/favorites/tags") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const folder = normalizeFavoriteFolderName(payload.folder, "folder");
+    const id = String(payload.id || "").trim();
+    const type = payload.type == null ? null : Number(payload.type);
+    if (!id) {
+      throw createHttpError(400, "Invalid favorites tags payload");
+    }
+    const tags = favoriteTagsValue(payload.tags);
+    await withWritableFavoriteDb(profileRoot, (db) => {
+      if (!tableExists(db, folder)) {
+        throw createHttpError(404, "Favorites folder not found");
+      }
+      ensureFavoriteFolderTable(db, folder);
+      const hasType = Number.isInteger(type);
+      const quotedTable = sqliteIdentifier(folder);
+      const sql = hasType
+        ? `update ${quotedTable} set tags = ? where id = ? and type = ?;`
+        : `update ${quotedTable} set tags = ? where id = ?;`;
+      const statement = db.prepare(sql);
+      const result = hasType
+        ? statement.run(tags, id, type)
+        : statement.run(tags, id);
+      if (Number(result?.changes || 0) === 0) {
+        throw createHttpError(404, "Favorite item not found");
+      }
+    });
+    markServerDbDirty(profileRoot, "favorites-tags");
+    sendJson(res, 200, { ok: true, profile: profileId });
     return true;
   }
 

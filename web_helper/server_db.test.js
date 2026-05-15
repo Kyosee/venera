@@ -707,6 +707,224 @@ test("server-db favorites read APIs list folders and items", async () => {
   }
 });
 
+test("server-db favorites write APIs create add info tags move copy delete rename reorder", async () => {
+  const serverDataDir = await mkdtemp(join(tmpdir(), "venera-server-db-"));
+  const helper = createServer({ serverDataDir });
+  const helperUrl = await listen(helper);
+  const post = (path, body) =>
+    fetch(`${helperUrl}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile: "writer", ...body }),
+    });
+
+  try {
+    const createResponse = await post(
+      "/api/server-db/favorites/folder/create",
+      { name: "Shelf" },
+    );
+    assert.equal(createResponse.status, 200);
+    assert.equal((await createResponse.json()).name, "Shelf");
+
+    const linkResponse = await post("/api/server-db/favorites/folder/link", {
+      folder: "Shelf",
+      source: "network-source",
+      networkFolder: "Remote Shelf",
+    });
+    assert.equal(linkResponse.status, 200);
+    let foldersPayload = await (
+      await post("/api/server-db/favorites/folders", {})
+    ).json();
+    assert.equal(foldersPayload.folders[0].sourceKey, "network-source");
+    assert.equal(foldersPayload.folders[0].sourceFolder, "Remote Shelf");
+
+    const addFirstResponse = await post("/api/server-db/favorites/add", {
+      folder: "Shelf",
+      order: 10,
+      updateTime: "2026-05-15 12:00:00",
+      item: {
+        id: "comic-a",
+        name: "first",
+        author: "author-a",
+        type: 1,
+        tags: ["tag-a", "tag-b"],
+        coverPath: "cover-a.jpg",
+      },
+    });
+    assert.equal(addFirstResponse.status, 200);
+    const addSecondResponse = await post("/api/server-db/favorites/add", {
+      folder: "Shelf",
+      order: 20,
+      item: {
+        id: "comic-b",
+        name: "second",
+        type: 2,
+      },
+    });
+    assert.equal(addSecondResponse.status, 200);
+    const addThirdResponse = await post("/api/server-db/favorites/add", {
+      folder: "Shelf",
+      order: 40,
+      item: {
+        id: "comic-c",
+        name: "third",
+        type: 3,
+      },
+    });
+    assert.equal(addThirdResponse.status, 200);
+
+    const findPayload = await (
+      await post("/api/server-db/favorites/find", { id: "comic-a", type: 1 })
+    ).json();
+    assert.deepEqual(findPayload.folders, ["Shelf"]);
+
+    const getPayload = await (
+      await post("/api/server-db/favorites/get", {
+        folder: "Shelf",
+        id: "comic-a",
+        type: 1,
+      })
+    ).json();
+    assert.equal(getPayload.item.name, "first");
+    assert.deepEqual(getPayload.item.tags, ["tag-a", "tag-b"]);
+    assert.equal(getPayload.item.displayOrder, 10);
+
+    const infoResponse = await post("/api/server-db/favorites/info", {
+      folder: "Shelf",
+      item: {
+        id: "comic-a",
+        type: 1,
+        name: "first updated",
+        author: "author-updated",
+        coverPath: "cover-updated.jpg",
+        tags: ["info-tag"],
+        translatedTags: ["translated-info"],
+      },
+    });
+    assert.equal(infoResponse.status, 200);
+    const tagsResponse = await post("/api/server-db/favorites/tags", {
+      folder: "Shelf",
+      id: "comic-a",
+      tags: ["tag-final"],
+    });
+    assert.equal(tagsResponse.status, 200);
+    const updatedGetPayload = await (
+      await post("/api/server-db/favorites/get", {
+        folder: "Shelf",
+        id: "comic-a",
+        type: 1,
+      })
+    ).json();
+    assert.equal(updatedGetPayload.item.name, "first updated");
+    assert.equal(updatedGetPayload.item.author, "author-updated");
+    assert.equal(updatedGetPayload.item.coverPath, "cover-updated.jpg");
+    assert.deepEqual(updatedGetPayload.item.tags, ["tag-final"]);
+    assert.deepEqual(updatedGetPayload.item.translatedTags, ["translated-info"]);
+
+    let listPayload = await (
+      await post("/api/server-db/favorites/list", {
+        folder: "Shelf",
+        limit: 10,
+      })
+    ).json();
+    assert.equal(listPayload.total, 3);
+    assert.deepEqual(
+      listPayload.items.map((item) => item.id),
+      ["comic-a", "comic-b", "comic-c"],
+    );
+
+    const reorderResponse = await post("/api/server-db/favorites/reorder", {
+      folder: "Shelf",
+      items: [
+        { id: "comic-a", type: 1, order: 30 },
+        { id: "comic-b", type: 2, order: 5 },
+        { id: "comic-c", type: 3, order: 40 },
+      ],
+    });
+    assert.equal(reorderResponse.status, 200);
+    listPayload = await (
+      await post("/api/server-db/favorites/list", {
+        folder: "Shelf",
+        limit: 10,
+      })
+    ).json();
+    assert.deepEqual(
+      listPayload.items.map((item) => item.id),
+      ["comic-b", "comic-a", "comic-c"],
+    );
+
+    const moveResponse = await post("/api/server-db/favorites/move", {
+      sourceFolder: "Shelf",
+      targetFolder: "Archive",
+      id: "comic-b",
+      type: 2,
+    });
+    assert.equal(moveResponse.status, 200);
+
+    const batchMoveResponse = await post("/api/server-db/favorites/batch-move", {
+      sourceFolder: "Shelf",
+      targetFolder: "Archive",
+      items: [{ id: "comic-c", type: 3 }],
+    });
+    assert.equal(batchMoveResponse.status, 200);
+
+    const batchCopyResponse = await post("/api/server-db/favorites/batch-copy", {
+      sourceFolder: "Shelf",
+      targetFolder: "Archive",
+      items: [{ id: "comic-a", type: 1 }],
+    });
+    assert.equal(batchCopyResponse.status, 200);
+
+    const deleteResponse = await post("/api/server-db/favorites/delete", {
+      folder: "Shelf",
+      id: "comic-a",
+      type: 1,
+    });
+    assert.equal(deleteResponse.status, 200);
+
+    const renameResponse = await post(
+      "/api/server-db/favorites/folder/rename",
+      { before: "Shelf", after: "Done" },
+    );
+    assert.equal(renameResponse.status, 200);
+
+    foldersPayload = await (
+      await post("/api/server-db/favorites/folders", {})
+    ).json();
+    assert.deepEqual(
+      foldersPayload.folders.map((folder) => folder.name),
+      ["Archive", "Done"],
+    );
+    assert.equal(foldersPayload.folders[0].count, 3);
+    assert.equal(foldersPayload.folders[1].count, 0);
+    assert.equal(foldersPayload.folders[1].sourceKey, "network-source");
+    assert.equal(foldersPayload.folders[1].sourceFolder, "Remote Shelf");
+
+    listPayload = await (
+      await post("/api/server-db/favorites/list", {
+        folder: "Archive",
+        limit: 10,
+      })
+    ).json();
+    assert.equal(listPayload.total, 3);
+    assert.deepEqual(
+      listPayload.items.map((item) => item.id),
+      ["comic-b", "comic-a", "comic-c"],
+    );
+    assert.equal(listPayload.items[1].name, "first updated");
+    assert.deepEqual(listPayload.items[1].tags, ["tag-final"]);
+
+    const statusPayload = await (
+      await fetch(`${helperUrl}/api/server-db/status?profile=writer`)
+    ).json();
+    assert.equal(statusPayload.metadata.dirty, true);
+    assert.equal(statusPayload.metadata.dirtyReason, "favorites-folder-rename");
+  } finally {
+    await close(helper);
+    await rm(serverDataDir, { recursive: true, force: true });
+  }
+});
+
 test("server-db upload reuses helper-side comic sources", async () => {
   const serverDataDir = await mkdtemp(join(tmpdir(), "venera-server-db-"));
   let uploaded = null;
