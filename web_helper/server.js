@@ -2686,32 +2686,22 @@ function sqliteIdentifier(name) {
   return `"${String(name).replaceAll('"', '""')}"`;
 }
 
+const nonFavoriteTableNames = new Set([
+  "folder_sync",
+  "folder_order",
+  "comic_links",
+  "sqlite_sequence",
+]);
+
 function favoriteHistoryKeysFromServerDb(profileRoot) {
   const filePath = serverDbEntryPath(profileRoot, "local_favorite.db");
   if (!existsSync(filePath)) return new Set();
-  const nonFavoriteTables = new Set([
-    "folder_sync",
-    "folder_order",
-    "comic_links",
-    "sqlite_sequence",
-  ]);
   return openWritableSqliteDatabase(filePath).then((db) => {
     try {
       const keys = new Set();
-      const tables = db
-        .prepare("select name from sqlite_master where type = 'table';")
-        .all()
-        .map((row) => String(row.name || ""))
-        .filter((name) => name && !nonFavoriteTables.has(name));
+      const tables = favoriteTableNames(db);
       for (const tableName of tables) {
         const quotedTable = sqliteIdentifier(tableName);
-        const columns = db.prepare(`PRAGMA table_info(${quotedTable});`).all();
-        if (
-          !columns.some((column) => column.name === "id") ||
-          !columns.some((column) => column.name === "type")
-        ) {
-          continue;
-        }
         for (const row of db.prepare(`select id, type from ${quotedTable};`).all()) {
           const id = String(row.id || "").trim();
           const type = Number(row.type);
@@ -2725,6 +2715,104 @@ function favoriteHistoryKeysFromServerDb(profileRoot) {
       db.close();
     }
   });
+}
+
+function tableExists(db, tableName) {
+  const row = db
+    .prepare("select name from sqlite_master where type = 'table' and name = ?;")
+    .get(tableName);
+  return row != null;
+}
+
+function favoriteTableNames(db) {
+  return db
+    .prepare("select name from sqlite_master where type = 'table';")
+    .all()
+    .map((row) => String(row.name || ""))
+    .filter((name) => name && !name.startsWith("sqlite_"))
+    .filter((name) => !nonFavoriteTableNames.has(name))
+    .filter((name) => {
+      const quotedTable = sqliteIdentifier(name);
+      const columns = db.prepare(`PRAGMA table_info(${quotedTable});`).all();
+      return (
+        columns.some((column) => column.name === "id") &&
+        columns.some((column) => column.name === "type")
+      );
+    });
+}
+
+function splitFavoriteTags(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizeFavoriteRow(row, folderName) {
+  return {
+    folder: folderName,
+    id: String(row.id || ""),
+    name: String(row.name || ""),
+    author: String(row.author || ""),
+    type: Number(row.type || 0),
+    tags: splitFavoriteTags(row.tags),
+    coverPath: String(row.cover_path || ""),
+    time: String(row.time || ""),
+    displayOrder: Number(row.display_order || 0),
+    translatedTags: splitFavoriteTags(row.translated_tags),
+    lastUpdateTime:
+      row.last_update_time == null ? null : String(row.last_update_time),
+    hasNewUpdate: Number(row.has_new_update || 0) === 1,
+    lastCheckTime:
+      row.last_check_time == null ? null : Number(row.last_check_time),
+  };
+}
+
+async function withFavoriteDb(profileRoot, callback) {
+  const filePath = serverDbEntryPath(profileRoot, "local_favorite.db");
+  if (!existsSync(filePath)) {
+    throw createHttpError(404, "Server favorites DB not found");
+  }
+  const db = await openWritableSqliteDatabase(filePath);
+  try {
+    return callback(db);
+  } finally {
+    db.close();
+  }
+}
+
+function favoriteFoldersFromDb(db) {
+  const tables = favoriteTableNames(db);
+  const orders = new Map();
+  if (tableExists(db, "folder_order")) {
+    for (const row of db.prepare("select * from folder_order;").all()) {
+      orders.set(String(row.folder_name || ""), Number(row.order_value || 0));
+    }
+  }
+  const syncLinks = new Map();
+  if (tableExists(db, "folder_sync")) {
+    for (const row of db.prepare("select * from folder_sync;").all()) {
+      syncLinks.set(String(row.folder_name || ""), {
+        sourceKey: row.source_key == null ? null : String(row.source_key),
+        sourceFolder:
+          row.source_folder == null ? null : String(row.source_folder),
+      });
+    }
+  }
+  return tables
+    .map((name) => {
+      const quotedTable = sqliteIdentifier(name);
+      const countRow = db.prepare(`select count(*) as c from ${quotedTable};`).get();
+      const syncLink = syncLinks.get(name) || {};
+      return {
+        name,
+        count: Number(countRow?.c || 0),
+        order: orders.get(name) || 0,
+        sourceKey: syncLink.sourceKey ?? null,
+        sourceFolder: syncLink.sourceFolder ?? null,
+      };
+    })
+    .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
 }
 
 async function withWritableHistoryDb(profileRoot, callback) {
@@ -3010,6 +3098,85 @@ async function handleServerDbRoute({
     });
     markServerDbDirty(profileRoot, "history-clear-unfavorited");
     sendJson(res, 200, { ok: true, profile: profileId, deleted });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/favorites/folders") {
+    const folders = await withFavoriteDb(profileRoot, favoriteFoldersFromDb);
+    sendJson(res, 200, { ok: true, profile: profileId, folders });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/favorites/list") {
+    const folder = String(payload.folder || "").trim();
+    if (!folder) {
+      throw createHttpError(400, "Missing favorites folder");
+    }
+    const safeOffset = Math.max(0, Number(payload.offset) || 0);
+    const safeLimit = Math.max(1, Math.min(500, Number(payload.limit) || 100));
+    const data = await withFavoriteDb(profileRoot, (db) => {
+      const folders = favoriteTableNames(db);
+      if (!folders.includes(folder)) {
+        throw createHttpError(404, "Favorites folder not found");
+      }
+      const quotedTable = sqliteIdentifier(folder);
+      const total = Number(
+        db.prepare(`select count(*) as c from ${quotedTable};`).get()?.c || 0,
+      );
+      const items = db
+        .prepare(
+          `select * from ${quotedTable} order by display_order limit ? offset ?;`,
+        )
+        .all(safeLimit, safeOffset)
+        .map((row) => normalizeFavoriteRow(row, folder));
+      return { total, items };
+    });
+    sendJson(res, 200, { ok: true, profile: profileId, folder, ...data });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/favorites/find") {
+    const id = String(payload.id || "").trim();
+    const type = Number(payload.type);
+    if (!id || !Number.isInteger(type)) {
+      throw createHttpError(400, "Invalid favorites find payload");
+    }
+    const folders = await withFavoriteDb(profileRoot, (db) =>
+      favoriteTableNames(db).filter((folder) => {
+        const quotedTable = sqliteIdentifier(folder);
+        return (
+          db
+            .prepare(`select 1 from ${quotedTable} where id = ? and type = ?;`)
+            .get(id, type) != null
+        );
+      }),
+    );
+    sendJson(res, 200, { ok: true, profile: profileId, folders });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/favorites/get") {
+    const folder = String(payload.folder || "").trim();
+    const id = String(payload.id || "").trim();
+    const type = Number(payload.type);
+    if (!folder || !id || !Number.isInteger(type)) {
+      throw createHttpError(400, "Invalid favorites get payload");
+    }
+    const item = await withFavoriteDb(profileRoot, (db) => {
+      const folders = favoriteTableNames(db);
+      if (!folders.includes(folder)) {
+        throw createHttpError(404, "Favorites folder not found");
+      }
+      const quotedTable = sqliteIdentifier(folder);
+      const row = db
+        .prepare(`select * from ${quotedTable} where id = ? and type = ?;`)
+        .get(id, type);
+      return row ? normalizeFavoriteRow(row, folder) : null;
+    });
+    if (!item) {
+      throw createHttpError(404, "Favorite item not found");
+    }
+    sendJson(res, 200, { ok: true, profile: profileId, item });
     return true;
   }
 

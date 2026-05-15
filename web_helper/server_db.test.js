@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -541,6 +541,150 @@ test("server-db history write APIs upsert, delete and clear rows", async () => {
     ).json();
     assert.equal(statusPayload.metadata.dirty, true);
     assert.equal(statusPayload.metadata.dirtyReason, "history-clear");
+  } finally {
+    await close(helper);
+    await rm(serverDataDir, { recursive: true, force: true });
+  }
+});
+
+test("server-db favorites read APIs list folders and items", async () => {
+  const serverDataDir = await mkdtemp(join(tmpdir(), "venera-server-db-"));
+  const profileDbDir = join(serverDataDir, "profiles", "reader", "db");
+  await mkdir(profileDbDir, { recursive: true });
+  const { DatabaseSync } = await import("node:sqlite");
+  const favoriteDb = new DatabaseSync(join(profileDbDir, "local_favorite.db"));
+  try {
+    favoriteDb.exec(`
+      create table folder_order (
+        folder_name text primary key,
+        order_value int
+      );
+      create table folder_sync (
+        folder_name text primary key,
+        source_key text,
+        source_folder text
+      );
+      create table "Default" (
+        id text,
+        name text,
+        author text,
+        type int,
+        tags text,
+        cover_path text,
+        time text,
+        display_order int,
+        translated_tags text,
+        primary key (id, type)
+      );
+      create table "Later" (
+        id text,
+        name text,
+        author text,
+        type int,
+        tags text,
+        cover_path text,
+        time text,
+        display_order int,
+        translated_tags text,
+        last_update_time text,
+        has_new_update int,
+        last_check_time int,
+        primary key (id, type)
+      );
+    `);
+    favoriteDb
+      .prepare("insert into folder_order values (?, ?);")
+      .run("Later", 0);
+    favoriteDb
+      .prepare("insert into folder_order values (?, ?);")
+      .run("Default", 1);
+    favoriteDb
+      .prepare("insert into folder_sync values (?, ?, ?);")
+      .run("Later", "source", "remote");
+    favoriteDb
+      .prepare(
+        'insert into "Default" values (?, ?, ?, ?, ?, ?, ?, ?, ?);',
+      )
+      .run(
+        "comic-1",
+        "first",
+        "author",
+        1,
+        "tag-a,tag-b,",
+        "cover.jpg",
+        "2026-05-15 12:00:00",
+        2,
+        "translated,",
+      );
+    favoriteDb
+      .prepare(
+        'insert into "Later" values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+      )
+      .run(
+        "comic-2",
+        "second",
+        "author",
+        2,
+        "",
+        "cover2.jpg",
+        "2026-05-15 13:00:00",
+        1,
+        "",
+        "2026-05-15 14:00:00",
+        1,
+        1234,
+      );
+  } finally {
+    favoriteDb.close();
+  }
+
+  const helper = createServer({ serverDataDir });
+  const helperUrl = await listen(helper);
+  const post = (path, body) =>
+    fetch(`${helperUrl}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile: "reader", ...body }),
+    });
+
+  try {
+    const foldersPayload = await (
+      await post("/api/server-db/favorites/folders", {})
+    ).json();
+    assert.deepEqual(
+      foldersPayload.folders.map((folder) => folder.name),
+      ["Later", "Default"],
+    );
+    assert.equal(foldersPayload.folders[0].count, 1);
+    assert.equal(foldersPayload.folders[0].sourceKey, "source");
+    assert.equal(foldersPayload.folders[0].sourceFolder, "remote");
+
+    const listPayload = await (
+      await post("/api/server-db/favorites/list", {
+        folder: "Default",
+        limit: 10,
+      })
+    ).json();
+    assert.equal(listPayload.total, 1);
+    assert.equal(listPayload.items[0].id, "comic-1");
+    assert.deepEqual(listPayload.items[0].tags, ["tag-a", "tag-b"]);
+    assert.deepEqual(listPayload.items[0].translatedTags, ["translated"]);
+
+    const findPayload = await (
+      await post("/api/server-db/favorites/find", { id: "comic-2", type: 2 })
+    ).json();
+    assert.deepEqual(findPayload.folders, ["Later"]);
+
+    const getPayload = await (
+      await post("/api/server-db/favorites/get", {
+        folder: "Later",
+        id: "comic-2",
+        type: 2,
+      })
+    ).json();
+    assert.equal(getPayload.item.name, "second");
+    assert.equal(getPayload.item.hasNewUpdate, true);
+    assert.equal(getPayload.item.lastCheckTime, 1234);
   } finally {
     await close(helper);
     await rm(serverDataDir, { recursive: true, force: true });
