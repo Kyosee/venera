@@ -359,6 +359,38 @@ Future<Map<String, dynamic>?> importWebServerDbDumps(
   return status;
 }
 
+Future<int> importWebServerComicSources(List<dynamic> rawSources) async {
+  final sources = rawSources
+      .whereType<Map>()
+      .map((item) => item.cast<String, dynamic>())
+      .toList();
+  if (sources.isEmpty) {
+    return 0;
+  }
+
+  final targetDir = Directory(FilePath.join(App.dataPath, 'comic_source'));
+  if (targetDir.existsSync()) {
+    targetDir.deleteSync(recursive: true);
+  }
+  targetDir.createSync(recursive: true);
+  var written = 0;
+  for (final source in sources) {
+    final name = source['name']?.toString() ?? '';
+    if (!RegExp(r'^[^/\\]+\.(?:js|data)$').hasMatch(name)) {
+      throw FormatException('Invalid comic source name: $name');
+    }
+    final dataBase64 = source['dataBase64']?.toString() ?? '';
+    await File(
+      FilePath.join(targetDir.path, name),
+    ).writeAsBytes(base64Decode(dataBase64));
+    written += 1;
+  }
+  if (written > 0 && App.isInitialized) {
+    await ComicSourceManager().reload();
+  }
+  return written;
+}
+
 Future<Map<String, dynamic>> _importExtractedDatabases(
   List<String> presentEntries,
   Map<dynamic, dynamic> databases,

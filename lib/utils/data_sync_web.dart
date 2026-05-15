@@ -312,6 +312,8 @@ class DataSync with ChangeNotifier {
       if (e.response?.statusCode != 404) rethrow;
     }
 
+    await _importServerComicSourcesFromHelper();
+
     if (!hydrateLocalCache) {
       if (sha256.isNotEmpty) {
         appdata.implicitData['webServerDbSyncedSha256'] = sha256;
@@ -340,6 +342,26 @@ class DataSync with ChangeNotifier {
       appdata.implicitData['webServerDbImportSha256'] = sha256;
     }
     appdata.writeImplicitData();
+  }
+
+  Future<void> _importServerComicSourcesFromHelper() async {
+    try {
+      final comicSourcesResponse = await _postHelper(
+        '/api/server-db/comic-sources',
+        {
+          'profile': _serverDbProfile,
+        },
+      );
+      final items = comicSourcesResponse['items'];
+      if (items is List) {
+        final imported = await importWebServerComicSources(items);
+        if (imported > 0) {
+          Log.info('Data Sync', 'Imported $imported comic sources from server DB');
+        }
+      }
+    } on DioException catch (e) {
+      if (e.response?.statusCode != 404) rethrow;
+    }
   }
 
   int _backupDay(String fileName) {

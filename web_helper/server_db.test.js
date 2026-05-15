@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -313,6 +313,8 @@ test("server-db sync stores WebDAV backup on helper disk", async () => {
   const backupBytes = buildZipArchive([
     { name: "appdata.json", data: Buffer.from('{"settings":{}}') },
     { name: "history.db", data: historyDb },
+    { name: "comic_source/demo.js", data: Buffer.from("function demo() {}") },
+    { name: "comic_source/demo.data", data: Buffer.from('{"ok":true}') },
   ]);
   const seenRequests = [];
 
@@ -356,6 +358,7 @@ test("server-db sync stores WebDAV backup on helper disk", async () => {
     assert.equal(syncPayload.remoteFileName, "1700000000100.venera");
     assert.equal(syncPayload.written.writtenDatabases, 1);
     assert.equal(syncPayload.written.writtenAppdata, true);
+    assert.equal(syncPayload.written.writtenComicSources, 2);
     assert.equal(Object.hasOwn(syncPayload, "dataBase64"), false);
 
     const storedDb = await readFile(
@@ -379,6 +382,19 @@ test("server-db sync stores WebDAV backup on helper disk", async () => {
     });
     assert.equal(appdataResponse.status, 200);
     assert.deepEqual((await appdataResponse.json()).data, { settings: {} });
+
+    const comicSourcesPayload = await (
+      await fetch(`${helperUrl}/api/server-db/comic-sources`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile: "reader" }),
+      })
+    ).json();
+    assert.equal(comicSourcesPayload.ok, true);
+    assert.deepEqual(
+      comicSourcesPayload.items.map((item) => item.name).sort(),
+      ["demo.data", "demo.js"],
+    );
 
     const statusPayload = await (
       await fetch(`${helperUrl}/api/server-db/status?profile=reader`)
@@ -687,6 +703,70 @@ test("server-db favorites read APIs list folders and items", async () => {
     assert.equal(getPayload.item.lastCheckTime, 1234);
   } finally {
     await close(helper);
+    await rm(serverDataDir, { recursive: true, force: true });
+  }
+});
+
+test("server-db upload reuses helper-side comic sources", async () => {
+  const serverDataDir = await mkdtemp(join(tmpdir(), "venera-server-db-"));
+  let uploaded = null;
+  const upstream = createHttpServer(async (req, res) => {
+    if (req.method === "PUT" && req.url === "/1700000000300.venera") {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      uploaded = Buffer.concat(chunks);
+      res.writeHead(201);
+      res.end();
+      return;
+    }
+    if (req.method === "PROPFIND") {
+      res.writeHead(207, { "Content-Type": "application/xml" });
+      res.end(`<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response><d:href>/1700000000300.venera</d:href></d:response>
+</d:multistatus>`);
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+
+  const upstreamUrl = await listen(upstream);
+  const helper = createServer({ serverDataDir });
+  const helperUrl = await listen(helper);
+  const post = (path, body) =>
+    fetch(`${helperUrl}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile: "reader", ...body }),
+    });
+
+  try {
+    await post("/api/server-db/history/upsert", {
+      history: { id: "comic-1", title: "uploaded history", time: 2000, type: 1 },
+    });
+    const sourceDir = join(serverDataDir, "profiles", "reader", "comic_source");
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(join(sourceDir, "stored.js"), "function stored() {}");
+    await writeFile(join(sourceDir, "stored.data"), '{"stored":true}');
+
+    const uploadResponse = await post("/api/server-db/upload/webdav", {
+      url: upstreamUrl,
+      user: "user",
+      pass: "pass",
+      fileName: "1700000000300.venera",
+      appdata: { settings: {} },
+    });
+    assert.equal(uploadResponse.status, 200);
+    const uploadPayload = await uploadResponse.json();
+    assert.equal(uploadPayload.entries.includes("comic_source/stored.js"), true);
+    assert.equal(uploadPayload.entries.includes("comic_source/stored.data"), true);
+    assert.equal(Buffer.isBuffer(uploaded), true);
+    assert.equal(uploaded.includes(Buffer.from("function stored() {}")), true);
+    assert.equal(uploaded.includes(Buffer.from('{"stored":true}')), true);
+  } finally {
+    await close(helper);
+    await close(upstream);
     await rm(serverDataDir, { recursive: true, force: true });
   }
 });

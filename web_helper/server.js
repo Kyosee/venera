@@ -2501,9 +2501,13 @@ function writeServerDbBackup(profileRoot, entries) {
     mkdirSync(profileRoot, { recursive: true });
     writeFileSync(join(profileRoot, "appdata.json"), appdata);
   }
+  const comicSources = writeServerDbComicSources(profileRoot, entries, {
+    replace: true,
+  });
   return {
     writtenDatabases,
     writtenAppdata: !!appdata,
+    ...comicSources,
   };
 }
 
@@ -2534,6 +2538,55 @@ function normalizeComicSourceBackupEntries(rawSources) {
   return result;
 }
 
+function isComicSourceBackupEntryName(name) {
+  return /^comic_source\/[^/\\]+\.(?:js|data)$/.test(String(name || ""));
+}
+
+function serverDbComicSourceDir(profileRoot) {
+  return join(profileRoot, "comic_source");
+}
+
+function writeServerDbComicSources(profileRoot, entries, { replace = false } = {}) {
+  const sourceEntries = [];
+  for (const [entryName, data] of entries) {
+    if (!isComicSourceBackupEntryName(entryName) || !Buffer.isBuffer(data)) {
+      continue;
+    }
+    sourceEntries.push({ name: entryName.replace("comic_source/", ""), data });
+  }
+  const targetDir = serverDbComicSourceDir(profileRoot);
+  if (replace) {
+    rmSync(targetDir, { recursive: true, force: true });
+  }
+  if (sourceEntries.length === 0) {
+    return { writtenComicSources: 0 };
+  }
+  mkdirSync(targetDir, { recursive: true });
+  for (const entry of sourceEntries) {
+    writeFileSync(join(targetDir, entry.name), entry.data);
+  }
+  return { writtenComicSources: sourceEntries.length };
+}
+
+function readServerDbComicSourceEntries(profileRoot) {
+  const targetDir = serverDbComicSourceDir(profileRoot);
+  if (!existsSync(targetDir)) return [];
+  return readdirSync(targetDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .filter((entry) => /^[^/\\]+\.(?:js|data)$/.test(entry.name))
+    .map((entry) => ({
+      name: `comic_source/${entry.name}`,
+      data: readFileSync(join(targetDir, entry.name)),
+    }));
+}
+
+function readServerDbComicSourcePayload(profileRoot) {
+  return readServerDbComicSourceEntries(profileRoot).map((entry) => ({
+    name: entry.name.replace("comic_source/", ""),
+    dataBase64: entry.data.toString("base64"),
+  }));
+}
+
 function buildServerDbBackup(profileRoot, appdataPayload, comicSourcesPayload) {
   const entries = [];
   let databaseCount = 0;
@@ -2552,7 +2605,15 @@ function buildServerDbBackup(profileRoot, appdataPayload, comicSourcesPayload) {
     entries.push({ name: "appdata.json", data: appdataBytes });
   }
 
-  entries.push(...normalizeComicSourceBackupEntries(comicSourcesPayload));
+  const payloadComicSources = normalizeComicSourceBackupEntries(comicSourcesPayload);
+  if (Array.isArray(comicSourcesPayload)) {
+    writeServerDbComicSources(
+      profileRoot,
+      new Map(payloadComicSources.map((entry) => [entry.name, entry.data])),
+      { replace: true },
+    );
+  }
+  entries.push(...readServerDbComicSourceEntries(profileRoot));
 
   for (const entryName of serverDbEntryNames) {
     const filePath = serverDbEntryPath(profileRoot, entryName);
@@ -2992,6 +3053,15 @@ async function handleServerDbRoute({
     return true;
   }
 
+  if (parsedUrl.pathname === "/api/server-db/comic-sources") {
+    sendJson(res, 200, {
+      ok: true,
+      profile: profileId,
+      items: readServerDbComicSourcePayload(profileRoot),
+    });
+    return true;
+  }
+
   if (parsedUrl.pathname === "/api/server-db/history/list") {
     const data = historyRowsFromServerDb(profileRoot, {
       limit: payload.limit,
@@ -3329,8 +3399,11 @@ async function handleServerDbRoute({
       return true;
     }
 
-    const entries = extractZipEntries(downloaded.buffer, (name) =>
-      serverDbBackupEntryNames.includes(name),
+    const entries = extractZipEntries(
+      downloaded.buffer,
+      (name) =>
+        serverDbBackupEntryNames.includes(name) ||
+        isComicSourceBackupEntryName(name),
     );
     const written = writeServerDbBackup(profileRoot, entries);
     if (written.writtenDatabases === 0 && !written.writtenAppdata) {

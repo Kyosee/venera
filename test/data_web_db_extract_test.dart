@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:venera/foundation/app.dart';
 import 'package:venera/utils/data_web.dart';
 
 void main() {
@@ -141,6 +142,42 @@ void main() {
     expect(favorites['present'], isTrue);
     expect(favorites['extracted'], isFalse);
     expect(favorites['merged'], isFalse);
+  });
+
+  test('importWebServerComicSources restores comic source files', () async {
+    final tempDir = await Directory.systemTemp.createTemp('venera-comic-source-');
+    final previousDataPath = App.dataPath;
+    final previousIsInitialized = App.isInitialized;
+    App.dataPath = tempDir.path;
+    App.isInitialized = false;
+    addTearDown(() async {
+      App.dataPath = previousDataPath;
+      App.isInitialized = previousIsInitialized;
+      await tempDir.delete(recursive: true);
+    });
+
+    final imported = await importWebServerComicSources([
+      {
+        'name': 'demo.js',
+        'dataBase64': base64Encode(utf8.encode('function demo() {}')),
+      },
+      {
+        'name': 'demo.data',
+        'dataBase64': base64Encode(utf8.encode('{"ok":true}')),
+      },
+    ]);
+
+    expect(imported, 2);
+    expect(File('${tempDir.path}/comic_source/demo.js').existsSync(), isTrue);
+    expect(File('${tempDir.path}/comic_source/demo.data').existsSync(), isTrue);
+    expect(
+      await File('${tempDir.path}/comic_source/demo.js').readAsString(),
+      'function demo() {}',
+    );
+    expect(
+      await File('${tempDir.path}/comic_source/demo.data').readAsString(),
+      '{"ok":true}',
+    );
   });
 }
 
