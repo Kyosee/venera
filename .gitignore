@@ -58,3 +58,8 @@ data.venera
 /web/node_modules/
 /web/dist/
 /server/target/
+
+
+.claude
+CLAUDE.md
+.playwright-cli/

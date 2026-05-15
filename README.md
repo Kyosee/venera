@@ -1,21 +1,21 @@
-# Venera - 漫画阅读器 / Manga & Comic Reader
+# Venera
 
 [![flutter](https://img.shields.io/badge/flutter-3.41.4-blue)](https://flutter.dev/)
 [![License](https://img.shields.io/github/license/kyosee/venera)](https://github.com/kyosee/venera/blob/master/LICENSE)
 [![stars](https://img.shields.io/github/stars/kyosee/venera?style=flat)](https://github.com/kyosee/venera/stargazers)
 [![Download](https://img.shields.io/github/v/release/kyosee/venera)](https://github.com/kyosee/venera/releases)
 
-
-这是个人维护版本。下面只列当前分支相对原版 `v1.6.3` 的主要变化，基础阅读能力不重复展开。
+声明: 此库所有内容仅用于个人学习！！！
+这是个人使用维护版本。下面只列当前分支相对原版 `v1.6.3` 的主要变化，基础阅读能力不重复展开。
 
 ## 警告
 
 ## 禁止部署在公网！
 ## 禁止部署在公网！
 ## 禁止部署在公网！
-## Web/PWA 只适合个人自用环境，请放在内网有强认证保护的环境中
-## 直接暴露到互联网可能导致服务器被攻击、流量被滥用，以及 Cookie、WebDAV 配置和个人数据泄露
-## 禁止把 Web/PWA 当作公共阅读站、分发服务、盈利或非盈利入口使用，由此产生的法律和安全风险自行承担
+## Web/PWA 只适用个人自用环境，主要为了便于IOS端的使用，请放在内网有强认证保护的环境中
+## 直接暴露到互联网可能导致被攻击、流量被滥用，以及 Cookie、WebDAV 配置和个人数据泄露等各种风险
+## 禁止把 Web/PWA 部署在公网或用作公共阅读站、分发服务、盈利或非盈利入口使用，由此产生的法律和安全风险自行承担
 
 ## 迁移提示
 
@@ -25,11 +25,11 @@
 
 | 类型 | 变化 |
 |------|------|
-| 新增 | Web/PWA 自托管：可在 NAS、服务器或本机 Docker 跑网页端，内置代理、登录辅助、WebDAV 和数据持久化 |
+| 新增 | Web/PWA 自托管：可在 NAS、本机 Docker 跑网页端，内置代理、登录辅助、WebDAV 和数据持久化 |
 | 新增 | Windows 自更新：打包产物包含 `venera_updater.exe` |
 | 改进 | 阅读体验：无缝连续章节、卡片章节进度、手势和设置布局修复 |
 | 改进 | 收藏/历史/追更：收藏夹管理、本地书库状态、追更任务、历史排序和任务时间显示更完整 |
-| 改进 | 同步和登录：WebDAV 备份导入/上传/清理更稳，Cookie 同步和 Cloudflare 验证回退更可靠 |
+| 改进 | 同步和登录：WebDAV 备份导入/上传/清理更稳，Cookie 同步和 cf 验证回退更可靠 |
 | 改进 | 构建维护：完善 Windows x64/arm64 打包，拆分 Native/Web 实现，补充 Web 数据和 helper 测试 |
 
 ## Web/PWA 快速启动
