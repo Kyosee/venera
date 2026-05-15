@@ -1877,8 +1877,10 @@ test("server-db source runtime supports canonical fallback and Map chapters", as
   });
 
   const upstreamUrl = await listen(upstream);
+  await writeFile(join(sourceDir, "copy_manga.js"), "");
+  await writeFile(join(sourceDir, "copy_manga(0).js"), "");
   await writeFile(
-    join(sourceDir, "copy_manga.js"),
+    join(sourceDir, "copy_manga(1).js"),
     `
 class CopyManga extends ComicSource {
   key = "copy_manga";

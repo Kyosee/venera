@@ -3670,12 +3670,35 @@ function resolveComicSourceFiles(sourceDir, sourceKey) {
   addCandidate(key);
   const canonicalKey = canonicalComicSourceKey(key);
   if (canonicalKey && canonicalKey !== key) addCandidate(canonicalKey);
+  try {
+    const duplicateCandidates = readdirSync(sourceDir)
+      .filter((name) => {
+        const candidate = String(name || "");
+        if (!candidate.toLowerCase().endsWith(".js")) return false;
+        const candidateKey = candidate.replace(/\.js$/i, "");
+        return canonicalComicSourceKey(candidateKey) === canonicalKey;
+      })
+      .map((name) => String(name).replace(/\.js$/i, ""))
+      .sort((a, b) => {
+        const rank = (value) => {
+          const match = String(value).match(/\((\d+)\)$/u);
+          return match ? Number(match[1]) + 1 : 0;
+        };
+        return rank(a) - rank(b) || a.localeCompare(b);
+      });
+    for (const candidate of duplicateCandidates) addCandidate(candidate);
+  } catch { /* source directory may not exist */ }
 
   let selectedKey = "";
   let sourceFile = "";
   for (const candidate of candidates) {
     const filePath = join(sourceDir, `${candidate}.js`);
-    if (existsSync(filePath)) {
+    let isUsableSourceFile = false;
+    try {
+      const stat = statSync(filePath);
+      isUsableSourceFile = stat.isFile() && stat.size > 0;
+    } catch { /* ignore invalid candidate */ }
+    if (isUsableSourceFile) {
       selectedKey = candidate;
       sourceFile = filePath;
       break;
