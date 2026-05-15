@@ -2682,6 +2682,51 @@ function normalizeHistoryPayload(payload) {
   };
 }
 
+function sqliteIdentifier(name) {
+  return `"${String(name).replaceAll('"', '""')}"`;
+}
+
+function favoriteHistoryKeysFromServerDb(profileRoot) {
+  const filePath = serverDbEntryPath(profileRoot, "local_favorite.db");
+  if (!existsSync(filePath)) return new Set();
+  const nonFavoriteTables = new Set([
+    "folder_sync",
+    "folder_order",
+    "comic_links",
+    "sqlite_sequence",
+  ]);
+  return openWritableSqliteDatabase(filePath).then((db) => {
+    try {
+      const keys = new Set();
+      const tables = db
+        .prepare("select name from sqlite_master where type = 'table';")
+        .all()
+        .map((row) => String(row.name || ""))
+        .filter((name) => name && !nonFavoriteTables.has(name));
+      for (const tableName of tables) {
+        const quotedTable = sqliteIdentifier(tableName);
+        const columns = db.prepare(`PRAGMA table_info(${quotedTable});`).all();
+        if (
+          !columns.some((column) => column.name === "id") ||
+          !columns.some((column) => column.name === "type")
+        ) {
+          continue;
+        }
+        for (const row of db.prepare(`select id, type from ${quotedTable};`).all()) {
+          const id = String(row.id || "").trim();
+          const type = Number(row.type);
+          if (id && Number.isInteger(type)) {
+            keys.add(`${id}\u0000${type}`);
+          }
+        }
+      }
+      return keys;
+    } finally {
+      db.close();
+    }
+  });
+}
+
 async function withWritableHistoryDb(profileRoot, callback) {
   const filePath = serverDbEntryPath(profileRoot, "history.db");
   const db = await openWritableSqliteDatabase(filePath);
@@ -2931,6 +2976,40 @@ async function handleServerDbRoute({
     });
     markServerDbDirty(profileRoot, "history-clear");
     sendJson(res, 200, { ok: true, profile: profileId });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/history/clear-unfavorited") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const favoriteKeys = await favoriteHistoryKeysFromServerDb(profileRoot);
+    let deleted = 0;
+    await withWritableHistoryDb(profileRoot, (db) => {
+      const rows = db.prepare("select id, type from history;").all();
+      const statement = db.prepare(
+        "delete from history where id = ? and type = ?;",
+      );
+      db.exec("BEGIN TRANSACTION;");
+      try {
+        for (const row of rows) {
+          const id = String(row.id || "").trim();
+          const type = Number(row.type);
+          if (!id || !Number.isInteger(type)) continue;
+          if (!favoriteKeys.has(`${id}\u0000${type}`)) {
+            statement.run(id, type);
+            deleted += 1;
+          }
+        }
+        db.exec("COMMIT;");
+      } catch (err) {
+        db.exec("ROLLBACK;");
+        throw err;
+      }
+    });
+    markServerDbDirty(profileRoot, "history-clear-unfavorited");
+    sendJson(res, 200, { ok: true, profile: profileId, deleted });
     return true;
   }
 

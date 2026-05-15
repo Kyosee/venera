@@ -359,6 +359,16 @@ class HistoryManager with ChangeNotifier {
     }
   }
 
+  Future<bool> _clearServerUnfavoritedHistory() async {
+    if (!kIsWeb) return false;
+    try {
+      return await const ServerDbClient().clearUnfavoritedHistory();
+    } catch (e, s) {
+      Log.error('Server DB History', e, s);
+      return false;
+    }
+  }
+
   void _writeLocalHistory(History newItem) {
     _db.execute(_insertHistorySql, _historySqlArgs(newItem));
   }
@@ -431,8 +441,7 @@ class HistoryManager with ChangeNotifier {
     notifyListeners();
   }
 
-  void clearUnfavoritedHistory() {
-    if (!isInitialized) return;
+  void _clearLocalUnfavoritedHistory() {
     _db.execute('BEGIN TRANSACTION;');
     try {
       final idAndTypes = _db.select("""
@@ -456,6 +465,20 @@ class HistoryManager with ChangeNotifier {
       _db.execute('ROLLBACK;');
       rethrow;
     }
+  }
+
+  void clearUnfavoritedHistory() {
+    if (!isInitialized) return;
+    if (kIsWeb) {
+      unawaited(() async {
+        await _clearServerUnfavoritedHistory();
+        _clearLocalUnfavoritedHistory();
+        updateCache();
+        notifyListeners();
+      }());
+      return;
+    }
+    _clearLocalUnfavoritedHistory();
     updateCache();
     notifyListeners();
   }

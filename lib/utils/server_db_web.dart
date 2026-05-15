@@ -103,4 +103,13 @@ class ServerDbClient {
     final data = response.data;
     return data is Map && data['ok'] == true;
   }
+
+  Future<bool> clearUnfavoritedHistory() async {
+    final response = await _dio().post(
+      '/api/server-db/history/clear-unfavorited',
+      data: {'profile': _profile},
+    );
+    final data = response.data;
+    return data is Map && data['ok'] == true;
+  }
 }

@@ -495,6 +495,40 @@ test("server-db history write APIs upsert, delete and clear rows", async () => {
     await post("/api/server-db/history/upsert", {
       history: { id: "comic-2", title: "kept", time: 3000, type: 2 },
     });
+    await post("/api/server-db/history/upsert", {
+      history: { id: "comic-3", title: "removed", time: 4000, type: 2 },
+    });
+    const { DatabaseSync } = await import("node:sqlite");
+    const favoriteDb = new DatabaseSync(
+      join(serverDataDir, "profiles", "reader", "db", "local_favorite.db"),
+    );
+    try {
+      favoriteDb.exec(`
+        create table "Default" (
+          id text,
+          name text,
+          type int,
+          primary key (id, type)
+        );
+      `);
+      favoriteDb
+        .prepare('insert into "Default" (id, name, type) values (?, ?, ?);')
+        .run("comic-2", "kept", 2);
+    } finally {
+      favoriteDb.close();
+    }
+    const clearUnfavoritedResponse = await post(
+      "/api/server-db/history/clear-unfavorited",
+      {},
+    );
+    assert.equal(clearUnfavoritedResponse.status, 200);
+    assert.equal((await clearUnfavoritedResponse.json()).deleted, 1);
+    listPayload = await (
+      await post("/api/server-db/history/list", { limit: 20 })
+    ).json();
+    assert.equal(listPayload.total, 1);
+    assert.equal(listPayload.items[0].id, "comic-2");
+
     const clearResponse = await post("/api/server-db/history/clear", {});
     assert.equal(clearResponse.status, 200);
     listPayload = await (

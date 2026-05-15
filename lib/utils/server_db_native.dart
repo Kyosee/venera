@@ -26,4 +26,8 @@ class ServerDbClient {
   Future<bool> clearHistory() {
     return Future.value(false);
   }
+
+  Future<bool> clearUnfavoritedHistory() {
+    return Future.value(false);
+  }
 }
