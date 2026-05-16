@@ -1,5 +1,5 @@
 services:
-  venera-web-helper:
+  venera-web:
     build: .
     restart: unless-stopped
     ports:
@@ -12,7 +12,6 @@ services:
       VENERA_SERVER_DATA_DIR: /app/server-data
       VENERA_BROWSER_HEADLESS: "true"
     volumes:
-      - ./public:/app/public:ro
       - browser-data:/app/browser-data
       - server-data:/app/server-data
 

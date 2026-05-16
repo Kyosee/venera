@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { apiPost } from '@/services/api'
 import { getComicSources } from '@/services/server-db'
 import { useSettingsStore } from '@/stores/settings'
@@ -19,7 +19,6 @@ interface ExploreSection {
   comics: ExploreComic[]
 }
 
-const router = useRouter()
 const route = useRoute()
 const settingsStore = useSettingsStore()
 const sources = ref<ComicSource[]>([])

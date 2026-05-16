@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { apiPost, imageProxyUrl } from '@/services/api'
+import { apiPost } from '@/services/api'
 import ProxiedImage from '@/components/ProxiedImage.vue'
 import { getComicSources, getSourceCapabilities } from '@/services/server-db'
 import { useSettingsStore } from '@/stores/settings'
@@ -344,7 +344,7 @@ onMounted(async () => {
                 <div class="category-cover-wrap">
                   <ProxiedImage
                     class="category-cover"
-                    :src="cat.cover"
+                    :src="cat.cover ?? ''"
                     :alt="cat.title"
                   />
                 </div>

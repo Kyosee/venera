@@ -734,7 +734,7 @@ class _ContinuousReaderEntry {
   final String? error;
 
   bool get isImage => imageKey != null;
-  bool get isSpacer => chapter == 0;
+  bool get isSpacer => chapter == 0 && !hasNext;
   bool get isSeparator => !isImage && !isSpacer;
 }
 

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { imageProxyUrl } from '@/services/api'
 import ProxiedImage from '@/components/ProxiedImage.vue'
 import { listHistory, getComicSources, listFavorites } from '@/services/server-db'
 import { getSyncStatus, type WebDavSyncStatus } from '@/services/sync'

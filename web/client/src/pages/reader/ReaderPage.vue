@@ -18,6 +18,7 @@ const images = ref<string[]>([])
 const loading = ref(true)
 const error = ref('')
 const currentPage = ref(0)
+const chapterBoundaries = ref<Array<{ chapterId: string; startIndex: number; length: number }>>([])
 const showToolbar = ref(false)
 const showSettings = ref(false)
 const showChapterPicker = ref(false)
@@ -92,6 +93,18 @@ const isFullscreen = ref(false)
 const totalPages = computed(() => images.value.length)
 const isGallery = computed(() => readingMode.value.startsWith('gallery'))
 const isContinuous = computed(() => readingMode.value.startsWith('continuous'))
+const currentChapterBoundary = computed(() => {
+  const bounds = chapterBoundaries.value
+  if (!bounds.length) return { startIndex: 0, length: totalPages.value }
+  const p = currentPage.value
+  // Find the boundary whose range includes currentPage
+  for (const b of bounds) {
+    if (p >= b.startIndex && p < b.startIndex + b.length) return b
+  }
+  return bounds[bounds.length - 1] // fallback to last
+})
+const currentChapterPage = computed(() => currentPage.value - currentChapterBoundary.value.startIndex)
+const currentChapterPageCount = computed(() => currentChapterBoundary.value.length)
 const isRTL = computed(() => readingMode.value.includes('RightToLeft'))
 const isVerticalMode = computed(() => readingMode.value.includes('TopToBottom'))
 const isContinuousHorizontal = computed(() => isContinuous.value && !isVerticalMode.value)
@@ -102,11 +115,17 @@ const canLongPressZoom = computed(() => longPressZoom.value)
 const limitContinuousImageWidth = computed(() => limitImageWidth.value)
 const sliderVal = ref(1)
 
-// Keep slider in sync with currentPage
-watch(currentPage, (p) => { sliderVal.value = p + 1 })
+// Keep slider in sync with currentPage (chapter-relative)
+watch([currentPage, currentChapterBoundary], () => {
+  sliderVal.value = currentChapterPage.value + 1
+})
 function onSliderChange(v: number) {
-  const page = Math.max(0, Math.min(v - 1, totalPages.value - 1))
-  currentPage.value = page
+  const globalPage = currentChapterBoundary.value.startIndex + Math.max(0, Math.min(v - 1, currentChapterPageCount.value - 1))
+  currentPage.value = globalPage
+  if (isContinuous.value && continuousEl.value) {
+    const imgs = continuousEl.value.querySelectorAll('img')
+    if (imgs[globalPage]) imgs[globalPage].scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'start' })
+  }
 }
 
 
@@ -154,6 +173,7 @@ async function fetchPages() {
     })
     if (res.ok && res.data) {
       images.value = res.data
+      chapterBoundaries.value = [{ chapterId: ep, startIndex: 0, length: res.data.length }]
       chapterTitle.value = res.title || currentChapter.value?.title || `E${chapterIndex.value + 1}`
       comicTitle.value = res.comicTitle || comicTitle.value || route.query.title?.toString() || ''
       const page = Math.max(1, Number.parseInt(route.query.page?.toString() || '1', 10) || 1)
@@ -230,8 +250,20 @@ function goPage(p: number) {
 }
 function nextPage() { isRTL.value ? goPage(currentPage.value - 1) : goPage(currentPage.value + 1) }
 function prevPage() { isRTL.value ? goPage(currentPage.value + 1) : goPage(currentPage.value - 1) }
-function goFirst() { currentPage.value = 0 }
-function goLast() { currentPage.value = Math.max(0, totalPages.value - 1) }
+function goFirst() {
+  currentPage.value = currentChapterBoundary.value.startIndex
+  if (isContinuous.value && continuousEl.value) {
+    const imgs = continuousEl.value.querySelectorAll('img')
+    if (imgs[currentPage.value]) imgs[currentPage.value].scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'start' })
+  }
+}
+function goLast() {
+  currentPage.value = Math.max(0, currentChapterBoundary.value.startIndex + currentChapterPageCount.value - 1)
+  if (isContinuous.value && continuousEl.value) {
+    const imgs = continuousEl.value.querySelectorAll('img')
+    if (imgs[currentPage.value]) imgs[currentPage.value].scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'start' })
+  }
+}
 function goChapterByOffset(offset: number) {
   const list = flatChapters.value
   const current = list.findIndex(chapter => chapter.id === currentChapterId.value)
@@ -269,6 +301,7 @@ function applyReaderSettings() {
   readingMode.value = normalizeReadingMode(s.readingMode)
   tapToTurnPages.value = s.tapToTurn
   reverseTapToTurnPages.value = s.reverseTap
+  autoPageEnabled.value = s.autoPageEnabled
   autoPageInterval.value = s.autoPageInterval
   pageAnimation.value = s.pageAnimation
   continuousChapter.value = s.continuousChapter
@@ -455,8 +488,9 @@ function preloadImages() {
   }
 }
 
-// Loading next chapter in continuous mode
+// Loading next/prev chapter in continuous mode
 const loadingNextChapter = ref(false)
+const loadingPrevChapter = ref(false)
 
 function onScroll() {
   if (!continuousEl.value || !isContinuous.value) return
@@ -480,13 +514,21 @@ function onScroll() {
   if (pageIndicatorTimer) clearTimeout(pageIndicatorTimer)
   pageIndicatorTimer = setTimeout(() => { showPageIndicator.value = false }, 2000)
 
-  // Continuous chapter reading: detect near-end scroll
-  if (continuousChapter.value && !loadingNextChapter.value) {
-    const atEnd = isContinuousHorizontal.value
-      ? el.scrollLeft + el.clientWidth >= el.scrollWidth - 100
-      : el.scrollTop + el.clientHeight >= el.scrollHeight - 100
-    if (atEnd && currentPage.value >= totalPages.value - 2) {
-      loadNextChapterContinuous()
+  if (!continuousChapter.value) return
+  const pCount = Math.max(1, Number(preloadCount.value) || 4)
+
+  // Preload next chapter when within preloadCount pages of the end
+  if (!loadingNextChapter.value && currentPage.value >= totalPages.value - pCount - 1) {
+    loadNextChapterContinuous()
+  }
+
+  // Load previous chapter when near the top
+  if (!loadingPrevChapter.value) {
+    const nearStart = isContinuousHorizontal.value
+      ? el.scrollLeft < 200
+      : el.scrollTop < 200
+    if (nearStart && currentPage.value <= pCount) {
+      loadPrevChapterContinuous()
     }
   }
 }
@@ -507,13 +549,48 @@ async function loadNextChapterContinuous() {
       sourceKey: sourceKey.value, comicId: comicId.value, chapterId: nextCh.id
     })
     if (res.ok && res.data && res.data.length > 0) {
+      const prevLen = images.value.length
       images.value = [...images.value, ...res.data]
+      chapterBoundaries.value = [...chapterBoundaries.value, { chapterId: nextCh.id, startIndex: prevLen, length: res.data.length }]
       currentChapterId.value = nextCh.id
       chapterIndex.value = next
       chapterTitle.value = res.title || nextCh.title || `E${next + 1}`
     }
   } catch { /* silent */ }
   finally { loadingNextChapter.value = false }
+}
+
+async function loadPrevChapterContinuous() {
+  const list = flatChapters.value
+  const current = list.findIndex(ch => ch.id === currentChapterId.value)
+  const fallback = current >= 0 ? current : chapterIndex.value
+  const prev = fallback - 1
+  if (prev < 0) return
+  loadingPrevChapter.value = true
+  try {
+    const prevCh = list[prev]
+    const res = await apiPost<any>('/api/server-db/reader/pages', {
+      sourceKey: sourceKey.value, comicId: comicId.value, chapterId: prevCh.id
+    })
+    if (res.ok && res.data && res.data.length > 0) {
+      const prevCount = res.data.length
+      images.value = [...res.data, ...images.value]
+      currentPage.value += prevCount
+      chapterBoundaries.value = [
+        { chapterId: prevCh.id, startIndex: 0, length: prevCount },
+        ...chapterBoundaries.value.map(b => ({ ...b, startIndex: b.startIndex + prevCount })),
+      ]
+      await nextTick()
+      // Maintain scroll position after prepending
+      if (continuousEl.value) {
+        const imgs = continuousEl.value.querySelectorAll('img')
+        if (imgs[currentPage.value]) {
+          imgs[currentPage.value].scrollIntoView({ block: 'start', inline: 'start' })
+        }
+      }
+    }
+  } catch { /* silent */ }
+  finally { loadingPrevChapter.value = false }
 }
 
 watch(currentPage, () => {
@@ -652,7 +729,7 @@ onUnmounted(() => {
       <div v-if="showToolbar" class="toolbar-bottom" @click.stop>
         <span class="tb-btn tb-btn-text" @click="goFirst">首页</span>
         <div class="slider-wrap">
-          <van-slider v-model="sliderVal" :min="1" :max="Math.max(totalPages, 1)" :step="1" active-color="#1989fa" @change="onSliderChange" />
+          <van-slider v-model="sliderVal" :min="1" :max="Math.max(currentChapterPageCount, 1)" :step="1" active-color="#1989fa" @change="onSliderChange" />
         </div>
         <span class="tb-btn tb-btn-text" @click="goLast">末页</span>
         <div class="chapter-btns">
@@ -697,7 +774,7 @@ onUnmounted(() => {
             <template #right-icon><van-switch v-model="showSingleImageOnFirstPage" size="20" @change="settingsStore.update('showSingleImageOnFirstPage', showSingleImageOnFirstPage)" /></template>
           </van-cell>
           <van-cell title="自动翻页" v-if="isGallery">
-            <template #right-icon><van-switch v-model="autoPageEnabled" size="20" /></template>
+            <template #right-icon><van-switch v-model="autoPageEnabled" size="20" @change="settingsStore.update('autoPageEnabled', autoPageEnabled)" /></template>
           </van-cell>
           <van-cell title="自动翻页间隔" v-if="isGallery && autoPageEnabled">
             <template #value>
@@ -762,19 +839,19 @@ onUnmounted(() => {
           <van-cell title="显示页码">
             <template #right-icon><van-switch v-model="showPageNum" size="20" @change="settingsStore.update('showPageNum', showPageNum)" /></template>
           </van-cell>
-          <van-cell title="在阅读器中显示时间和电量信息">
+          <van-cell title="在阅读器中显示时间和电量信息" v-if="false">
             <template #right-icon><van-switch v-model="showTimeAndBattery" size="20" @change="settingsStore.update('showTimeAndBattery', showTimeAndBattery)" /></template>
           </van-cell>
-          <van-cell title="显示系统状态栏">
+          <van-cell title="显示系统状态栏" v-if="false">
             <template #right-icon><van-switch v-model="showStatusBar" size="20" @change="settingsStore.update('showStatusBar', showStatusBar)" /></template>
           </van-cell>
-          <van-cell title="显示章节评论">
+          <van-cell title="显示章节评论" v-if="false">
             <template #right-icon><van-switch v-model="showChapterComments" size="20" @change="settingsStore.update('showChapterComments', showChapterComments)" /></template>
           </van-cell>
-          <van-cell title="章节末尾显示评论" v-if="showChapterComments && isGallery">
+          <van-cell title="章节末尾显示评论" v-if="false">
             <template #right-icon><van-switch v-model="showChapterCommentsAtEnd" size="20" @change="settingsStore.update('showChapterCommentsAtEnd', showChapterCommentsAtEnd)" /></template>
           </van-cell>
-          <van-cell title="使用音量键翻页">
+          <van-cell title="使用音量键翻页" v-if="false">
             <template #right-icon><van-switch v-model="volumeKeyTurn" size="20" /></template>
           </van-cell>
         </van-cell-group>

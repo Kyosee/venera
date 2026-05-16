@@ -18,7 +18,9 @@ export interface SettingsData {
   pageAnimation: boolean
   readingMode: string
   continuousChapter: boolean
+  autoPageEnabled: boolean
   autoPageInterval: number
+  volumeKeyTurn: boolean
   scrollSpeed: number
   doubleTapZoom: boolean
   longPressZoom: boolean
@@ -66,7 +68,9 @@ const DEFAULTS: SettingsData = {
   pageAnimation: true,
   readingMode: 'galleryLeftToRight',
   continuousChapter: true,
+  autoPageEnabled: false,
   autoPageInterval: 5,
+  volumeKeyTurn: true,
   scrollSpeed: 1,
   doubleTapZoom: true,
   longPressZoom: true,

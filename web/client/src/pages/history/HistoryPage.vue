@@ -85,18 +85,6 @@ function itemKey(item: History): string {
   return `${item.id}::${itemSourceKey(item)}`
 }
 
-function parseReadEpisode(raw: History['readEpisode']): string[] {
-  if (Array.isArray(raw)) return raw.map(String).filter(Boolean)
-  if (!raw) return []
-  const text = String(raw).trim()
-  if (!text) return []
-  try {
-    const a = JSON.parse(text)
-    if (Array.isArray(a)) return a.map(String)
-  } catch {}
-  return text.split(',').map(s => s.trim()).filter(Boolean)
-}
-
 function isCompleted(item: History): boolean {
   if (!item.maxPage) return false
   return item.page >= item.maxPage
@@ -147,11 +135,6 @@ function isThisWeek(ts: number): boolean {
 
 const thisWeekItems = computed(() => filteredItems.value.filter(i => isThisWeek(i.time)))
 const earlierItems = computed(() => filteredItems.value.filter(i => !isThisWeek(i.time)))
-
-function formatDate(ts: number): string {
-  const d = new Date(ts)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
 
 function goComic(item: History) {
   if (multiSelectMode.value) { toggleSelect(item); return }

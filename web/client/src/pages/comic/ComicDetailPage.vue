@@ -7,7 +7,7 @@ import { resolveSourceKey, sourceTypeFromKey } from '@/utils/source'
 import { useSettingsStore } from '@/stores/settings'
 import ProxiedImage from '@/components/ProxiedImage.vue'
 import ComicCard from '@/components/ComicCard.vue'
-import { comicAuthorText, comicVisibleTags, normalizeComicTags, parseComicTags } from '@/utils/comic-display'
+import { comicAuthorText, normalizeComicTags, parseComicTags } from '@/utils/comic-display'
 import { showToast } from 'vant'
 import type { Comic, Chapter, ChapterGroup, Comment, ComicSource, History } from '@/types'
 
@@ -78,18 +78,36 @@ const lastReadInfo = computed(() => {
   const id = lastReadChapterId.value
   // Try matching by chapter ID first
   let ch = flatChapters.value.find(c => c.id === id)
-  // Fallback: try positional (history stores 1-based ep/index)
+  let resolvedGroupIdx: number | null = null
   if (!ch) {
-    const idx = parseInt(id, 10)
-    if (!isNaN(idx) && idx >= 1 && idx <= flatChapters.value.length) {
-      ch = flatChapters.value[idx - 1]
+    // Check if it's a "groupIdx-chapterIdx" positional format (for grouped chapters)
+    const dashIdx = id.indexOf('-')
+    if (dashIdx > 0) {
+      const gIdx = parseInt(id.substring(0, dashIdx), 10)
+      const cIdx = parseInt(id.substring(dashIdx + 1), 10)
+      if (!isNaN(gIdx) && !isNaN(cIdx) && isGrouped.value) {
+        const groups = chapters.value as ChapterGroup[]
+        if (gIdx >= 1 && gIdx <= groups.length) {
+          const group = groups[gIdx - 1]
+          if (group?.chapters && cIdx >= 1 && cIdx <= group.chapters.length) {
+            ch = group.chapters[cIdx - 1]
+            resolvedGroupIdx = gIdx
+          }
+        }
+      }
+    }
+    // Fallback: try as a simple 1-based flat index
+    if (!ch) {
+      const idx = parseInt(id, 10)
+      if (!isNaN(idx) && idx >= 1 && idx <= flatChapters.value.length) {
+        ch = flatChapters.value[idx - 1]
+      }
     }
   }
-  const groupName = groupTitles.value[lastReadGroup.value ?? 0] || '默認'
+  const groupIdxForDisplay = resolvedGroupIdx ?? lastReadGroup.value ?? 0
+  const groupName = groupTitles.value[groupIdxForDisplay > 0 ? groupIdxForDisplay - 1 : 0] || groupTitles.value[lastReadGroup.value ?? 0] || '默認'
   return { group: groupName, chapter: ch?.title || id, page: lastReadPage.value }
 })
-const comicTags = computed(() => comic.value ? comicVisibleTags(comic.value, Number.POSITIVE_INFINITY) : [])
-const comicAuthor = computed(() => comic.value ? comicAuthorText(comic.value) : '')
 const sourceDisplayName = computed(() => {
   const source = sources.value.find(item => {
     const canonical = item.canonicalKey || item.key
@@ -582,15 +600,15 @@ onUnmounted(() => {
       <!-- Action Buttons - Desktop (matches APP: single horizontal scroll row) -->
       <div v-if="!isMobile" class="action-buttons desktop-actions">
         <button v-if="hasHistory" class="action-btn" @click="continueReading">
-          <van-icon name="play-circle-o" class="action-icon icon-yellow" />
+          <van-icon name="play-circle-o" class="action-icon" style="color:#4f6ef7" />
           <span>继续</span>
         </button>
         <button class="action-btn" @click="startReading">
-          <van-icon name="play" class="action-icon icon-orange" />
+          <van-icon name="play" class="action-icon" style="color:#27ae60" />
           <span>开始</span>
         </button>
         <button class="action-btn" @click="onDownload">
-          <van-icon name="down" class="action-icon icon-teal" />
+          <van-icon name="down" class="action-icon" style="color:#9b59b6" />
           <span>下载</span>
         </button>
         <button v-if="showLikeButton" class="action-btn" @click="likeOrUnlike">
@@ -598,15 +616,15 @@ onUnmounted(() => {
           <span>{{ (comic as any).likesCount ? (comic as any).likesCount + ((comic as any).isLiked ? 1 : 0) : ((comic as any).isLiked ? '已赞' : '点赞') }}</span>
         </button>
         <button class="action-btn" :class="{ active: isFavorite }" @click="toggleFavorite">
-          <van-icon :name="isFavorite ? 'star' : 'star-o'" class="action-icon icon-purple" />
+          <van-icon :name="isFavorite ? 'star' : 'star-o'" class="action-icon" style="color:#f5a623" />
           <span>收藏</span>
         </button>
         <button v-if="comments.length" class="action-btn" @click="scrollToComments">
-          <van-icon name="chat-o" class="action-icon icon-green" />
+          <van-icon name="chat-o" class="action-icon" style="color:#27ae60" />
           <span>评论</span>
         </button>
         <button class="action-btn" @click="shareComic">
-          <van-icon name="share-o" class="action-icon icon-blue" />
+          <van-icon name="share-o" class="action-icon" style="color:#5b9bd5" />
           <span>分享</span>
         </button>
       </div>
@@ -615,7 +633,7 @@ onUnmounted(() => {
       <div v-else class="mobile-actions">
         <div class="mobile-action-row">
           <button v-if="hasHistory" class="action-btn compact" @click="startReading">
-            <van-icon name="play" class="action-icon icon-orange" />
+            <van-icon name="play" class="action-icon" style="color:#27ae60" />
             <span>开始</span>
           </button>
           <button v-if="showLikeButton" class="action-btn compact" @click="likeOrUnlike">
@@ -623,28 +641,28 @@ onUnmounted(() => {
             <span>{{ (comic as any).isLiked ? '已赞' : '点赞' }}</span>
           </button>
           <button class="action-btn compact" :class="{ active: isFavorite }" @click="toggleFavorite">
-            <van-icon :name="isFavorite ? 'star' : 'star-o'" class="action-icon icon-purple" />
+            <van-icon :name="isFavorite ? 'star' : 'star-o'" class="action-icon" style="color:#f5a623" />
             <span>收藏</span>
           </button>
           <button v-if="comments.length" class="action-btn compact" @click="scrollToComments">
-            <van-icon name="chat-o" class="action-icon icon-green" />
+            <van-icon name="chat-o" class="action-icon" style="color:#27ae60" />
             <span>评论</span>
           </button>
           <button class="action-btn compact" @click="shareComic">
-            <van-icon name="share-o" class="action-icon icon-blue" />
+            <van-icon name="share-o" class="action-icon" style="color:#5b9bd5" />
             <span>分享</span>
+          </button>
+          <button class="action-btn compact" @click="onDownload">
+            <van-icon name="down" class="action-icon" style="color:#9b59b6" />
+            <span>下载</span>
           </button>
         </div>
         <div class="mobile-full-row">
-          <button class="action-btn full" @click="onDownload">
-            <van-icon name="down" class="action-icon icon-teal" />
-            <span>下载</span>
-          </button>
-          <button v-if="hasHistory" class="action-btn full primary" @click="continueReading">
+          <button v-if="hasHistory" class="action-btn continue-btn" @click="continueReading">
             <van-icon name="play-circle-o" />
             <span>继续</span>
           </button>
-          <button v-else class="action-btn full primary" @click="startReading">
+          <button v-else class="action-btn continue-btn primary" @click="startReading">
             <van-icon name="play" />
             <span>开始</span>
           </button>
@@ -966,13 +984,7 @@ onUnmounted(() => {
 .action-icon {
   font-size: 20px;
 }
-.icon-yellow { color: #f5a623; }
-.icon-orange { color: #f5a623; }
 .icon-red { color: #e74c3c; }
-.icon-purple { color: #9b59b6; }
-.icon-green { color: #27ae60; }
-.icon-blue { color: #4f6ef7; }
-.icon-teal { color: #17a2b8; }
 
 /* Mobile Actions */
 .mobile-actions {
@@ -995,25 +1007,32 @@ onUnmounted(() => {
 }
 .mobile-full-row {
   display: flex;
+  justify-content: center;
   gap: 8px;
 }
-.mobile-full-row .action-btn.full {
-  flex: 1;
-  flex-direction: row;
+.continue-btn {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 12px 16px;
+  padding: 12px 24px;
   font-size: 14px;
   font-weight: 500;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+  transition: background 0.15s;
 }
-.mobile-full-row .action-btn.full.primary {
+.continue-btn:active { background: #f5f5f5; }
+.continue-btn.primary {
   background: #4f6ef7;
   color: #fff;
   border-color: #4f6ef7;
 }
-.mobile-full-row .action-btn.full.primary :deep(.van-icon) {
-  color: #fff;
-}
+.continue-btn.primary:active { background: #3d5bd9; }
 
 /* Last Read Pill */
 .last-read-pill {
@@ -1132,7 +1151,7 @@ onUnmounted(() => {
 }
 .no-chapters {
   text-align: center;
-  color: #999;
+  color: #666;
   padding: 32px 0;
   font-size: 14px;
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 
 const router = useRouter()
@@ -45,12 +45,17 @@ function goMobileTab(index: number) {
 }
 
 function goAction(path: string) { pushPath(path) }
+
+const isMobile = ref(false)
+function onResize() { isMobile.value = window.innerWidth < 720 }
+onMounted(() => { onResize(); window.addEventListener('resize', onResize) })
+onUnmounted(() => { window.removeEventListener('resize', onResize) })
 </script>
 
 <template>
-  <div class="app-layout">
+  <div class="app-layout" :class="{ mobile: isMobile }">
     <!-- Desktop Sidebar -->
-    <aside class="sidebar">
+    <aside v-if="!isMobile" class="sidebar">
       <div class="sidebar-logo">
         <img src="/favicon.png" alt="Venera" class="logo-img" />
         <span class="logo-text">Venera</span>
@@ -81,7 +86,7 @@ function goAction(path: string) { pushPath(path) }
     </main>
 
     <!-- Mobile Bottom Tab -->
-    <van-tabbar v-model="activeTab" class="mobile-tabbar">
+    <van-tabbar v-if="isMobile" v-model="activeTab">
       <van-tabbar-item
         v-for="(tab, i) in mobileTabs"
         :key="tab.key"
@@ -94,12 +99,17 @@ function goAction(path: string) { pushPath(path) }
 </template>
 
 <style scoped>
-.app-layout { display: flex; height: 100vh; overflow: hidden; }
+.app-layout {
+  height: 100%;
+  display: flex;
+}
 
-/* Sidebar */
+/* Desktop: horizontal flex with sidebar */
 .sidebar {
-  width: 140px; flex-shrink: 0;
-  display: flex; flex-direction: column;
+  width: 140px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
   border-right: 0.6px solid var(--van-border-color);
   padding: 16px 12px;
   background: var(--van-background-2);
@@ -108,9 +118,7 @@ function goAction(path: string) { pushPath(path) }
   display: flex; align-items: center; gap: 8px;
   padding: 8px 12px; margin-bottom: 16px;
 }
-.logo-img {
-  width: 32px; height: 32px; border-radius: 8px;
-}
+.logo-img { width: 32px; height: 32px; border-radius: 8px; }
 .logo-text { font-size: 16px; font-weight: 800; }
 .sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 4px; }
 .sidebar-bottom { display: flex; flex-direction: column; gap: 4px; border-top: 0.6px solid var(--van-border-color); padding-top: 12px; }
@@ -127,15 +135,26 @@ function goAction(path: string) { pushPath(path) }
   border-left: 2px solid #4f6ef7;
 }
 
-/* Main content */
-.main-content { flex: 1; overflow-y: auto; overflow-x: hidden; }
+/* Main content area */
+.main-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
 
-/* Mobile tabbar */
-.mobile-tabbar { display: none; }
+/* Mobile: vertical layout */
+.app-layout.mobile {
+  display: flex;
+  flex-direction: column;
+}
 
-@media (max-width: 720px) {
-  .sidebar { display: none; }
-  .mobile-tabbar { display: flex !important; }
-  .main-content { padding-bottom: 50px; }
+.app-layout.mobile .main-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* van-tabbar is position:fixed and ~50px tall */
+  padding-bottom: 50px;
+  padding-bottom: calc(50px + env(safe-area-inset-bottom, 0px));
 }
 </style>

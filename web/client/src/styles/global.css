@@ -10,6 +10,14 @@
   --color-text-tertiary: #999999;
   --safe-area-top: env(safe-area-inset-top);
   --safe-area-bottom: env(safe-area-inset-bottom);
+
+  /* Vant overrides — ensure text is always visible */
+  --van-text-color: #1a1a1a;
+  --van-text-color-2: #666666;
+  --van-border-color: #ebedf0;
+  --van-background-2: #f7f8fa;
+  --van-active-color: rgba(0, 0, 0, 0.05);
+  --van-empty-description-color: #666666;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
