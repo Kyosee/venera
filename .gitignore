@@ -54,12 +54,16 @@ data.venera
 /android/key.properties
 /android/keystore.jks
 
-# Web PWA workspace
-/web/node_modules/
-/web/dist/
 /server/target/
 
 
 .claude
 CLAUDE.md
 .playwright-cli/
+
+# Web server user data
+web/server/.venera-helper-data/
+web/server/.browser-data/
+web_server*.log
+web_chapters_raw.json
+app_chapters_raw.json

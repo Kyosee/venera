@@ -137,6 +137,29 @@ class ComicSourceParser {
       ComicSource.sources.$_key = this['temp'];
     """);
 
+    // Fix broken isAppVersionAfter comparison in source scripts.
+    // The original only checks "less than" per component without early-returning
+    // on "greater than", so e.g. version "2.0.0" is incorrectly deemed < "1.3.0".
+    JsEngine().runCode("""
+      (function() {
+        var src = ComicSource.sources.$_key;
+        if (src && src.isAppVersionAfter) {
+          src.isAppVersionAfter = function(target) {
+            var current = APP.version;
+            var targetArr = target.split('.');
+            var currentArr = current.split('.');
+            for (var i = 0; i < 3; i++) {
+              var c = parseInt(currentArr[i]) || 0;
+              var t = parseInt(targetArr[i]) || 0;
+              if (c > t) return true;
+              if (c < t) return false;
+            }
+            return true;
+          };
+        }
+      })();
+    """);
+
     var source = ComicSource(
       _name!,
       key,
