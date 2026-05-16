@@ -361,7 +361,7 @@ class _GalleryModeState extends State<_GalleryMode>
 
             if (reader.imagesPerPage == 1 || pageImages.length == 1) {
               return PhotoViewGalleryPageOptions(
-                filterQuality: FilterQuality.medium,
+                filterQuality: kIsWeb ? FilterQuality.low : FilterQuality.medium,
                 controller: photoViewControllers[index],
                 imageProvider: _createImageProviderFromKey(
                   pageImages[0],
@@ -848,7 +848,34 @@ class _ContinuousModeState extends State<_ContinuousMode>
     final entries = <_ContinuousReaderEntry>[
       const _ContinuousReaderEntry.spacer(),
     ];
-    for (var chapter = _baseChapter; chapter <= reader.maxChapter; chapter++) {
+
+    // Build entries backward from _baseChapter - 1 down to chapter 1
+    // Find the lowest consecutively loaded chapter below _baseChapter
+    int lowestChapter = _baseChapter;
+    for (var ch = _baseChapter - 1; ch >= 1; ch--) {
+      if (_continuousChapterImages.containsKey(ch)) {
+        lowestChapter = ch;
+      } else {
+        break;
+      }
+    }
+
+    // Add a separator at the top if there are earlier chapters to load
+    if (lowestChapter > 1) {
+      final prevChapter = lowestChapter - 1;
+      entries.add(
+        _ContinuousReaderEntry.separator(
+          chapter: 0,
+          hasNext: true,
+          nextChapter: prevChapter,
+          isLoading: _continuousChapterLoads.containsKey(prevChapter),
+          error: _continuousChapterErrors[prevChapter],
+        ),
+      );
+    }
+
+    // Add images from lowestChapter up through all loaded chapters
+    for (var chapter = lowestChapter; chapter <= reader.maxChapter; chapter++) {
       final images = _continuousChapterImages[chapter];
       if (images == null) {
         break;
@@ -892,7 +919,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
   }
 
   Future<void> _ensureContinuousChapterLoaded(int chapter) {
-    if (chapter < _baseChapter ||
+    if (chapter < 1 ||
         chapter > reader.maxChapter ||
         _continuousChapterImages.containsKey(chapter)) {
       return Future.value();
@@ -901,15 +928,41 @@ class _ContinuousModeState extends State<_ContinuousMode>
     if (existing != null) {
       return existing;
     }
+    final isPrepend = chapter < _baseChapter;
+    // Calculate the current entry count before prepending so we can maintain
+    // scroll position after the new chapter is inserted.
+    final entriesBeforePrepend = isPrepend ? _continuousEntries().length : 0;
     final future = _loadContinuousChapterImages(chapter)
         .then((images) {
           if (!mounted) {
             return;
           }
+          // Capture visible index before setState so we can restore position
+          int? visibleIndex;
+          if (isPrepend &&
+              itemPositionsListener.itemPositions.value.isNotEmpty) {
+            final positions =
+                itemPositionsListener.itemPositions.value.toList()
+                  ..sort((a, b) => a.index.compareTo(b.index));
+            visibleIndex = positions.first.index;
+          }
           setState(() {
             _continuousChapterImages[chapter] = images;
             _continuousChapterErrors.remove(chapter);
           });
+          // Maintain scroll position after prepending a previous chapter
+          if (isPrepend && visibleIndex != null) {
+            final entriesAfterPrepend = _continuousEntries().length;
+            final addedCount = entriesAfterPrepend - entriesBeforePrepend;
+            if (addedCount > 0) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                itemScrollController.jumpTo(
+                  index: visibleIndex! + addedCount,
+                );
+              });
+            }
+          }
         })
         .catchError((e, s) {
           Log.error('Continuous chapter reading', e, s);
@@ -977,6 +1030,23 @@ class _ContinuousModeState extends State<_ContinuousMode>
       final entries = _continuousEntries();
       final positions = itemPositionsListener.itemPositions.value.toList()
         ..sort((a, b) => a.index.compareTo(b.index));
+
+      // Detect if user is near the top - trigger previous chapter loading
+      if (positions.isNotEmpty) {
+        final firstVisibleIndex = positions.first.index;
+        // If the first visible item is within the first few items (spacer or
+        // the top separator for previous chapter), load the previous chapter
+        if (firstVisibleIndex <= 2 && entries.length > 1) {
+          final topEntry = entries.length > 1 ? entries[1] : null;
+          if (topEntry != null &&
+              topEntry.isSeparator &&
+              topEntry.hasNext &&
+              topEntry.nextChapter != null) {
+            _ensureContinuousChapterLoaded(topEntry.nextChapter!);
+          }
+        }
+      }
+
       for (final position in positions) {
         if (position.index < 0 || position.index >= entries.length) {
           continue;
@@ -1060,12 +1130,30 @@ class _ContinuousModeState extends State<_ContinuousMode>
   void cacheImages(int current) {
     if (seamlessChapterReading) {
       final entries = _continuousEntries();
+      // Cache forward
       for (var i = current + 1; i <= current + preCacheCount; i++) {
         if (i < 0 || i >= entries.length) {
           break;
         }
         final entry = entries[i];
         if (entry.hasNext && entry.nextChapter != null) {
+          _ensureContinuousChapterLoaded(entry.nextChapter!);
+        }
+        if (!entry.isImage) {
+          continue;
+        }
+        final cacheKey = '${entry.chapter}:${entry.page}:${entry.imageKey}';
+        if (_continuousCachedImages.add(cacheKey)) {
+          _preDownloadImageEntry(entry, context);
+        }
+      }
+      // Cache backward
+      for (var i = current - 1; i >= current - preCacheCount; i--) {
+        if (i < 0 || i >= entries.length) {
+          break;
+        }
+        final entry = entries[i];
+        if (entry.isSeparator && entry.hasNext && entry.nextChapter != null) {
           _ensureContinuousChapterLoaded(entry.nextChapter!);
         }
         if (!entry.isImage) {
@@ -1121,7 +1209,13 @@ class _ContinuousModeState extends State<_ContinuousMode>
     BuildContext context,
     _ContinuousReaderEntry entry,
   ) {
-    final title = entry.hasNext ? 'Next Chapter'.tl : 'No next chapter'.tl;
+    // chapter == 0 means this is a "previous chapter" separator at the top
+    final isPrevChapterSeparator = entry.chapter == 0;
+    final title = !entry.hasNext
+        ? 'No next chapter'.tl
+        : isPrevChapterSeparator
+            ? 'Previous Chapter'.tl
+            : 'Next Chapter'.tl;
     final subtitle = entry.hasNext && entry.nextChapter != null
         ? _chapterTitle(entry.nextChapter!)
         : reader.widget.name;
@@ -1152,9 +1246,11 @@ class _ContinuousModeState extends State<_ContinuousMode>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
-                    entry.hasNext
-                        ? Icons.keyboard_arrow_down_rounded
-                        : Icons.done_all_rounded,
+                    !entry.hasNext
+                        ? Icons.done_all_rounded
+                        : isPrevChapterSeparator
+                            ? Icons.keyboard_arrow_up_rounded
+                            : Icons.keyboard_arrow_down_rounded,
                     size: 42,
                     color: context.colorScheme.primary,
                   ),
@@ -1215,6 +1311,8 @@ class _ContinuousModeState extends State<_ContinuousMode>
           ? const NeverScrollableScrollPhysics()
           : isZoomedIn
           ? const ClampingScrollPhysics()
+          : kIsWeb
+          ? const ClampingScrollPhysics()
           : const BouncingScrollPhysics(),
       itemBuilder: (context, index) {
         if (seamless) {
@@ -1248,7 +1346,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
           return ColoredBox(
             color: context.colorScheme.surface,
             child: ComicImage(
-              filterQuality: FilterQuality.medium,
+              filterQuality: kIsWeb ? FilterQuality.low : FilterQuality.medium,
               image: image,
               width: width,
               height: height,

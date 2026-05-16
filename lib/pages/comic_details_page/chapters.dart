@@ -239,6 +239,7 @@ class _GroupedComicChaptersState extends State<_GroupedComicChapters>
     if (index != tabController.index) {
       setState(() {
         index = tabController.index;
+        showAll = false;
       });
     }
   }

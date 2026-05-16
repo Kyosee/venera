@@ -231,7 +231,7 @@ class ComicDetails with HistoryMixin {
       "cover": cover,
       "description": description,
       "tags": tags,
-      "chapters": chapters,
+      "chapters": chapters?.toJson(),
       "thumbnails": thumbnails,
       "recommend": null,
       "sourceKey": sourceKey,
@@ -377,8 +377,9 @@ class ComicChapters {
     return ComicChapters(chapters);
   }
 
-  static fromJsonOrNull(dynamic json) {
+  static ComicChapters? fromJsonOrNull(dynamic json) {
     if (json == null) return null;
+    if (json is ComicChapters) return json;
     return ComicChapters.fromJson(json);
   }
 

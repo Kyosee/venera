@@ -442,12 +442,11 @@ class HistoryManager with ChangeNotifier {
 
     _haveAsyncTask = true;
     if (kIsWeb) {
+      _writeLocalHistory(newItem);
       final pendingServerWrite = _upsertServerHistory(
         newItem,
       ).then<void>((_) {});
       _trackServerHistoryWrite(pendingServerWrite);
-      await pendingServerWrite;
-      _writeLocalHistory(newItem);
     } else {
       await _addHistoryAsync(_dbPath, newItem);
     }
@@ -461,19 +460,13 @@ class HistoryManager with ChangeNotifier {
   /// This function would be called when user start reading.
   void addHistory(History newItem) {
     if (!isInitialized) return;
-    if (kIsWeb) {
-      final pending = () async {
-        await _upsertServerHistory(newItem);
-        _writeLocalHistory(newItem);
-        _cacheAddedHistory(newItem);
-        notifyListeners();
-      }();
-      _trackServerHistoryWrite(pending);
-      return;
-    }
     _writeLocalHistory(newItem);
     _cacheAddedHistory(newItem);
     notifyListeners();
+    if (kIsWeb) {
+      final pending = _upsertServerHistory(newItem).then<void>((_) {});
+      _trackServerHistoryWrite(pending);
+    }
   }
 
   void clearHistory() {

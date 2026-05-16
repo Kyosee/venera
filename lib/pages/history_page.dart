@@ -63,11 +63,26 @@ class _HistoryPageState extends State<HistoryPage> {
   Future<void> _loadServerHistory() async {
     try {
       final page = await const ServerDbClient().listHistory(limit: 500);
-      if (!mounted || page == null) {
+      if (!mounted) return;
+      if (page != null && page.items.isNotEmpty) {
+        setState(() {
+          comics = page.items;
+          if (multiSelectMode) {
+            selectedComics.removeWhere((comic, _) => !comics.contains(comic));
+            if (selectedComics.isEmpty) {
+              multiSelectMode = false;
+            }
+          }
+        });
         return;
       }
+    } catch (_) {}
+    // Fallback to local SQLite if server returns empty or fails
+    if (!mounted) return;
+    final local = HistoryManager().getAll();
+    if (local.isNotEmpty) {
       setState(() {
-        comics = page.items;
+        comics = local;
         if (multiSelectMode) {
           selectedComics.removeWhere((comic, _) => !comics.contains(comic));
           if (selectedComics.isEmpty) {
@@ -75,7 +90,7 @@ class _HistoryPageState extends State<HistoryPage> {
           }
         }
       });
-    } catch (_) {}
+    }
   }
 
   List<History> get filteredComics {

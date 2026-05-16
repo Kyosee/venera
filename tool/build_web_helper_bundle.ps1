@@ -1,18 +1,9 @@
 param(
   [string]$Output = "build/web-helper-bundle",
-  [string]$BaseHref = "/",
-  [ValidateSet("Auto", "Always", "Skip")]
-  [string]$FlutterBuildMode = "Auto",
-  [switch]$SkipFlutterBuild,
-  [switch]$ForceFlutterBuild,
-  [ValidateSet("O1","O2","O3","O4")]
-  [string]$DartOptLevel = "O4",
-  [switch]$Dev
+  [switch]$SkipFrontendBuild
 )
 
 $ErrorActionPreference = "Stop"
-
-if ($Dev) { $DartOptLevel = "O1" }
 
 $root = Split-Path -Parent $PSScriptRoot
 $outputPath = if ([System.IO.Path]::IsPathRooted($Output)) {
@@ -20,160 +11,10 @@ $outputPath = if ([System.IO.Path]::IsPathRooted($Output)) {
 } else {
   Join-Path $root $Output
 }
-$webBuildPath = Join-Path $root "build/web"
-$helperPath = Join-Path $root "web_helper"
+$frontendPath = Join-Path $root "web/client"
+$webBuildPath = Join-Path $root "build/web-vue"
+$helperPath = Join-Path $root "web/server"
 $publicPath = Join-Path $outputPath "public"
-$webBuildStampPath = Join-Path $webBuildPath ".venera-build-stamp.json"
-$flutterInputPaths = @(
-  (Join-Path $root "pubspec.yaml"),
-  (Join-Path $root "pubspec.lock"),
-  (Join-Path $root "lib"),
-  (Join-Path $root "assets"),
-  (Join-Path $root "web/index.html"),
-  (Join-Path $root "web/manifest.json"),
-  (Join-Path $root "web/flutter_bootstrap.js"),
-  (Join-Path $root "web/flutter.js"),
-  (Join-Path $root "web/icons"),
-  (Join-Path $root "web/favicon.png"),
-  (Join-Path $root "web/apple-touch-icon.png"),
-  (Join-Path $root "web/venera_runtime.js"),
-  (Join-Path $root "web/sqlite3.wasm"),
-  (Join-Path $root "web/proxy.php")
-)
-$legacyWebBuildEntries = @("dist", "node_modules", "public", "src")
-
-$script:cachedInputFiles = $null
-
-function Get-FlutterInputFiles {
-  param([string[]]$Paths)
-
-  if ($null -ne $script:cachedInputFiles) {
-    return $script:cachedInputFiles
-  }
-  $files = New-Object System.Collections.Generic.List[System.IO.FileInfo]
-  foreach ($path in $Paths) {
-    if (-not (Test-Path -LiteralPath $path)) {
-      continue
-    }
-    $item = Get-Item -LiteralPath $path -Force
-    if ($item.PSIsContainer) {
-      foreach ($file in Get-ChildItem -LiteralPath $path -Recurse -File -Force -ErrorAction SilentlyContinue) {
-        $files.Add($file)
-      }
-    } else {
-      $files.Add($item)
-    }
-  }
-  $script:cachedInputFiles = $files | Sort-Object FullName
-  return $script:cachedInputFiles
-}
-
-function Get-RelativeFingerprintPath {
-  param([System.IO.FileInfo]$File)
-
-  $rootFullPath = [System.IO.Path]::GetFullPath($root).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
-  $fileFullPath = [System.IO.Path]::GetFullPath($File.FullName)
-  return $fileFullPath.Substring($rootFullPath.Length).Replace('\', '/')
-}
-
-function Get-WebBuildFingerprint {
-  $builder = [System.Text.StringBuilder]::new()
-  [void]$builder.AppendLine("target=lib/main_web.dart")
-  [void]$builder.AppendLine("baseHref=$BaseHref")
-  foreach ($file in (Get-FlutterInputFiles $flutterInputPaths)) {
-    $relative = Get-RelativeFingerprintPath $file
-    [void]$builder.AppendLine("$relative|$($file.Length)|$($file.LastWriteTimeUtc.Ticks)")
-  }
-  $sha = [System.Security.Cryptography.SHA256]::Create()
-  try {
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($builder.ToString())
-    return [System.BitConverter]::ToString($sha.ComputeHash($bytes)).Replace("-", "").ToLowerInvariant()
-  } finally {
-    $sha.Dispose()
-  }
-}
-
-function Get-LatestWriteTimeUtc {
-  param([string[]]$Paths)
-
-  $latest = [DateTime]::MinValue
-  foreach ($file in (Get-FlutterInputFiles $Paths)) {
-    if ($file.LastWriteTimeUtc -gt $latest) {
-      $latest = $file.LastWriteTimeUtc
-    }
-  }
-  return $latest
-}
-
-function Write-WebBuildStamp {
-  param([string]$Fingerprint)
-
-  @{
-    version = 1
-    baseHref = $BaseHref
-    target = "lib/main_web.dart"
-    fingerprint = $Fingerprint
-    builtAt = (Get-Date).ToUniversalTime().ToString("o")
-  } | ConvertTo-Json | Set-Content -LiteralPath $webBuildStampPath -Encoding UTF8
-}
-
-function Test-WebBuildFresh {
-  param([string]$Fingerprint)
-
-  $mainJsPath = Join-Path $webBuildPath "main.dart.js"
-  $indexPath = Join-Path $webBuildPath "index.html"
-  if (-not (Test-Path -LiteralPath $mainJsPath) -or -not (Test-Path -LiteralPath $indexPath)) {
-    return $false
-  }
-
-  if (Test-Path -LiteralPath $webBuildStampPath) {
-    try {
-      $stamp = Get-Content -LiteralPath $webBuildStampPath -Raw | ConvertFrom-Json
-      if ($stamp.baseHref -eq $BaseHref `
-        -and $stamp.target -eq "lib/main_web.dart" `
-        -and $stamp.fingerprint -eq $Fingerprint) {
-        return $true
-      }
-      Write-Host "Build stamp is stale; checking file timestamps."
-    } catch {
-      Write-Host "Build stamp is invalid; checking file timestamps."
-    }
-  } else {
-    Write-Host "No build stamp found; using file timestamps once."
-  }
-
-  $outputTime = (Get-Item -LiteralPath $mainJsPath).LastWriteTimeUtc
-  $inputTime = Get-LatestWriteTimeUtc $flutterInputPaths
-  if ($outputTime -ge $inputTime) {
-    Write-WebBuildStamp $Fingerprint
-    return $true
-  }
-  return $false
-}
-
-function Invoke-FlutterWebBuild {
-  param([string]$Fingerprint)
-
-  $dartOptArgs = @()
-  if ($DartOptLevel -ne "O4") {
-    $dartOptArgs = @("--dart2js-optimization", $DartOptLevel)
-    Write-Host "Using dart2js optimization level: $DartOptLevel"
-  }
-  flutter build web --target lib/main_web.dart --release --base-href $BaseHref --no-wasm-dry-run --no-tree-shake-icons @dartOptArgs
-  if ($LASTEXITCODE -ne 0) {
-    throw "flutter build web failed with exit code $LASTEXITCODE"
-  }
-  Write-WebBuildStamp $Fingerprint
-}
-
-function Copy-WebBuild {
-  $excludeDirs = $legacyWebBuildEntries + @(".venera-build-stamp.json", ".venera-build.lock")
-  $xdArgs = $excludeDirs | ForEach-Object { "/XF"; $_; "/XD"; $_ }
-  robocopy $webBuildPath $publicPath /MIR @xdArgs /NFL /NDL /NJH /NJS /NC /NS /NP
-  if ($LASTEXITCODE -ge 8) {
-    throw "robocopy failed with exit code $LASTEXITCODE"
-  }
-}
 
 function Reset-Directory {
   param([string]$Path)
@@ -188,34 +29,41 @@ function Reset-Directory {
   }
 }
 
+function Invoke-WebFrontendBuild {
+  if (-not (Test-Path -LiteralPath (Join-Path $frontendPath "package.json"))) {
+    throw "web/client/package.json not found"
+  }
+
+  Write-Host "Building Vue web frontend..."
+  Push-Location $frontendPath
+  try {
+    npm ci --silent
+    if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
+
+    npm run build
+    if ($LASTEXITCODE -ne 0) { throw "npm run build failed" }
+  } finally {
+    Pop-Location
+  }
+}
+
+function Copy-WebBuild {
+  robocopy $webBuildPath $publicPath /MIR /NFL /NDL /NJH /NJS /NC /NS /NP
+  if ($LASTEXITCODE -ge 8) {
+    throw "robocopy failed with exit code $LASTEXITCODE"
+  }
+}
+
 Push-Location $root
 try {
-  if ($SkipFlutterBuild -and $ForceFlutterBuild) {
-    throw "Use either -SkipFlutterBuild or -ForceFlutterBuild, not both."
-  }
-  if ($SkipFlutterBuild) {
-    $FlutterBuildMode = "Skip"
-  }
-  if ($ForceFlutterBuild) {
-    $FlutterBuildMode = "Always"
-  }
-
-  $fingerprint = if ($FlutterBuildMode -eq "Skip") { "" } else { Get-WebBuildFingerprint }
-
-  if ($FlutterBuildMode -eq "Skip") {
-    Write-Host "Skipping Flutter build because FlutterBuildMode=Skip."
-  } elseif (-not (Test-Path $webBuildPath)) {
-    Invoke-FlutterWebBuild $fingerprint
-  } elseif ($FlutterBuildMode -eq "Always") {
-    Invoke-FlutterWebBuild $fingerprint
-  } elseif (Test-WebBuildFresh $fingerprint) {
-    Write-Host "Reusing fresh build/web. Use -ForceFlutterBuild to rebuild."
+  if ($SkipFrontendBuild) {
+    Write-Host "Skipping web/client build."
   } else {
-    Invoke-FlutterWebBuild $fingerprint
+    Invoke-WebFrontendBuild
   }
 
-  if (-not (Test-Path $webBuildPath)) {
-    throw "build/web does not exist. Remove -SkipFlutterBuild or build Flutter Web first."
+  if (-not (Test-Path -LiteralPath $webBuildPath)) {
+    throw "build/web-vue does not exist. Remove -SkipFrontendBuild or build web/client first."
   }
 
   if (-not (Test-Path -LiteralPath $outputPath)) {
@@ -228,24 +76,23 @@ try {
   Copy-Item -LiteralPath (Join-Path $helperPath "compose.yaml") -Destination $outputPath
   Copy-Item -LiteralPath (Join-Path $helperPath "entrypoint.sh") -Destination $outputPath
 
-  # Include the Rust fetch sidecar source (Dockerfile builds it from this dir).
   $sidecarSource = Join-Path $helperPath "rust-fetch"
   $sidecarTarget = Join-Path $outputPath "rust-fetch"
   Reset-Directory $sidecarTarget
-  Copy-Item -Path (Join-Path $sidecarSource "Cargo.toml") -Destination $sidecarTarget
-  Copy-Item -Path (Join-Path $sidecarSource "rust-toolchain.toml") -Destination $sidecarTarget
-  if (Test-Path (Join-Path $sidecarSource "Cargo.lock")) {
-    Copy-Item -Path (Join-Path $sidecarSource "Cargo.lock") -Destination $sidecarTarget
+  Copy-Item -LiteralPath (Join-Path $sidecarSource "Cargo.toml") -Destination $sidecarTarget
+  Copy-Item -LiteralPath (Join-Path $sidecarSource "rust-toolchain.toml") -Destination $sidecarTarget
+  if (Test-Path -LiteralPath (Join-Path $sidecarSource "Cargo.lock")) {
+    Copy-Item -LiteralPath (Join-Path $sidecarSource "Cargo.lock") -Destination $sidecarTarget
   }
-  Copy-Item -Path (Join-Path $sidecarSource "src") -Destination $sidecarTarget -Recurse
-  Copy-Item -Path (Join-Path $sidecarSource ".cargo") -Destination $sidecarTarget -Recurse
+  Copy-Item -LiteralPath (Join-Path $sidecarSource "src") -Destination $sidecarTarget -Recurse
+  Copy-Item -LiteralPath (Join-Path $sidecarSource ".cargo") -Destination $sidecarTarget -Recurse
 
   Copy-WebBuild
 
   $readme = @'
 # Venera Web + Web Helper 部署包
 
-这个目录已经把 Flutter Web 静态文件和 Web Helper 后端放在一起。
+这个目录已经把 Vue Web 静态文件和 Web Helper 后端放在一起。
 部署后只需要访问同一个地址，例如 `http://<nas-host>:60098/`。
 Web 端会使用同源 helper，不需要再单独填写 helper 地址。
 
@@ -276,27 +123,21 @@ node server.js
 ## 快速重新打包
 
 ```powershell
-.\tool\build_web_helper_bundle.ps1
+.\tool\build_web/server_bundle.ps1
 ```
 
-默认会复用新鲜的 `build/web`，避免每次都跑 Flutter 编译。
+默认会重新构建 `web/client` 并同步到 `public/`。
 
 ```powershell
-.\tool\build_web_helper_bundle.ps1 -ForceFlutterBuild
+.\tool\build_web/server_bundle.ps1 -SkipFrontendBuild
 ```
 
-源码没变但需要强制重建 Flutter Web 时使用。
-
-```powershell
-.\tool\build_web_helper_bundle.ps1 -SkipFlutterBuild
-```
-
-确认 `build/web` 已经可用时，可以完全跳过新鲜度检查。
+确认 `build/web-vue` 已经可用时，可以跳过前端构建。
 
 ## 目录说明
 
 ```text
-public/       Flutter Web 静态文件
+public/       Vue Web 静态文件
 server.js     Web Helper 后端，同时托管 public/
 compose.yaml  NAS/Docker Compose 部署入口
 browser-data/ 运行后自动生成，保存 helper 浏览器数据和 cookie jar

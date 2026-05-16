@@ -23,10 +23,11 @@ const _serverDbEntries = [
 
 class DataSync with ChangeNotifier {
   DataSync._() {
-    unawaited(_bootstrapWebDavConfig());
-    if (isEnabled) {
-      unawaited(downloadData(hydrateLocalCache: true));
-    }
+    unawaited(_bootstrapWebDavConfig().then((_) {
+      if (isEnabled) {
+        unawaited(downloadData(hydrateLocalCache: true));
+      }
+    }));
     LocalFavoritesManager().addListener(onDataChanged);
     ComicSourceManager().addListener(onDataChanged);
     ImageFavoriteManager().addListener(onDataChanged);
@@ -560,6 +561,8 @@ class DataSync with ChangeNotifier {
           hydrateLocalCache: hydrateLocalCache,
         );
         Log.info("Data Sync", "Server DB synchronized successfully");
+        HistoryManager().notifyListeners();
+        LocalFavoritesManager().notifyListeners();
         return const Res(true);
       } catch (e, s) {
         if (!_isMissingServerDbRoute(e)) {

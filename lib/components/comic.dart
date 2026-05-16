@@ -1707,7 +1707,6 @@ class ComicDescription extends StatelessWidget {
     final source = _clean(badge) ?? _derivedSource(descriptionParts);
     final update = _clean(updateText) ?? _updateTextFromTags();
     final progress = _clean(progressText);
-    final pages = _clean(pagesText) ?? _pagesTextFromTags();
     final authorItems = _authorItems();
     final authors = authorItems.isEmpty
         ? null
@@ -1759,8 +1758,6 @@ class ComicDescription extends StatelessWidget {
       if (status != null) _infoRow(context, "Status".tl, status, Colors.purple),
       if (progress != null)
         _infoRow(context, "Progress".tl, progress, Colors.green),
-      if (pages != null)
-        _infoRow(context, "Pages".tl, pages, Colors.deepOrange),
       if (fallbackDescription != null)
         _infoRow(context, "Description".tl, fallbackDescription, Colors.orange),
     ];
@@ -1999,12 +1996,6 @@ class ComicDescription extends StatelessWidget {
     return _tagsWithNamespace(
       _updateNamespaces,
     ).where(_looksLikeDate).firstOrNull;
-  }
-
-  String? _pagesTextFromTags() {
-    return _tagsWithNamespace(
-      _pagesNamespaces,
-    ).where((e) => int.tryParse(e) != null).firstOrNull;
   }
 
   List<String> _tagsWithNamespace(Set<String> namespaces) {

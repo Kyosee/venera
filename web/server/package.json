@@ -1,0 +1,17 @@
+{
+  "name": "venera-web-helper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test --test-concurrency=1 helper.test.js server_db.test.js"
+  },
+  "dependencies": {
+    "node-html-parser": "^7.1.0",
+    "playwright": "1.59.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
