@@ -3146,6 +3146,40 @@ function ensureComicBasicInfoSchema(db) {
   `);
 }
 
+function backfillComicBasicInfoFromHistory(db) {
+  const count = db.prepare(
+    "select count(*) as cnt from comic_basic_info;",
+  ).all()[0]?.cnt ?? 0;
+  if (count > 0) return;
+  const rows = db.prepare(`
+    select distinct h.id, h.title, h.subtitle, h.cover, h.type, h.max_page
+    from history h
+    where h.title != ''
+    limit 500;
+  `).all();
+  for (const row of rows) {
+    try {
+      db.prepare(`
+        insert into comic_basic_info
+          (comic_id, title, subtitle, cover_uri, page_count, base_info_updated_at)
+        values (?, ?, ?, ?, ?, ?)
+        on conflict(comic_id) do update set
+          title = excluded.title,
+          subtitle = coalesce(excluded.subtitle, comic_basic_info.subtitle),
+          cover_uri = coalesce(excluded.cover_uri, comic_basic_info.cover_uri),
+          page_count = coalesce(excluded.page_count, comic_basic_info.page_count);
+      `).run(
+        String(row.id),
+        String(row.title || ""),
+        row.subtitle || null,
+        row.cover || null,
+        typeof row.max_page === "number" ? row.max_page : null,
+        Date.now(),
+      );
+    } catch { /* skip malformed rows */ }
+  }
+}
+
 function ensureImageFavoritesDbSchema(db) {
   db.exec(`
     create table if not exists image_favorites (
@@ -3191,6 +3225,7 @@ function normalizeHistoryPayload(payload) {
     cover: String(history.cover || ""),
     time: nullableNumber(history.time) || Date.now(),
     type,
+    sourceKey: String(history.sourceKey ?? history.source_key ?? ""),
     ep: nullableNumber(history.ep) || 0,
     page: nullableNumber(history.page) || 0,
     readEpisode,
@@ -3473,6 +3508,9 @@ function normalizeFavoriteWriteItem(payload) {
     name: String(item.name ?? item.title ?? ""),
     author: String(item.author || ""),
     type,
+    sourceKey: String(
+      item.sourceKey ?? item.source_key ?? payload.sourceKey ?? "",
+    ),
     tags: favoriteTagsValue(item.tags),
     coverPath: String(item.coverPath ?? item.cover_path ?? item.cover ?? ""),
     time: String(item.time ?? payload.updateTime ?? ""),
@@ -3642,6 +3680,8 @@ async function withWritableHistoryDb(profileRoot, callback) {
   const db = await openWritableSqliteDatabase(filePath);
   try {
     ensureHistoryDbSchema(db);
+    ensureComicBasicInfoSchema(db);
+    backfillComicBasicInfoFromHistory(db);
     return callback(db);
   } finally {
     db.close();
@@ -3667,7 +3707,7 @@ function saveComicBasicInfo(db, sourceKey, comic) {
     : (typeof comic.tags === 'object' && comic.tags !== null
       ? JSON.stringify(Object.entries(comic.tags).flatMap(([ns, vals]) =>
           Array.isArray(vals) ? vals.map(v => `${ns}:${v}`) : [`${ns}:${vals}`]))
-      : (comic.tags ?? ''));
+      : (comic.tags ?? null));
   const now = Date.now();
   db.prepare(`
     insert into comic_basic_info
@@ -3688,8 +3728,8 @@ function saveComicBasicInfo(db, sourceKey, comic) {
   `).run(
     comicId,
     comic.title ?? '',
-    comic.subtitle ?? comic.subTitle ?? '',
-    comic.description ?? '',
+    comic.subtitle ?? comic.subTitle ?? null,
+    comic.description ?? null,
     comic.author ?? null,
     comic.status ?? null,
     comic.updateTime ?? comic.update ?? comic.lastUpdateTime ?? null,
@@ -5280,6 +5320,16 @@ async function handleServerDbRoute({
         history.maxPage,
         history.chapterGroup,
       );
+      if (history.sourceKey) {
+        ensureComicBasicInfoSchema(db);
+        saveComicBasicInfo(db, history.sourceKey, {
+          id: history.id,
+          title: history.title,
+          subtitle: history.subtitle || null,
+          cover: history.cover || null,
+          maxPage: history.maxPage,
+        });
+      }
     });
     markServerDbDirty(profileRoot, "history-upsert");
     sendJson(res, 200, { ok: true, profile: profileId });
@@ -5600,6 +5650,17 @@ async function handleServerDbRoute({
     await withWritableFavoriteDb(profileRoot, (db) => {
       writeFavoriteItem(db, folder, item);
     });
+    if (item.sourceKey) {
+      await withWritableHistoryDb(profileRoot, (db) => {
+        saveComicBasicInfo(db, item.sourceKey, {
+          id: item.id,
+          title: item.name,
+          author: item.author || null,
+          cover: item.coverPath || null,
+          tags: item.tags ? String(item.tags).split(",") : null,
+        });
+      });
+    }
     markServerDbDirty(profileRoot, "favorites-add");
     sendJson(res, 200, { ok: true, profile: profileId });
     return true;
@@ -5617,6 +5678,9 @@ async function handleServerDbRoute({
     if (!id || !Number.isInteger(type)) {
       throw createHttpError(400, "Invalid favorites info payload");
     }
+    const sourceKey = String(
+      item?.sourceKey ?? item?.source_key ?? payload.sourceKey ?? "",
+    );
     await withWritableFavoriteDb(profileRoot, (db) => {
       if (!tableExists(db, folder)) {
         throw createHttpError(404, "Favorites folder not found");
@@ -5641,6 +5705,17 @@ async function handleServerDbRoute({
         throw createHttpError(404, "Favorite item not found");
       }
     });
+    if (sourceKey) {
+      await withWritableHistoryDb(profileRoot, (db) => {
+        saveComicBasicInfo(db, sourceKey, {
+          id,
+          title: String(item?.name ?? item?.title ?? ""),
+          author: item?.author || null,
+          cover: item?.coverPath ?? item?.cover_path ?? item?.cover ?? null,
+          tags: item?.tags ? (Array.isArray(item.tags) ? item.tags : String(item.tags).split(",")) : null,
+        });
+      });
+    }
     markServerDbDirty(profileRoot, "favorites-info");
     sendJson(res, 200, { ok: true, profile: profileId });
     return true;
