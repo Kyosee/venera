@@ -432,6 +432,7 @@ onMounted(async () => {
   overflow-y: auto;
   padding: 16px;
   -webkit-overflow-scrolling: touch;
+  will-change: scroll-position;
 }
 
 .comics-content {
@@ -439,6 +440,7 @@ onMounted(async () => {
   overflow-y: auto;
   padding: 16px;
   -webkit-overflow-scrolling: touch;
+  will-change: scroll-position;
 }
 
 /* Category grid */
@@ -518,6 +520,8 @@ onMounted(async () => {
 .comic-card {
   cursor: pointer;
   transition: transform 0.15s ease;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 300px;
 }
 
 .comic-card:active {

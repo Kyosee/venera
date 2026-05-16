@@ -636,6 +636,7 @@ async function handleBatchMove(targetFolderId: string) {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  will-change: scroll-position;
 }
 
 .content-toolbar {
@@ -674,6 +675,8 @@ async function handleBatchMove(targetFolderId: string) {
   cursor: pointer;
   transition: transform 0.15s;
   position: relative;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 300px;
 }
 
 .comic-card:hover { transform: translateY(-2px); }

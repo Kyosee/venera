@@ -518,6 +518,7 @@ function setStatusFilter(status: 'all' | 'uncompleted' | 'completed') {
   flex: 1;
   overflow-y: auto;
   padding: 0 16px 16px;
+  will-change: scroll-position;
 }
 
 .loading-state,
@@ -552,6 +553,8 @@ function setStatusFilter(status: 'all' | 'uncompleted' | 'completed') {
   cursor: pointer;
   border-radius: 8px;
   transition: transform 0.15s;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 300px;
 }
 
 .history-card-wrap:hover {

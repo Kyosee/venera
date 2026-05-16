@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, onUnmounted } from 'vue'
+import { ref, onMounted, computed, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { apiPost } from '@/services/api'
 import { getComicSources, batchGetComicBasicInfo } from '@/services/server-db'
@@ -34,7 +34,7 @@ const comics = ref<Record<string, ExploreComic[]>>({})
 const sections = ref<Record<string, ExploreSection[]>>({})
 const exploreType = ref<Record<string, string>>({})
 const loading = ref<Record<string, boolean>>({})
-const refreshing = ref(false)
+const refreshingTab = ref<Record<string, boolean>>({})
 const pages = ref<Record<string, number>>({})
 const finished = ref<Record<string, boolean>>({})
 const showFab = ref(true)
@@ -84,15 +84,19 @@ async function loadComics(sourceKey: string, page = 1, append = false) {
   try {
     const res = await apiPost<any>('/api/server-db/explore/list', { sourceKey, page })
     if (res?.type === 'multiPart' && Array.isArray(res.sections)) {
+      // Enrich section comics BEFORE setting reactive data so cards render with full info
+      const enrichedSections = res.sections.map((s: ExploreSection) => ({ ...s }))
+      for (const section of enrichedSections) {
+        if (section.comics?.length) await enrichComicsWithLocalInfo(sourceKey, section.comics)
+      }
       exploreType.value[sourceKey] = 'multiPart'
-      sections.value[sourceKey] = res.sections
+      sections.value[sourceKey] = enrichedSections
       finished.value[sourceKey] = true
-      // Enrich section comics with local basic info
-      const allSectionComics = res.sections.flatMap((s: ExploreSection) => s.comics ?? [])
-      enrichComicsWithLocalInfo(sourceKey, allSectionComics)
     } else {
+      const items: ExploreComic[] = (res?.comics ?? res?.items ?? []).map((c: any) => ({ ...c }))
+      // Enrich BEFORE setting reactive data
+      await enrichComicsWithLocalInfo(sourceKey, items)
       exploreType.value[sourceKey] = 'list'
-      const items: ExploreComic[] = res?.comics ?? res?.items ?? []
       if (append) {
         comics.value[sourceKey] = [...(comics.value[sourceKey] ?? []), ...items]
       } else {
@@ -100,7 +104,6 @@ async function loadComics(sourceKey: string, page = 1, append = false) {
       }
       pages.value[sourceKey] = page
       if (items.length === 0) finished.value[sourceKey] = true
-      enrichComicsWithLocalInfo(sourceKey, items)
     }
   } catch (e) {
     console.error('Failed to load explore comics:', e)
@@ -118,13 +121,12 @@ async function onTabChange(index: number) {
 }
 
 async function onRefresh() {
-  refreshing.value = true
   const key = currentSourceKey.value
-  if (key) {
-    finished.value[key] = false
-    await loadComics(key, 1, false)
-  }
-  refreshing.value = false
+  if (!key) return
+  refreshingTab.value[key] = true
+  finished.value[key] = false
+  await loadComics(key, 1, false)
+  refreshingTab.value[key] = false
 }
 
 async function onLoadMore() {
@@ -141,7 +143,23 @@ function onScroll(e: Event) {
   lastScrollTop = currentScrollTop
 }
 
-
+// Re-enrich with local info when navigating back from detail page (the component
+// stays mounted, so loadComics is not re-called, but the detail page may have
+// saved basic info to the DB).
+watch(() => route.path, (newPath) => {
+  if (newPath.startsWith('/explore')) {
+    const key = currentSourceKey.value
+    if (key) {
+      const items = comics.value[key]
+      if (items?.length) enrichComicsWithLocalInfo(key, items)
+      const secs = sections.value[key]
+      if (secs?.length) {
+        const all = secs.flatMap((s: any) => s.comics ?? [])
+        enrichComicsWithLocalInfo(key, all)
+      }
+    }
+  }
+})
 
 onMounted(async () => {
   await settingsStore.loadSettings()
@@ -182,7 +200,7 @@ onUnmounted(() => {
       @change="onTabChange"
     >
       <van-tab v-for="source in sources" :key="source.key" :title="source.name">
-        <van-pull-refresh v-model="refreshing" @refresh="onRefresh">
+        <van-pull-refresh v-model="refreshingTab[source.key]" @refresh="onRefresh">
           <div class="explore-content" @scroll="onScroll">
             <!-- Skeleton loading -->
             <div v-if="loading[source.key] && !comics[source.key]?.length && !sections[source.key]?.length" class="comic-grid" :style="gridStyle">
@@ -289,6 +307,7 @@ onUnmounted(() => {
   overflow-y: auto;
   padding: 16px;
   -webkit-overflow-scrolling: touch;
+  will-change: scroll-position;
 }
 
 .comic-grid {
@@ -301,6 +320,8 @@ onUnmounted(() => {
 .comic-card {
   cursor: pointer;
   transition: transform 0.15s ease;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 300px;
 }
 
 .comic-card:active {

@@ -230,8 +230,8 @@ async function doSearch(keyword?: string) {
       const opts = currentSearchOptions.value.length > 0 ? searchOptions.value : undefined
       const res = await searchComics(key, term, 1, opts)
       const comics = withSourceKey(res.comics, key)
+      await enrichWithLocalInfo(key, comics)
       results.value[key] = { comics, hasMore: res.hasMore, page: 1, loading: false, error: null }
-      enrichWithLocalInfo(key, comics)
     } catch (e: any) {
       results.value[key] = { comics: [], hasMore: false, page: 1, loading: false, error: e.message ?? '搜索失败' }
     }
@@ -530,6 +530,7 @@ onMounted(async () => {
   overflow-y: auto;
   padding: 16px;
   -webkit-overflow-scrolling: touch;
+  will-change: scroll-position;
 }
 
 .history-section {
@@ -611,6 +612,8 @@ onMounted(async () => {
 .comic-card {
   cursor: pointer;
   transition: transform 0.15s ease;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 300px;
 }
 
 .comic-card:active {

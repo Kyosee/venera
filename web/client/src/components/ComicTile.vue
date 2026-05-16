@@ -138,7 +138,12 @@ const styleVars = computed(() => ({
 </template>
 
 <style scoped>
-.comic-tile { cursor: pointer; transition: transform 0.15s ease; }
+.comic-tile {
+  cursor: pointer;
+  transition: transform 0.15s ease;
+  contain: content;
+  transform: translateZ(0);
+}
 .comic-tile:active { transform: scale(0.97); }
 .comic-tile.brief { width: 100%; }
 .comic-tile.detailed {

@@ -280,5 +280,7 @@ function sourceNameFor(item: FavoriteItem) {
 
 .comic-card {
   min-width: 0;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 300px;
 }
 </style>

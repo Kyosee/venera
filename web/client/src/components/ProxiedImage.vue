@@ -8,8 +8,12 @@ const props = withDefaults(defineProps<{
   alt?: string
   width?: string
   height?: string
+  loading?: 'lazy' | 'eager'
+  decoding?: 'async' | 'sync' | 'auto'
 }>(), {
   alt: '',
+  loading: 'lazy',
+  decoding: 'async',
 })
 
 const imgRef = ref<HTMLElement>()
@@ -27,7 +31,7 @@ onMounted(() => {
       isVisible.value = true
       observer?.disconnect()
     }
-  }, { rootMargin: '200px' })
+  }, { rootMargin: '100px' })
   if (imgRef.value) observer.observe(imgRef.value)
 })
 
@@ -43,6 +47,8 @@ function onError() { hasError.value = true }
       v-if="isVisible && !hasError"
       :src="proxiedSrc"
       :alt="alt"
+      :loading="props.loading"
+      :decoding="props.decoding"
       :class="{ loaded: isLoaded }"
       @load="onLoad"
       @error="onError"
