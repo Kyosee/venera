@@ -645,7 +645,7 @@ async function loadNextChapterContinuous() {
   const fallback = current >= 0 ? current : chapterIndex.value
   const next = fallback + 1
   if (next >= list.length) {
-    showToast('已经是最后一话')
+    loadingNextChapter.value = false
     return
   }
   loadingNextChapter.value = true
