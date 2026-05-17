@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { getComicSources, searchComics as searchSourceComics, getRelatedSources, linkRelatedSource, acceptRelatedSource, rejectRelatedSource, unlinkRelatedSource } from '@/services/server-db'
 import { apiPost } from '@/services/api'
 import { showToast } from 'vant'
@@ -201,11 +201,6 @@ async function handlePreviewResult(comic: any) {
   }
 }
 
-function closePreview() {
-  previewVisible.value = false
-  previewComic.value = null
-}
-
 function onNavigateRelated(source: RelatedSource) {
   if (isCurrentSource(source)) return
   const url = `#/comic/${encodeURIComponent(source.sourceKey)}/${encodeURIComponent(source.id)}`
@@ -270,12 +265,12 @@ watch(() => props.show, (val) => {
                     <span class="source-title" @click="onNavigateRelated(source)">{{ source.title }}</span>
                     <van-tag
                       :color="statusColor(source.link_status)"
-                      size="small"
+                      size="medium"
                       text-color="#fff"
                     >{{ statusText(source.link_status) }}</van-tag>
                   </div>
                   <div class="source-meta">
-                    <span class="source-platform">{{ source.platformName || source.platform_id }}</span>
+                    <span class="source-platform">{{ source.platform_name || source.platform_id }}</span>
                     <span v-if="source.author" class="source-author"> / {{ source.author }}</span>
                   </div>
                   <div v-if="source.link_status === 'candidate' && source.link_source === 'auto'" class="source-confidence">
@@ -287,13 +282,13 @@ watch(() => props.show, (val) => {
                   <div class="source-actions">
                     <template v-if="source.link_status === 'candidate'">
                       <van-button
-                        size="small"
+                        size="medium"
                         type="primary"
                         :loading="actionLoading['accept-' + source.comic_id]"
                         @click.stop="handleAccept(source)"
                       >确认</van-button>
                       <van-button
-                        size="small"
+                        size="medium"
                         type="default"
                         :loading="actionLoading['reject-' + source.comic_id]"
                         @click.stop="handleReject(source)"
@@ -301,7 +296,7 @@ watch(() => props.show, (val) => {
                     </template>
                     <template v-if="source.link_status === 'accepted' && !isCurrentSource(source)">
                       <van-button
-                        size="small"
+                        size="medium"
                         type="danger"
                         :loading="actionLoading['unlink-' + source.comic_id]"
                         @click.stop="handleUnlink(source)"
@@ -341,7 +336,7 @@ watch(() => props.show, (val) => {
                 @keyup.enter="handleSearch"
               />
               <van-button
-                size="small"
+                size="medium"
                 type="primary"
                 :loading="searchLoading"
                 :disabled="!searchSourceKey"
@@ -371,8 +366,8 @@ watch(() => props.show, (val) => {
                   <span v-if="comic.subtitle || comic.author" class="result-subtitle">{{ comic.subtitle || comic.author }}</span>
                 </div>
                 <div class="result-actions">
-                  <van-button size="small" plain @click.stop="handlePreviewResult(comic)">预览</van-button>
-                  <van-button size="small" type="primary" @click.stop="handleLinkResult(comic)">关联</van-button>
+                  <van-button size="medium" plain @click.stop="handlePreviewResult(comic)">预览</van-button>
+                  <van-button size="medium" type="primary" @click.stop="handleLinkResult(comic)">关联</van-button>
                 </div>
               </div>
             </div>
@@ -428,7 +423,7 @@ watch(() => props.show, (val) => {
                   class="advanced-input"
                   placeholder="漫画 ID"
                 />
-                <van-button size="small" type="primary" @click="handleAdvancedLink">关联</van-button>
+                <van-button size="medium" type="primary" @click="handleAdvancedLink">关联</van-button>
               </div>
             </div>
           </div>

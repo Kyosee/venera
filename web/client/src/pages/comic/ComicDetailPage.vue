@@ -562,7 +562,7 @@ async function shareComic() {
 
 async function markAsReadHandler() {
   if (!comic.value) return
-  const folder = comic.value.folder || favoriteFolder.value
+  const folder = (comic.value as any).folder || favoriteFolder.value
   if (!folder) {
     showToast('请先收藏此漫画')
     return

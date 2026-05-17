@@ -460,7 +460,7 @@ function onImageLoad(e: Event, index: number) {
 }
 
 // Long-press image actions
-function onImagePointerDown(e: PointerEvent, imgIdx?: number) {
+function onImagePointerDown(_e: PointerEvent, imgIdx?: number) {
   if (imgIdx !== undefined) longPressImageIndex.value = imgIdx
   if (!canLongPressZoom.value) return
   longPressTriggered = false

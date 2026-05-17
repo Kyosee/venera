@@ -90,7 +90,6 @@ async function doSingleMigrate() {
       id: props.comic.id,
       type: props.comic.type,
       name: props.comic.name,
-      sourceKey: props.comic.sourceKey || '',
     }],
     targetSourceKeys: [selectedTarget.value.sourceKey],
     migrateHistory: migrateHistory.value,
@@ -98,7 +97,7 @@ async function doSingleMigrate() {
     confirmEach: false,
   }
   const res = await startSourceMigration(params)
-  if (res.taskId) {
+  if (res) {
     showToast('迁移任务已启动')
     emit('done')
     emit('update:show', false)
@@ -127,7 +126,7 @@ async function doBatchMigrate() {
     confirmEach: confirmEach.value,
   }
   const res = await startSourceMigration(params)
-  if (res.taskId) {
+  if (res) {
     showToast('迁移任务已启动')
     emit('done')
     emit('update:show', false)
