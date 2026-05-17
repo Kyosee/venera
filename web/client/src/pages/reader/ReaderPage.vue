@@ -15,6 +15,7 @@ const sourceKey = computed(() => route.params.sourceKey as string)
 const comicId = computed(() => route.params.id as string)
 
 const images = ref<string[]>([])
+const imageAspects = ref<Record<number, string>>({})
 const loading = ref(true)
 const error = ref('')
 const currentPage = ref(0)
@@ -123,8 +124,8 @@ function onSliderChange(v: number) {
   const globalPage = currentChapterBoundary.value.startIndex + Math.max(0, Math.min(v - 1, currentChapterPageCount.value - 1))
   currentPage.value = globalPage
   if (isContinuous.value && continuousEl.value) {
-    const imgs = continuousEl.value.querySelectorAll('img')
-    if (imgs[globalPage]) imgs[globalPage].scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'start' })
+    const els = continuousEl.value.querySelectorAll('.img-placeholder')
+    if (els[globalPage]) els[globalPage].scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'start' })
   }
 }
 
@@ -173,6 +174,7 @@ async function fetchPages() {
     })
     if (res.ok && res.data) {
       images.value = res.data
+      imageAspects.value = {}
       chapterBoundaries.value = [{ chapterId: ep, startIndex: 0, length: res.data.length }]
       chapterTitle.value = res.title || currentChapter.value?.title || `E${chapterIndex.value + 1}`
       comicTitle.value = res.comicTitle || comicTitle.value || route.query.title?.toString() || ''
@@ -253,15 +255,15 @@ function prevPage() { isRTL.value ? goPage(currentPage.value + 1) : goPage(curre
 function goFirst() {
   currentPage.value = currentChapterBoundary.value.startIndex
   if (isContinuous.value && continuousEl.value) {
-    const imgs = continuousEl.value.querySelectorAll('img')
-    if (imgs[currentPage.value]) imgs[currentPage.value].scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'start' })
+    const els = continuousEl.value.querySelectorAll('.img-placeholder')
+    if (els[currentPage.value]) els[currentPage.value].scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'start' })
   }
 }
 function goLast() {
   currentPage.value = Math.max(0, currentChapterBoundary.value.startIndex + currentChapterPageCount.value - 1)
   if (isContinuous.value && continuousEl.value) {
-    const imgs = continuousEl.value.querySelectorAll('img')
-    if (imgs[currentPage.value]) imgs[currentPage.value].scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'start' })
+    const els = continuousEl.value.querySelectorAll('.img-placeholder')
+    if (els[currentPage.value]) els[currentPage.value].scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'start' })
   }
 }
 function goChapterByOffset(offset: number) {
@@ -368,6 +370,14 @@ function handleDoubleTap(x: number, y: number, rect: DOMRect) {
     zoomOriginY.value = py
     zoomScale.value = 2
     isZoomed.value = true
+  }
+}
+
+// Image placeholder aspect ratio tracking
+function onImageLoad(e: Event, index: number) {
+  const img = e.target as HTMLImageElement
+  if (img.naturalWidth && img.naturalHeight) {
+    imageAspects.value[index] = `${img.naturalWidth}/${img.naturalHeight}`
   }
 }
 
@@ -495,7 +505,7 @@ const loadingPrevChapter = ref(false)
 function onScroll() {
   if (!continuousEl.value || !isContinuous.value) return
   const el = continuousEl.value
-  const imgs = el.querySelectorAll('img')
+  const imgs = el.querySelectorAll('.img-placeholder')
   const mid = isContinuousHorizontal.value
     ? el.scrollLeft + el.clientWidth / 2
     : el.scrollTop + el.clientHeight / 2
@@ -575,6 +585,12 @@ async function loadPrevChapterContinuous() {
     if (res.ok && res.data && res.data.length > 0) {
       const prevCount = res.data.length
       images.value = [...res.data, ...images.value]
+      // Shift existing aspect ratios by prevCount
+      const shifted: Record<number, string> = {}
+      for (const [k, v] of Object.entries(imageAspects.value)) {
+        shifted[Number(k) + prevCount] = v
+      }
+      imageAspects.value = shifted
       currentPage.value += prevCount
       chapterBoundaries.value = [
         { chapterId: prevCh.id, startIndex: 0, length: prevCount },
@@ -583,9 +599,9 @@ async function loadPrevChapterContinuous() {
       await nextTick()
       // Maintain scroll position after prepending
       if (continuousEl.value) {
-        const imgs = continuousEl.value.querySelectorAll('img')
-        if (imgs[currentPage.value]) {
-          imgs[currentPage.value].scrollIntoView({ block: 'start', inline: 'start' })
+        const els = continuousEl.value.querySelectorAll('.img-placeholder')
+        if (els[currentPage.value]) {
+          els[currentPage.value].scrollIntoView({ block: 'start', inline: 'start' })
         }
       }
     }
@@ -601,8 +617,8 @@ watch(currentPage, () => {
 watch(() => route.query.ep, () => { fetchPages() })
 watch(readingMode, () => {
   if (isContinuous.value) nextTick(() => {
-    const imgs = continuousEl.value?.querySelectorAll('img')
-    if (imgs?.[currentPage.value]) imgs[currentPage.value].scrollIntoView()
+    const els = continuousEl.value?.querySelectorAll('.img-placeholder')
+    if (els?.[currentPage.value]) els[currentPage.value].scrollIntoView()
   })
   // Stop auto page if switching to continuous
   if (isContinuous.value && autoPageEnabled.value) {
@@ -686,15 +702,21 @@ onUnmounted(() => {
         :class="{ horizontal: isContinuousHorizontal, limited: limitContinuousImageWidth }"
         @scroll="onScroll"
       >
-        <img
+        <div
           v-for="(url, i) in images" :key="i"
-          :src="imageProxyUrl(url)"
-          class="continuous-img" loading="lazy"
-          @pointerdown="onImagePointerDown"
-          @pointerup="onImagePointerUp"
-          @pointercancel="onImagePointerCancel"
-          @contextmenu.prevent
-        />
+          class="img-placeholder"
+          :style="{ aspectRatio: imageAspects[i] || '3/4' }"
+        >
+          <img
+            :src="imageProxyUrl(url)"
+            class="continuous-img" loading="lazy"
+            @load="onImageLoad($event, i)"
+            @pointerdown="onImagePointerDown"
+            @pointerup="onImagePointerUp"
+            @pointercancel="onImagePointerCancel"
+            @contextmenu.prevent
+          />
+        </div>
       </div>
     </template>
 
@@ -903,10 +925,12 @@ onUnmounted(() => {
 .zoom-transition { transition: transform 0.25s cubic-bezier(0.25, 0.1, 0.25, 1); }
 .continuous { width: 100%; height: 100%; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .continuous.horizontal { display: flex; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; }
-.continuous-img { display: block; width: 100%; height: auto; }
-.continuous.limited:not(.horizontal) .continuous-img { max-width: min(100%, 980px); margin: 0 auto; }
-.continuous.horizontal .continuous-img { width: auto; height: 100%; max-width: none; flex: 0 0 auto; object-fit: contain; scroll-snap-align: center; }
-.continuous.horizontal.limited .continuous-img { max-width: 100vw; }
+.continuous-img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.img-placeholder { width: 100%; background: #1a1a1a; }
+.continuous.limited:not(.horizontal) .img-placeholder { max-width: min(100%, 980px); margin: 0 auto; }
+.continuous.limited:not(.horizontal) .continuous-img { max-width: 100%; }
+.continuous.horizontal .img-placeholder { width: auto; height: 100%; flex: 0 0 auto; aspect-ratio: 3/4; scroll-snap-align: center; }
+.continuous.horizontal .continuous-img { width: auto; height: 100%; max-width: none; object-fit: contain; }
 .toolbar-top {
   position: absolute; top: 0; left: 0; right: 0; z-index: 50;
   display: flex; align-items: center; gap: 12px;
