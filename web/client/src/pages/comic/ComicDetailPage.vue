@@ -7,6 +7,8 @@ import { resolveSourceKey, sourceTypeFromKey } from '@/utils/source'
 import { useSettingsStore } from '@/stores/settings'
 import ProxiedImage from '@/components/ProxiedImage.vue'
 import ComicCard from '@/components/ComicCard.vue'
+import RelatedSourcesDialog from '@/components/RelatedSourcesDialog.vue'
+import SourceMigrationDialog from '@/components/SourceMigrationDialog.vue'
 import { comicAuthorText, normalizeComicTags, parseComicTags } from '@/utils/comic-display'
 import { showToast, showDialog } from 'vant'
 import type { Comic, Chapter, ChapterGroup, Comment, ComicSource, History } from '@/types'
@@ -50,6 +52,8 @@ const detailNotice = ref('')
 const sources = ref<ComicSource[]>([])
 const detailSourceName = ref('')
 const isMobile = ref(false)
+const showRelatedDialog = ref(false)
+const showMigrationDialog = ref(false)
 
 function onResize() {
   isMobile.value = window.innerWidth < 600
@@ -763,6 +767,14 @@ onUnmounted(() => {
           <van-icon name="checked" class="action-icon" />
           <span>标记已读</span>
         </button>
+        <button class="action-btn" style="background:#ff9800;color:#fff;border-color:#ff9800" @click="showMigrationDialog = true">
+          <van-icon name="exchange" class="action-icon" />
+          <span>迁移源</span>
+        </button>
+        <button class="action-btn" style="background:#9b59b6;color:#fff;border-color:#9b59b6" @click="showRelatedDialog = true">
+          <van-icon name="cluster-o" class="action-icon" />
+          <span>关联源</span>
+        </button>
       </div>
 
       <!-- Action Buttons - Mobile (compact row + full-width row) -->
@@ -794,6 +806,14 @@ onUnmounted(() => {
           <button class="action-btn compact" style="background:#e74c3c;color:#fff;border-color:#e74c3c" @click="markAsReadHandler">
             <van-icon name="checked" class="action-icon" />
             <span>标记已读</span>
+          </button>
+          <button class="action-btn compact" style="background:#ff9800;color:#fff;border-color:#ff9800" @click="showMigrationDialog = true">
+            <van-icon name="exchange" class="action-icon" />
+            <span>迁移源</span>
+          </button>
+          <button class="action-btn compact" style="background:#9b59b6;color:#fff;border-color:#9b59b6" @click="showRelatedDialog = true">
+            <van-icon name="cluster-o" class="action-icon" />
+            <span>关联源</span>
           </button>
         </div>
         <div class="mobile-full-row">
@@ -976,6 +996,21 @@ onUnmounted(() => {
         </div>
       </div>
     </van-popup>
+
+    <!-- Related Sources Dialog -->
+    <RelatedSourcesDialog
+      v-model:show="showRelatedDialog"
+      :source-key="sourceKey"
+      :comic-id="comicId"
+      :comic-title="comic?.title || ''"
+    />
+
+    <!-- Source Migration Dialog -->
+    <SourceMigrationDialog
+      v-model:show="showMigrationDialog"
+      mode="single"
+      :comic="comic ? { id: comicId, name: comic.title || '', type: sourceTypeFromKey(sourceKey), sourceKey } : undefined"
+    />
   </div>
 </template>
 <style scoped>

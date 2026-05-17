@@ -18,6 +18,7 @@ function getTaskIcon(type: TaskType): string {
     case 'follow_update': return 'bell'
     case 'history_refresh': return 'replay'
     case 'source_update': return 'upgrade'
+    case 'source_migration': return 'exchange'
   }
 }
 
@@ -26,6 +27,7 @@ function getTaskTypeLabel(type: TaskType): string {
     case 'follow_update': return '检查追更'
     case 'history_refresh': return '刷新历史'
     case 'source_update': return '更新漫画源'
+    case 'source_migration': return '迁移漫画源'
   }
 }
 
@@ -85,6 +87,7 @@ function startTask(type: TaskType) {
     case 'follow_update': runFollowUpdateTask(task); break
     case 'history_refresh': runHistoryRefreshTask(task); break
     case 'source_update': runSourceUpdateTask(task); break
+    case 'source_migration': showToast('请从收藏页面使用迁移功能'); break
   }
 }
 

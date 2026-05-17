@@ -140,6 +140,26 @@ export interface SourceCapabilities {
   settings: Record<string, any> | null
 }
 
+export interface RelatedSource {
+  comic_id: string
+  id: string
+  sourceKey: string
+  title: string
+  author: string | null
+  status: string | null
+  cover_uri: string | null
+  description: string | null
+  tags: string[] | null
+  tags_json: string | null
+  page_count: number | null
+  link_status: 'candidate' | 'accepted' | 'rejected'
+  link_source: 'auto' | 'manual'
+  confidence: number
+  work_id: string
+  platform_name: string
+  platform_id: string
+}
+
 export interface SyncStatus {
   isDownloading: boolean
   isUploading: boolean

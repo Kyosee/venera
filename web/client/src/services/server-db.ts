@@ -253,3 +253,110 @@ export async function cancelFollowUpdateCheck(taskId: string): Promise<boolean> 
   const res = await apiPost<any>('/api/server-db/follow-updates/check-cancel', { taskId })
   return res?.ok === true && !res?.notFound
 }
+
+// === Source Migration ===
+
+export interface MigrationTaskState {
+  taskId: string
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+  total: number
+  checked: number
+  migrated: Array<{ id: string; type: number; title: string; targetId: string; targetSourceKey: string; targetTitle: string }>
+  skipped: Array<{ id: string; type: number; title: string }>
+  currentItem: string
+  error: string | null
+  startTime: number
+  endTime: number | null
+  notFound?: boolean
+}
+
+export interface SourceMigrationParams {
+  folder: string
+  favorites: Array<{ id: string; type: number; title?: string; name?: string }>
+  targetSourceKeys: string[]
+  migrateHistory?: boolean
+  replaceFavorite?: boolean
+  confirmEach?: boolean
+}
+
+export async function startSourceMigration(params: SourceMigrationParams): Promise<string> {
+  const res = await apiPost<any>('/api/server-db/source-migration/start', params)
+  return res?.taskId ?? ''
+}
+
+export async function getSourceMigrationStatus(taskId: string): Promise<MigrationTaskState | null> {
+  const res = await apiPost<any>('/api/server-db/source-migration/status', { taskId })
+  if (res?.notFound) return null
+  return {
+    taskId: res?.taskId ?? taskId,
+    status: res?.status ?? 'pending',
+    total: res?.total ?? 0,
+    checked: res?.checked ?? 0,
+    migrated: res?.migrated ?? [],
+    skipped: res?.skipped ?? [],
+    currentItem: res?.currentItem ?? '',
+    error: res?.error ?? null,
+    startTime: res?.startTime ?? 0,
+    endTime: res?.endTime ?? null,
+    notFound: false,
+  }
+}
+
+export async function cancelSourceMigration(taskId: string): Promise<boolean> {
+  const res = await apiPost<any>('/api/server-db/source-migration/cancel', { taskId })
+  return res?.ok === true && !res?.notFound
+}
+
+// === Related Sources ===
+
+export interface RelatedSource {
+  comic_id: string
+  id: string
+  sourceKey: string
+  title: string
+  author: string | null
+  status: string | null
+  cover_uri: string | null
+  description: string | null
+  tags: string[] | null
+  tags_json: string | null
+  page_count: number | null
+  link_status: 'candidate' | 'accepted' | 'rejected'
+  link_source: 'auto' | 'manual'
+  confidence: number
+  work_id: string
+  platform_name: string
+  platform_id: string
+}
+
+export async function getRelatedSources(sourceKey: string, comicId: string): Promise<RelatedSource[]> {
+  const res = await apiPost<{ sources: RelatedSource[] }>('/api/server-db/comic/related-sources', { sourceKey, comicId })
+  return res?.sources ?? []
+}
+
+export async function linkRelatedSource(
+  sourceKey: string, comicId: string,
+  targetSourceKey: string, targetComicId: string,
+): Promise<{ ok: boolean; workId: string }> {
+  return apiPost('/api/server-db/comic/link-related', { sourceKey, comicId, targetSourceKey, targetComicId })
+}
+
+export async function acceptRelatedSource(sourceKey: string, comicId: string, workId: string): Promise<{ ok: boolean }> {
+  return apiPost('/api/server-db/comic/accept-related', { sourceKey, comicId, workId })
+}
+
+export async function rejectRelatedSource(sourceKey: string, comicId: string, workId: string): Promise<{ ok: boolean }> {
+  return apiPost('/api/server-db/comic/reject-related', { sourceKey, comicId, workId })
+}
+
+export async function unlinkRelatedSource(sourceKey: string, comicId: string, workId: string): Promise<{ ok: boolean }> {
+  return apiPost('/api/server-db/comic/unlink-related', { sourceKey, comicId, workId })
+}
+
+export async function mirrorComic(sourceKey: string, comicId: string): Promise<{ ok: boolean }> {
+  return apiPost('/api/server-db/comic/mirror', { sourceKey, comicId })
+}
+
+export async function batchAutoLink(): Promise<{ ok: boolean; linked: number }> {
+  return apiPost('/api/server-db/related-source/auto-link', {})
+}

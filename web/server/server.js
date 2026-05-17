@@ -3372,7 +3372,7 @@ async function checkFollowUpdatesFolder(
             tags: newTags,
             updateTime: newUpdateTime,
             maxPage: comic.maxPage ?? comic.pageCount ?? null,
-          });
+          }, profileRoot);
         });
       } catch { /* best-effort */ }
 
@@ -3434,6 +3434,203 @@ async function checkFollowUpdatesFolder(
     taskState.endTime = Date.now();
   }
   return { checked, updated };
+}
+
+// Source migration: move favorites from one source to another
+async function runSourceMigration({
+  profileRoot,
+  folder,
+  favorites,
+  targetSourceKeys,
+  migrateHistory,
+  replaceFavorite,
+  cookieJar,
+  persistCookieJar,
+  recordProxyRequest,
+  taskState,
+}) {
+  taskState.status = "running";
+  taskState.startTime = Date.now();
+  taskState.total = favorites.length;
+  taskState.migrated = [];
+  taskState.skipped = [];
+
+  let completed = 0;
+  for (const item of favorites) {
+    if (taskState.cancelled) break;
+    completed++;
+    taskState.checked = completed;
+    taskState.currentItem = item.title || item.name || item.id;
+
+    let matched = null;
+    let matchedSourceKey = null;
+
+    try {
+      // Search each target source for this comic
+      for (const targetKey of targetSourceKeys) {
+        if (taskState.cancelled) break;
+        try {
+          const result = await executeSourceMethod({
+            profileRoot,
+            sourceKey: targetKey,
+            method: "search",
+            args: [item.title || item.name, 1, null],
+            cookieJar,
+            persistCookieJar,
+            recordProxyRequest,
+          });
+          const comics = result?.comics ?? [];
+          const candidates = comics.slice(0, 8);
+          if (candidates.length === 0) continue;
+
+          // Normalize search title
+          const normalizedSearchTitle = normalizeTitleForLink(item.title || item.name || "");
+
+          // Find exact title match
+          let bestMatch = null;
+          for (const comic of candidates) {
+            if (normalizeTitleForLink(comic.title || "") === normalizedSearchTitle) {
+              bestMatch = comic;
+              break;
+            }
+          }
+          // Fallback to first result
+          if (!bestMatch) {
+            bestMatch = candidates[0];
+          }
+
+          if (bestMatch && bestMatch.id) {
+            matched = bestMatch;
+            matchedSourceKey = targetKey;
+            break;
+          }
+        } catch {
+          // Source search may fail, try next source
+        }
+      }
+
+      if (matched && matchedSourceKey) {
+        // Mirror target comic to domain DB
+        try {
+          const sourceMeta = comicSourceMetadataForKey(profileRoot, matchedSourceKey);
+          await withDomainDb(profileRoot, (db) => {
+            const comicKey = `${matchedSourceKey}:${matched.id}`;
+            ensureSourcePlatform(db, matchedSourceKey, sourceMeta);
+            upsertComicToDomain(db, comicKey, { ...matched, id: matched.id });
+            autoLinkComic(db, comicKey);
+          });
+        } catch { /* best-effort mirror */ }
+
+        // Copy history from old comic to new comic
+        if (migrateHistory) {
+          try {
+            await withWritableHistoryDb(profileRoot, (db) => {
+              const oldType = Number(item.type || 0);
+              const oldRow = db.prepare(
+                "select * from history where id = ? and type = ?"
+              ).get(item.id, oldType);
+              if (oldRow) {
+                // Upsert history for new comic with same read progress
+                db.prepare(`
+                  insert or replace into history (
+                    id, title, subtitle, cover, time, type, ep, page,
+                    readEpisode, max_page, chapter_group
+                  ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `).run(
+                  matched.id,
+                  matched.title || oldRow.title,
+                  matched.subtitle || matched.subTitle || oldRow.subtitle,
+                  matched.cover || oldRow.cover,
+                  Date.now(),
+                  oldType,
+                  oldRow.ep || 0,
+                  oldRow.page || 0,
+                  oldRow.readEpisode || "",
+                  oldRow.max_page || null,
+                  oldRow.chapter_group || null,
+                );
+                // Also mirror basic info for the target comic
+                ensureComicBasicInfoSchema(db);
+                saveComicBasicInfo(db, matchedSourceKey, {
+                  id: matched.id,
+                  title: matched.title || oldRow.title,
+                  subtitle: matched.subtitle || matched.subTitle || oldRow.subtitle,
+                  cover: matched.cover || oldRow.cover,
+                  maxPage: oldRow.max_page,
+                });
+              }
+            });
+          } catch { /* best-effort history copy */ }
+        }
+
+        // Add target comic to favorites
+        try {
+          const newItem = {
+            id: String(matched.id),
+            name: String(matched.title || item.name),
+            author: String(matched.subtitle || matched.subTitle || matched.author || item.author || ""),
+            type: Number(item.type || 0),
+            tags: item.tags || "",
+            coverPath: String(matched.cover || item.coverPath || ""),
+            time: item.time || favoriteReadTime(),
+            displayOrder: item.displayOrder || 0,
+            translatedTags: item.translatedTags || "",
+            sourceKey: matchedSourceKey,
+            lastUpdateTime: item.lastUpdateTime || null,
+            hasNewUpdate: item.hasNewUpdate || false,
+            lastCheckTime: item.lastCheckTime || null,
+          };
+          await withWritableFavoriteDb(profileRoot, (db) => {
+            writeFavoriteItem(db, folder, newItem);
+          });
+        } catch { /* best-effort favorite add */ }
+
+        // Remove old favorite if replacing
+        if (replaceFavorite) {
+          try {
+            await withWritableFavoriteDb(profileRoot, (db) => {
+              ensureFavoriteFolderTable(db, folder);
+              db.prepare(
+                `delete from ${sqliteIdentifier(folder)} where id = ? and type = ?`
+              ).run(item.id, Number(item.type || 0));
+            });
+          } catch { /* best-effort remove */ }
+        }
+
+        taskState.migrated.push({
+          id: item.id,
+          type: item.type,
+          title: item.title || item.name || item.id,
+          targetId: matched.id,
+          targetSourceKey: matchedSourceKey,
+          targetTitle: matched.title || "",
+        });
+      } else {
+        taskState.skipped.push({
+          id: item.id,
+          type: item.type,
+          title: item.title || item.name || item.id,
+        });
+      }
+    } catch {
+      taskState.skipped.push({
+        id: item.id,
+        type: item.type,
+        title: item.title || item.name || item.id,
+      });
+    }
+
+    // 650ms delay between items (unless cancelled or last item)
+    if (!taskState.cancelled && completed < favorites.length) {
+      await new Promise((r) => setTimeout(r, 650));
+    }
+  }
+
+  taskState.status = "completed";
+  taskState.currentItem = `完成，迁移 ${taskState.migrated.length} 项，跳过 ${taskState.skipped.length} 项`;
+  taskState.endTime = Date.now();
+  markServerDbDirty(profileRoot, "source-migration");
+  tryAutoBackupToWebDav(profileRoot);
 }
 
 function ensureImageFavoritesDbSchema(db) {
@@ -3960,7 +4157,7 @@ async function withWritableComicInfoDb(profileRoot, callback) {
   }
 }
 
-function saveComicBasicInfo(db, sourceKey, comic) {
+function saveComicBasicInfo(db, sourceKey, comic, profileRoot) {
   const comicId = `${sourceKey}:${comic.id}`;
   const tags = Array.isArray(comic.tags)
     ? JSON.stringify(comic.tags)
@@ -3999,6 +4196,21 @@ function saveComicBasicInfo(db, sourceKey, comic) {
     comic.maxPage ?? comic.pageCount ?? null,
     now,
   );
+  // Mirror to domain DB for related-source auto-linking
+  if (profileRoot) {
+    try {
+      const sourceMeta = comicSourceMetadataForKey(profileRoot, sourceKey);
+      const domainDb = new (await import("node:sqlite")).DatabaseSync(domainDbPath(profileRoot));
+      try {
+        ensureDomainDbSchema(domainDb);
+        ensureSourcePlatform(domainDb, sourceKey, sourceMeta);
+        upsertComicToDomain(domainDb, comicId, comic);
+        autoLinkComic(domainDb, comicId);
+      } finally {
+        domainDb.close();
+      }
+    } catch { /* best-effort: domain DB mirroring is non-critical */ }
+  }
 }
 
 function markServerDbDirty(profileRoot, reason) {
@@ -4009,6 +4221,331 @@ function markServerDbDirty(profileRoot, reason) {
     dirtyReason: reason,
     dirtyAt: new Date().toISOString(),
   });
+}
+
+// ===== Domain Database (Related Sources) =====
+
+function domainDbPath(profileRoot) {
+  return join(profileRoot, "domain.db");
+}
+
+function normalizeTitleForLink(title) {
+  return String(title || "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[\[\]【】()（）{}<>《》:：,，.!！?？\-_\/\\|]/g, "");
+}
+
+function ensureDomainDbSchema(db) {
+  db.exec(`
+    create table if not exists comics (
+      comic_id text primary key,
+      title text not null,
+      author text,
+      status text,
+      cover_uri text,
+      description text,
+      tags_json text,
+      page_count integer
+    );
+  `);
+  db.exec(`
+    create table if not exists works (
+      work_id text primary key,
+      title text not null,
+      author text,
+      status text,
+      cover_uri text,
+      description text,
+      tags_json text
+    );
+  `);
+  db.exec(`
+    create table if not exists work_sources (
+      work_id text not null,
+      comic_id text not null,
+      link_status text not null default 'candidate',
+      link_source text not null default 'auto',
+      confidence real not null default 0.0,
+      primary key (work_id, comic_id)
+    );
+  `);
+  db.exec(`
+    create table if not exists source_platforms (
+      platform_id text primary key,
+      canonical_key text unique,
+      display_name text,
+      kind text not null default 'comic_source'
+    );
+  `);
+}
+
+async function openDomainDb(profileRoot) {
+  const { DatabaseSync } = await import("node:sqlite");
+  const filePath = domainDbPath(profileRoot);
+  mkdirSync(dirname(filePath), { recursive: true });
+  const db = new DatabaseSync(filePath);
+  ensureDomainDbSchema(db);
+  return db;
+}
+
+async function withDomainDb(profileRoot, callback) {
+  const db = await openDomainDb(profileRoot);
+  try {
+    return callback(db);
+  } finally {
+    db.close();
+  }
+}
+
+function ensureSourcePlatform(db, sourceKey, sourceMeta) {
+  const platformId = canonicalComicSourceKey(sourceKey);
+  const displayName = sourceMeta?.displayName || sourceMeta?.sourceName || sourceKey;
+  db.prepare(`
+    insert into source_platforms (platform_id, canonical_key, display_name, kind)
+    values (?, ?, ?, 'comic_source')
+    on conflict(platform_id) do update set
+      display_name = excluded.display_name
+  `).run(platformId, platformId, displayName);
+  return platformId;
+}
+
+function upsertComicToDomain(db, comicId, comic) {
+  const tags = Array.isArray(comic.tags)
+    ? JSON.stringify(comic.tags)
+    : (typeof comic.tags === 'object' && comic.tags !== null
+      ? JSON.stringify(Object.entries(comic.tags).flatMap(([ns, vals]) =>
+          Array.isArray(vals) ? vals.map(v => `${ns}:${v}`) : [`${ns}:${vals}`]))
+      : (comic.tags ?? null));
+  db.prepare(`
+    insert into comics (comic_id, title, author, status, cover_uri, description, tags_json, page_count)
+    values (?, ?, ?, ?, ?, ?, ?, ?)
+    on conflict(comic_id) do update set
+      title = excluded.title,
+      author = coalesce(excluded.author, comics.author),
+      status = coalesce(excluded.status, comics.status),
+      cover_uri = coalesce(excluded.cover_uri, comics.cover_uri),
+      description = coalesce(excluded.description, comics.description),
+      tags_json = coalesce(excluded.tags_json, comics.tags_json),
+      page_count = coalesce(excluded.page_count, comics.page_count)
+  `).run(
+    comicId,
+    comic.title ?? '',
+    comic.author ?? null,
+    comic.status ?? null,
+    comic.cover ?? comic.coverPath ?? null,
+    comic.description ?? null,
+    tags,
+    comic.maxPage ?? comic.pageCount ?? null,
+  );
+}
+
+function findAcceptedWorkId(db, comicId) {
+  const row = db.prepare(`
+    select work_id from work_sources
+    where comic_id = ? and link_status = 'accepted'
+  `).get(comicId);
+  return row ? row.work_id : null;
+}
+
+function createWork(db, title, author, status, coverUri, desc, tagsJson) {
+  const workId = randomUUID();
+  db.prepare(`
+    insert into works (work_id, title, author, status, cover_uri, description, tags_json)
+    values (?, ?, ?, ?, ?, ?, ?)
+  `).run(workId, title, author, status, coverUri, desc, tagsJson);
+  return workId;
+}
+
+function upsertWorkSource(db, workId, comicId, status, source, confidence) {
+  db.prepare(`
+    insert into work_sources (work_id, comic_id, link_status, link_source, confidence)
+    values (?, ?, ?, ?, ?)
+    on conflict(work_id, comic_id) do update set
+      link_status = excluded.link_status,
+      link_source = excluded.link_source,
+      confidence = max(work_sources.confidence, excluded.confidence)
+  `).run(workId, comicId, status, source, confidence);
+}
+
+function autoLinkComic(db, comicId) {
+  const comic = db.prepare("select * from comics where comic_id = ?").get(comicId);
+  if (!comic || !comic.title) return [];
+
+  const normalizedTitle = normalizeTitleForLink(comic.title);
+  if (!normalizedTitle) return [];
+
+  const allComics = db.prepare(
+    "select * from comics where comic_id != ?"
+  ).all(comicId);
+
+  const linkedIds = [];
+
+  for (const candidate of allComics) {
+    if (normalizeTitleForLink(candidate.title) !== normalizedTitle) continue;
+
+    // Check if already linked (any work_sources entry exists between them)
+    const existingLink = db.prepare(`
+      select 1 from work_sources ws1
+      join work_sources ws2 on ws1.work_id = ws2.work_id
+      where ws1.comic_id = ? and ws2.comic_id = ?
+    `).get(comicId, candidate.comic_id);
+    if (existingLink) continue;
+
+    const authorMatch = comic.author && candidate.author &&
+      comic.author.toLowerCase().trim() === candidate.author.toLowerCase().trim();
+    const confidence = authorMatch ? 0.95 : 0.72;
+
+    // Find or create work
+    let workId = findAcceptedWorkId(db, comicId) || findAcceptedWorkId(db, candidate.comic_id);
+    if (!workId) {
+      workId = createWork(
+        db, comic.title, comic.author, comic.status,
+        comic.cover_uri, comic.description, comic.tags_json
+      );
+      upsertWorkSource(db, workId, comicId, 'accepted', 'auto', 1.0);
+    }
+
+    upsertWorkSource(db, workId, candidate.comic_id, 'candidate', 'auto', confidence);
+    upsertWorkSource(db, workId, comicId, 'accepted', 'auto', 1.0);
+    linkedIds.push(candidate.comic_id);
+  }
+
+  return linkedIds;
+}
+
+function getRelatedSourcesForComic(db, comicId) {
+  const workRow = db.prepare(`
+    select work_id from work_sources
+    where comic_id = ? and link_status in ('accepted', 'candidate')
+  `).get(comicId);
+
+  if (!workRow) return [];
+
+  const sources = db.prepare(`
+    select
+      c.comic_id, c.title, c.author, c.status, c.cover_uri, c.description,
+      c.tags_json, c.page_count,
+      ws.link_status, ws.link_source, ws.confidence, ws.work_id,
+      sp.display_name as platform_name, sp.platform_id
+    from work_sources ws
+    join comics c on ws.comic_id = c.comic_id
+    left join source_platforms sp on sp.platform_id = (
+      select sp2.platform_id from source_platforms sp2
+      where sp2.canonical_key = substr(c.comic_id, 1, instr(c.comic_id || ':', ':') - 1)
+      or sp2.platform_id = substr(c.comic_id, 1, instr(c.comic_id || ':', ':') - 1)
+      limit 1
+    )
+    where ws.work_id = ?
+    order by ws.link_status = 'accepted' desc, ws.confidence desc
+  `).all(workRow.work_id);
+
+  return sources.map(s => {
+    // Extract sourceKey from comic_id ("sourceKey:comicId")
+    const colonIdx = s.comic_id.indexOf(':');
+    const sourceKey = colonIdx > 0 ? s.comic_id.substring(0, colonIdx) : '';
+    const id = colonIdx > 0 ? s.comic_id.substring(colonIdx + 1) : s.comic_id;
+    return {
+      ...s,
+      sourceKey,
+      id,
+      tags: s.tags_json ? safeJsonParse(s.tags_json) : undefined,
+      platformName: s.platform_name || sourceKey,
+    };
+  });
+}
+
+function safeJsonParse(text) {
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+function manuallyLinkComics(db, sourceComicId, targetSourceKey, targetComicId) {
+  const targetId = `${targetSourceKey}:${targetComicId}`;
+
+  // Verify target comic exists
+  const targetComic = db.prepare("select * from comics where comic_id = ?").get(targetId);
+  if (!targetComic) return { ok: false, error: "Target comic not found in domain DB" };
+
+  const sourceComic = db.prepare("select * from comics where comic_id = ?").get(sourceComicId);
+  if (!sourceComic) return { ok: false, error: "Source comic not found in domain DB" };
+
+  // Find or create work
+  let workId = findAcceptedWorkId(db, sourceComicId) || findAcceptedWorkId(db, targetId);
+  if (!workId) {
+    workId = createWork(
+      db, sourceComic.title, sourceComic.author, sourceComic.status,
+      sourceComic.cover_uri, sourceComic.description, sourceComic.tags_json
+    );
+  }
+
+  // Both get accepted status with manual source
+  upsertWorkSource(db, workId, sourceComicId, 'accepted', 'manual', 1.0);
+  upsertWorkSource(db, workId, targetId, 'accepted', 'manual', 1.0);
+
+  // Reject competing candidates in the same work
+  db.prepare(`
+    update work_sources set link_status = 'rejected'
+    where work_id = ? and comic_id not in (?, ?) and link_status = 'candidate'
+  `).run(workId, sourceComicId, targetId);
+
+  return { ok: true, workId };
+}
+
+function acceptRelatedSourceLink(db, comicId, workId) {
+  // Accept this candidate
+  db.prepare(`
+    update work_sources set link_status = 'accepted', confidence = 1.0
+    where work_id = ? and comic_id = ? and link_status = 'candidate'
+  `).run(workId, comicId);
+
+  // Reject other candidates in the same work
+  db.prepare(`
+    update work_sources set link_status = 'rejected'
+    where work_id = ? and comic_id != ? and link_status = 'candidate'
+  `).run(workId, comicId);
+
+  return { ok: true };
+}
+
+function rejectRelatedSourceLink(db, comicId, workId) {
+  db.prepare(`
+    update work_sources set link_status = 'rejected'
+    where work_id = ? and comic_id = ?
+  `).run(workId, comicId);
+  return { ok: true };
+}
+
+function unlinkRelatedSourceLink(db, comicId, workId) {
+  db.prepare(`
+    delete from work_sources
+    where work_id = ? and comic_id = ?
+  `).run(workId, comicId);
+
+  // Clean up work if no more sources
+  const remaining = db.prepare(
+    "select count(*) as cnt from work_sources where work_id = ?"
+  ).get(workId);
+  if (remaining?.cnt === 0) {
+    db.prepare("delete from works where work_id = ?").run(workId);
+  }
+
+  return { ok: true };
+}
+
+function batchAutoLinkAll(db) {
+  const comics = db.prepare("select comic_id from comics").all();
+  let linkedCount = 0;
+  const seen = new Set();
+
+  for (const { comic_id } of comics) {
+    if (seen.has(comic_id)) continue;
+    const newLinks = autoLinkComic(db, comic_id);
+    linkedCount += newLinks.length;
+    seen.add(comic_id);
+    for (const id of newLinks) seen.add(id);
+  }
+
+  return { ok: true, linked: linkedCount };
 }
 
 function listServerDbProfiles(serverDataRoot) {
@@ -5286,10 +5823,15 @@ async function extractSourceCapabilities({ profileRoot, sourceKey }) {
 
 // Async follow-update check tasks (survive browser close)
 const followUpdateTasks = new Map();
+// Async source migration tasks (survive browser close)
+const migrationTasks = new Map();
 function cleanStaleTasks() {
   const cutoff = Date.now() - 3600_000;
   for (const [id, t] of followUpdateTasks) {
     if (t.endTime && t.endTime < cutoff) followUpdateTasks.delete(id);
+  }
+  for (const [id, t] of migrationTasks) {
+    if (t.endTime && t.endTime < cutoff) migrationTasks.delete(id);
   }
 }
 setInterval(cleanStaleTasks, 600_000);
@@ -5619,7 +6161,7 @@ async function handleServerDbRoute({
           subtitle: history.subtitle || null,
           cover: history.cover || null,
           maxPage: history.maxPage,
-        });
+        }, profileRoot);
       }
     });
     markServerDbDirty(profileRoot, "history-upsert");
@@ -5949,7 +6491,7 @@ async function handleServerDbRoute({
           author: item.author || null,
           cover: item.coverPath || null,
           tags: item.tags ? String(item.tags).split(",") : null,
-        });
+        }, profileRoot);
       });
     }
     markServerDbDirty(profileRoot, "favorites-add");
@@ -6004,7 +6546,7 @@ async function handleServerDbRoute({
           author: item?.author || null,
           cover: item?.coverPath ?? item?.cover_path ?? item?.cover ?? null,
           tags: item?.tags ? (Array.isArray(item.tags) ? item.tags : String(item.tags).split(",")) : null,
-        });
+        }, profileRoot);
       });
     }
     markServerDbDirty(profileRoot, "favorites-info");
@@ -6856,7 +7398,7 @@ async function handleServerDbRoute({
         await withWritableComicInfoDb(profileRoot, (db) => {
           for (const comic of comics) {
             if (comic && typeof comic === 'object' && comic.id) {
-              saveComicBasicInfo(db, sourceKey, comic);
+              saveComicBasicInfo(db, sourceKey, comic, profileRoot);
             }
           }
         });
@@ -6921,7 +7463,7 @@ async function handleServerDbRoute({
         await withWritableComicInfoDb(profileRoot, (db) => {
           for (const comic of catComics) {
             if (comic && typeof comic === 'object' && comic.id) {
-              saveComicBasicInfo(db, sourceKey, comic);
+              saveComicBasicInfo(db, sourceKey, comic, profileRoot);
             }
           }
         });
@@ -6961,7 +7503,7 @@ async function handleServerDbRoute({
         await withWritableComicInfoDb(profileRoot, (db) => {
           for (const comic of rankingComics) {
             if (comic && typeof comic === 'object' && comic.id) {
-              saveComicBasicInfo(db, sourceKey, comic);
+              saveComicBasicInfo(db, sourceKey, comic, profileRoot);
             }
           }
         });
@@ -7046,7 +7588,7 @@ async function handleServerDbRoute({
     if (comic && typeof comic === 'object' && comic.id) {
       try {
         await withWritableComicInfoDb(profileRoot, (db) => {
-          saveComicBasicInfo(db, sourceKey, comic);
+          saveComicBasicInfo(db, sourceKey, comic, profileRoot);
         });
       } catch { /* best-effort */ }
     }
@@ -7190,7 +7732,7 @@ async function handleServerDbRoute({
           // Save explore data to DB (future requests benefit)
           for (const comic of allComics) {
             if (comic && typeof comic === 'object' && comic.id) {
-              saveComicBasicInfo(db, sourceKey, comic);
+              saveComicBasicInfo(db, sourceKey, comic, profileRoot);
             }
           }
           // Query cached info for all returned comics
@@ -7275,6 +7817,270 @@ async function handleServerDbRoute({
       });
     } catch { /* best-effort */ }
     sendJson(res, 200, { ok: true, items });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/comic/related-sources") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const { sourceKey, comicId } = payload;
+    if (!sourceKey || !comicId) {
+      throw createHttpError(400, "sourceKey and comicId are required");
+    }
+    const comicKey = `${sourceKey}:${comicId}`;
+    let sources = [];
+    try {
+      sources = await withDomainDb(profileRoot, (db) =>
+        getRelatedSourcesForComic(db, comicKey)
+      );
+    } catch { /* domain DB may not exist yet */ }
+    sendJson(res, 200, { ok: true, sources });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/comic/link-related") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const { sourceKey, comicId, targetSourceKey, targetComicId } = payload;
+    if (!sourceKey || !comicId || !targetSourceKey || !targetComicId) {
+      throw createHttpError(400, "sourceKey, comicId, targetSourceKey, targetComicId are required");
+    }
+    const sourceComicId = `${sourceKey}:${comicId}`;
+    const result = await withDomainDb(profileRoot, (db) =>
+      manuallyLinkComics(db, sourceComicId, targetSourceKey, targetComicId)
+    );
+    if (!result.ok) {
+      throw createHttpError(400, result.error || "Failed to link comics");
+    }
+    sendJson(res, 200, result);
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/comic/accept-related") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const { sourceKey, comicId, workId } = payload;
+    if (!sourceKey || !comicId || !workId) {
+      throw createHttpError(400, "sourceKey, comicId, workId are required");
+    }
+    const comicKey = `${sourceKey}:${comicId}`;
+    const result = await withDomainDb(profileRoot, (db) =>
+      acceptRelatedSourceLink(db, comicKey, workId)
+    );
+    sendJson(res, 200, result);
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/comic/reject-related") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const { sourceKey, comicId, workId } = payload;
+    if (!sourceKey || !comicId || !workId) {
+      throw createHttpError(400, "sourceKey, comicId, workId are required");
+    }
+    const comicKey = `${sourceKey}:${comicId}`;
+    const result = await withDomainDb(profileRoot, (db) =>
+      rejectRelatedSourceLink(db, comicKey, workId)
+    );
+    sendJson(res, 200, result);
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/comic/unlink-related") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const { sourceKey, comicId, workId } = payload;
+    if (!sourceKey || !comicId || !workId) {
+      throw createHttpError(400, "sourceKey, comicId, workId are required");
+    }
+    const comicKey = `${sourceKey}:${comicId}`;
+    const result = await withDomainDb(profileRoot, (db) =>
+      unlinkRelatedSourceLink(db, comicKey, workId)
+    );
+    sendJson(res, 200, result);
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/comic/mirror") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const { sourceKey, comicId } = payload;
+    if (!sourceKey || !comicId) {
+      throw createHttpError(400, "sourceKey and comicId are required");
+    }
+    // Fetch comic detail and mirror to domain DB
+    let comic = null;
+    try {
+      const result = await executeSourceMethod({
+        profileRoot,
+        sourceKey,
+        method: "getComicInfo",
+        args: [comicId],
+        cookieJar,
+        persistCookieJar,
+        recordProxyRequest,
+      });
+      comic = result?.comic ?? result ?? {};
+    } catch { /* source may fail, try basic info from cache */ }
+    if (comic && typeof comic === "object") {
+      const sourceMeta = comicSourceMetadataForKey(profileRoot, sourceKey);
+      await withDomainDb(profileRoot, (db) => {
+        const comicKey = `${sourceKey}:${comicId}`;
+        ensureSourcePlatform(db, sourceKey, sourceMeta);
+        upsertComicToDomain(db, comicKey, { ...comic, id: comicId });
+        autoLinkComic(db, comicKey);
+      });
+    }
+    sendJson(res, 200, { ok: true });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/related-source/auto-link") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const result = await withDomainDb(profileRoot, (db) =>
+      batchAutoLinkAll(db)
+    );
+    sendJson(res, 200, result);
+    return true;
+  }
+
+  // === Source Migration endpoints ===
+
+  if (parsedUrl.pathname === "/api/server-db/source-migration/start") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const folder = normalizeFavoriteFolderName(
+      payload.folder || appdataGet(profileRoot, "followUpdatesFolder"),
+      "folder",
+    );
+    if (!folder) {
+      throw createHttpError(400, "No folder configured for source migration");
+    }
+    const favorites = Array.isArray(payload.favorites)
+      ? payload.favorites.map((item) => ({
+          id: String(item.id || "").trim(),
+          type: Number(item.type),
+          title: item.title || item.name || "",
+          name: item.name || item.title || "",
+          author: item.author || "",
+          tags: item.tags || "",
+          coverPath: item.coverPath || item.cover_path || item.cover || "",
+          time: item.time || "",
+          displayOrder: item.displayOrder ?? item.display_order ?? 0,
+          translatedTags: item.translatedTags ?? item.translated_tags ?? "",
+          sourceKey: item.sourceKey ?? item.source_key ?? "",
+          lastUpdateTime: item.lastUpdateTime ?? item.last_update_time ?? null,
+          hasNewUpdate: item.hasNewUpdate ?? item.has_new_update ?? false,
+          lastCheckTime: item.lastCheckTime ?? item.last_check_time ?? null,
+        }))
+      : [];
+    if (favorites.length === 0) {
+      throw createHttpError(400, "No favorites to migrate");
+    }
+    const targetSourceKeys = Array.isArray(payload.targetSourceKeys)
+      ? payload.targetSourceKeys.map(String).filter(Boolean)
+      : [];
+    if (targetSourceKeys.length === 0) {
+      throw createHttpError(400, "No target sources selected");
+    }
+    const migrateHistory = payload.migrateHistory !== false;
+    const replaceFavorite = payload.replaceFavorite !== false;
+    const confirmEach = Boolean(payload.confirmEach);
+
+    const taskId = randomUUID();
+    const taskState = {
+      taskId,
+      status: "pending",
+      folder,
+      total: favorites.length,
+      checked: 0,
+      migrated: [],
+      skipped: [],
+      currentItem: "",
+      error: null,
+      startTime: 0,
+      endTime: null,
+    };
+    migrationTasks.set(taskId, taskState);
+    cleanStaleTasks();
+
+    // Start migration in background — intentionally not awaited
+    runSourceMigration({
+      profileRoot,
+      folder,
+      favorites,
+      targetSourceKeys,
+      migrateHistory,
+      replaceFavorite,
+      confirmEach,
+      cookieJar,
+      persistCookieJar,
+      recordProxyRequest,
+      taskState,
+    }).catch((e) => {
+      taskState.status = "failed";
+      taskState.error = e.message || "Unknown error";
+      taskState.endTime = Date.now();
+    });
+
+    sendJson(res, 200, { ok: true, taskId, profile: profileId });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/source-migration/status") {
+    const taskId = String(payload.taskId || "");
+    const taskState = migrationTasks.get(taskId);
+    if (!taskState) {
+      sendJson(res, 200, { ok: true, notFound: true, profile: profileId });
+      return true;
+    }
+    sendJson(res, 200, {
+      ok: true,
+      profile: profileId,
+      taskId: taskState.taskId,
+      status: taskState.status,
+      total: taskState.total,
+      checked: taskState.checked,
+      migrated: taskState.migrated,
+      skipped: taskState.skipped,
+      currentItem: taskState.currentItem,
+      error: taskState.error,
+      startTime: taskState.startTime,
+      endTime: taskState.endTime,
+    });
+    return true;
+  }
+
+  if (parsedUrl.pathname === "/api/server-db/source-migration/cancel") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return true;
+    }
+    const taskId = String(payload.taskId || "");
+    const taskState = migrationTasks.get(taskId);
+    if (!taskState || taskState.status !== "running") {
+      sendJson(res, 200, { ok: true, notFound: true, profile: profileId });
+      return true;
+    }
+    taskState.cancelled = true;
+    sendJson(res, 200, { ok: true, profile: profileId });
     return true;
   }
 

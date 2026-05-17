@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
-export type TaskType = 'follow_update' | 'history_refresh' | 'source_update'
+export type TaskType = 'follow_update' | 'history_refresh' | 'source_update' | 'source_migration'
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 
 export interface TaskEvent {

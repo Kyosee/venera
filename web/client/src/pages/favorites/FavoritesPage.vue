@@ -11,6 +11,7 @@ import { showDialog, showConfirmDialog, showToast } from 'vant'
 import { resolveSourceKey } from '@/utils/source'
 import { useSettingsStore } from '@/stores/settings'
 import ComicCard from '@/components/ComicCard.vue'
+import SourceMigrationDialog from '@/components/SourceMigrationDialog.vue'
 
 const router = useRouter()
 const settingsStore = useSettingsStore()
@@ -289,6 +290,19 @@ async function handleBatchDelete() {
 }
 
 // --- Batch move ---
+// --- Batch migrate ---
+const showMigrationDialog = ref(false)
+
+function handleBatchMigrate() {
+  if (selectedIds.value.size === 0) return
+  showMigrationDialog.value = true
+}
+
+function onMigrationDone() {
+  exitMultiSelect()
+  loadFavorites()
+}
+
 async function handleBatchMove(targetFolderId: string) {
   if (selectedIds.value.size === 0) return
   showMovePopup.value = false
@@ -323,6 +337,7 @@ async function handleBatchMove(targetFolderId: string) {
         <van-button size="small" @click="selectAll">全选</van-button>
         <van-button size="small" @click="deselectAll">取消全选</van-button>
         <van-button size="small" type="primary" @click="showMovePopup = true" :disabled="selectedIds.size === 0">移动</van-button>
+        <van-button size="small" style="background:#9b59b6;color:#fff;border-color:#9b59b6" @click="handleBatchMigrate" :disabled="selectedIds.size === 0">迁移源</van-button>
         <van-button size="small" type="danger" @click="handleBatchDelete" :disabled="selectedIds.size === 0">删除</van-button>
         <van-button size="small" @click="exitMultiSelect">取消</van-button>
       </div>
@@ -522,6 +537,15 @@ async function handleBatchMove(targetFolderId: string) {
         </div>
       </div>
     </van-popup>
+
+    <!-- Source Migration Dialog -->
+    <SourceMigrationDialog
+      v-model:show="showMigrationDialog"
+      mode="batch"
+      :comics="selectedFavorites"
+      :folder="selectedFolderId ?? undefined"
+      @done="onMigrationDone"
+    />
   </div>
 </template>
 <style scoped>
