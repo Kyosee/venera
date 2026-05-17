@@ -361,8 +361,8 @@ watch(() => props.show, (val) => {
                   <span v-if="comic.subtitle || comic.author" class="result-subtitle">{{ comic.subtitle || comic.author }}</span>
                 </div>
                 <div class="result-actions">
-                  <van-button size="medium" plain @click.stop="handlePreviewResult(comic)">预览</van-button>
-                  <van-button size="medium" type="primary" @click.stop="handleLinkResult(comic)">关联</van-button>
+                  <van-button plain @click.stop="handlePreviewResult(comic)">预览</van-button>
+                  <van-button type="primary" @click.stop="handleLinkResult(comic)">关联</van-button>
                 </div>
               </div>
             </div>
@@ -418,7 +418,7 @@ watch(() => props.show, (val) => {
                   class="advanced-input"
                   placeholder="漫画 ID"
                 />
-                <van-button size="medium" type="primary" @click="handleAdvancedLink">关联</van-button>
+                <van-button type="primary" @click="handleAdvancedLink">关联</van-button>
               </div>
             </div>
           </div>
