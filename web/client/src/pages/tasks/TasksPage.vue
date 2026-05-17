@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { showToast, showConfirmDialog } from 'vant'
+import { useRoute, useRouter } from 'vue-router'
 import { listHistory, getComicSources, upsertHistory } from '@/services/server-db'
 import { apiPost } from '@/services/api'
 import { useTasksStore, type Task, type TaskType, type TaskStatus } from '@/stores/tasks'
 
 const store = useTasksStore()
+const route = useRoute()
+const router = useRouter()
 
 const activeTab = ref(0)
 const showActionSheet = ref(false)
@@ -134,7 +137,11 @@ async function runFollowUpdateTask(task: Task) {
           store.updateTask(task.id, { progress: state.checked, total: state.total, currentItem: state.currentItem || task.currentItem })
           if (state.status === 'completed') {
             stopPolling()
-            store.updateTask(task.id, { progress: state.checked, total: state.checked, currentItem: state.currentItem || `完成，检查了 ${state.checked} 项`, status: 'completed', endTime: state.endTime ?? Date.now() })
+            const events = Array.isArray(state.updated) ? state.updated.map((u: any) => ({
+              comic: u?.title || u?.id || '',
+              result: u?.updateTime ? `更新于 ${new Date(u.updateTime).toLocaleDateString()}` : '有更新',
+            })) : []
+            store.updateTask(task.id, { progress: state.checked, total: state.checked, currentItem: state.currentItem || `完成，检查了 ${state.checked} 项`, status: 'completed', endTime: state.endTime ?? Date.now(), events })
             store.clearActiveFollowTaskId()
             resolve()
           } else if (state.status === 'failed') {
@@ -279,7 +286,11 @@ async function reconnectToTask(serverTaskId: string) {
     store.addTask(task)
 
     if (state.status === 'completed' || state.status === 'failed' || state.status === 'cancelled') {
-      store.updateTask(task.id, { progress: state.checked, total: state.checked, status: state.status as TaskStatus, currentItem: state.currentItem || '', error: state.error ?? undefined, endTime: state.endTime ?? Date.now() })
+      const events = state.status === 'completed' && Array.isArray(state.updated) ? state.updated.map((u: any) => ({
+        comic: u?.title || u?.id || '',
+        result: u?.updateTime ? `更新于 ${new Date(u.updateTime).toLocaleDateString()}` : '有更新',
+      })) : []
+      store.updateTask(task.id, { progress: state.checked, total: state.checked, status: state.status as TaskStatus, currentItem: state.currentItem || '', error: state.error ?? undefined, endTime: state.endTime ?? Date.now(), events })
       store.clearActiveFollowTaskId()
       return
     }
@@ -333,6 +344,11 @@ onMounted(() => {
   const storedTaskId = store.getActiveFollowTaskId()
   if (storedTaskId) {
     reconnectToTask(storedTaskId)
+  }
+  const autoStart = route.query.autoStart as string | undefined
+  if (autoStart === 'follow_update') {
+    router.replace({ path: '/tasks', query: {} })
+    startTask('follow_update')
   }
 })
 </script>
@@ -446,6 +462,12 @@ onMounted(() => {
                 size="20"
               />
             </div>
+            <div v-if="task.events && task.events.length" class="task-events">
+              <div v-for="(evt, idx) in task.events" :key="idx" class="task-event-item">
+                <span class="event-comic">{{ evt.comic }}</span>
+                <span class="event-result">{{ evt.result }}</span>
+              </div>
+            </div>
           </div>
         </div>
       </van-tab>
@@ -552,6 +574,34 @@ onMounted(() => {
 
 .task-progress {
   margin-top: 10px;
+}
+
+.task-events {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.task-event-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.event-comic {
+  color: #333;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-result {
+  color: #4f6ef7;
+  margin-left: 8px;
+  white-space: nowrap;
 }
 
 .fab-container {

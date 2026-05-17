@@ -4,6 +4,11 @@ import { ref, computed } from 'vue'
 export type TaskType = 'follow_update' | 'history_refresh' | 'source_update'
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 
+export interface TaskEvent {
+  comic: string
+  result: string
+}
+
 export interface Task {
   id: string
   type: TaskType
@@ -16,6 +21,7 @@ export interface Task {
   startTime: number
   endTime?: number
   serverTaskId?: string
+  events?: TaskEvent[]
 }
 
 const STORAGE_KEY = 'venera_tasks_history'

@@ -71,6 +71,9 @@ export async function listFavorites(folder?: string): Promise<FavoriteItem[]> {
     const res = await apiPost<any>('/api/server-db/favorites/list', { folder, limit: 500, offset })
     const pageItems = res?.items ?? res?.favorites ?? res ?? []
     total = Number(res?.total ?? offset + pageItems.length)
+    for (const item of pageItems) {
+      item.folder = folder
+    }
     items.push(...pageItems)
     if (pageItems.length === 0 || pageItems.length < 500) break
     offset += pageItems.length

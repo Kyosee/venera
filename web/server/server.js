@@ -6162,11 +6162,8 @@ async function handleServerDbRoute({
       taskState.currentItem = results.updated.length > 0
         ? `完成，发现 ${results.updated.length} 个更新`
         : `完成，检查了 ${results.checked} 项，无更新`;
-      // Auto-backup to WebDAV if there are updates
-      if (results.updated.length > 0) {
-        markServerDbDirty(profileRoot, "follow-updates-check");
-        tryAutoBackupToWebDav(profileRoot);
-      }
+      markServerDbDirty(profileRoot, "follow-updates-check");
+      tryAutoBackupToWebDav(profileRoot);
     }).catch((e) => {
       taskState.status = "failed";
       taskState.error = e.message || "Unknown error";

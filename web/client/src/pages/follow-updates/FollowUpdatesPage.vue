@@ -3,8 +3,9 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import ComicCard from '@/components/ComicCard.vue'
-import { getComicSources, listFavorites, listFolders, listHistory, startAsyncFollowUpdateCheck } from '@/services/server-db'
+import { getComicSources, listFavorites, listFolders, listHistory } from '@/services/server-db'
 import { useSettingsStore } from '@/stores/settings'
+import { useTasksStore } from '@/stores/tasks'
 import type { ComicSource, FavoriteFolder, FavoriteItem, History } from '@/types'
 import { resolveSourceKey } from '@/utils/source'
 
@@ -15,7 +16,6 @@ const sources = ref<ComicSource[]>([])
 const favorites = ref<FavoriteItem[]>([])
 const histories = ref<History[]>([])
 const loading = ref(false)
-const checking = ref(false)
 const activeTab = ref<'updates' | 'unread' | 'ended'>('updates')
 
 const selectedFolder = computed(() => settingsStore.settings.followUpdatesFolder)
@@ -143,19 +143,12 @@ function isEndedComic(item: FavoriteItem): boolean {
 async function checkNow() {
   const folder = selectedFolder.value
   if (!folder) return
-  checking.value = true
-  try {
-    const taskId = await startAsyncFollowUpdateCheck(folder)
-    if (taskId) {
-      showToast('已创建追更检查任务')
-      router.push('/tasks')
-    } else {
-      showToast('启动检查失败')
-    }
-  } catch {
-    showToast('启动检查失败')
+  const tasksStore = useTasksStore()
+  if (tasksStore.currentTasks.some(t => t.type === 'follow_update')) {
+    showToast('追更检查任务正在运行中')
+    return
   }
-  checking.value = false
+  router.push({ path: '/tasks', query: { autoStart: 'follow_update' } })
 }
 
 function chooseFolder(folder: FavoriteFolder) {
@@ -203,7 +196,7 @@ function sourceNameFor(item: FavoriteItem) {
             <van-button size="small" icon="exchange">切换</van-button>
           </template>
         </van-popover>
-        <van-button size="small" icon="replay" :loading="checking" @click="checkNow">检查</van-button>
+        <van-button size="small" icon="replay" @click="checkNow">检查</van-button>
       </div>
 
       <van-tabs v-model:active="activeTab" sticky>

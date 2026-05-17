@@ -124,6 +124,24 @@ const filteredItems = computed(() => {
   return list
 })
 
+function isToday(ts: number): boolean {
+  const now = new Date()
+  const date = new Date(ts)
+  return date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
+}
+
+function isYesterday(ts: number): boolean {
+  const now = new Date()
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  const date = new Date(ts)
+  return date.getFullYear() === yesterday.getFullYear() &&
+    date.getMonth() === yesterday.getMonth() &&
+    date.getDate() === yesterday.getDate()
+}
+
 function isThisWeek(ts: number): boolean {
   const now = new Date()
   const date = new Date(ts)
@@ -133,7 +151,9 @@ function isThisWeek(ts: number): boolean {
   return date >= startOfWeek
 }
 
-const thisWeekItems = computed(() => filteredItems.value.filter(i => isThisWeek(i.time)))
+const todayItems = computed(() => filteredItems.value.filter(i => isToday(i.time)))
+const yesterdayItems = computed(() => filteredItems.value.filter(i => isYesterday(i.time)))
+const thisWeekItems = computed(() => filteredItems.value.filter(i => !isToday(i.time) && !isYesterday(i.time) && isThisWeek(i.time)))
 const earlierItems = computed(() => filteredItems.value.filter(i => !isThisWeek(i.time)))
 
 function goComic(item: History) {
@@ -316,6 +336,68 @@ function setStatusFilter(status: 'all' | 'uncompleted' | 'completed') {
         <van-empty description="暂无历史记录" />
       </div>
       <div v-else class="history-content">
+        <!-- Today section -->
+        <template v-if="todayItems.length">
+          <div class="section-header">今天</div>
+          <div class="history-grid" :style="gridStyle">
+            <div
+              v-for="item in todayItems"
+              :key="`${itemKey(item)}-t`"
+              class="history-card-wrap"
+              :class="{ selected: isSelected(item) }"
+              @click.stop="onCardClick(item)"
+              @contextmenu="onCardContextMenu($event, item)"
+              @touchstart.passive="onCardTouchStart(item)"
+              @touchend="onCardTouchEnd()"
+              @touchcancel="onCardTouchEnd()"
+            >
+              <van-checkbox
+                v-if="multiSelectMode"
+                :model-value="isSelected(item)"
+                class="card-checkbox"
+                @click.stop="toggleSelect(item)"
+              />
+              <ComicCard
+                :comic="item"
+                :source-key="itemSourceKey(item)"
+                :source-name="getSourceName(item)"
+                :read-progress="{ page: item.page, maxPage: item.maxPage ?? undefined }"
+              />
+            </div>
+          </div>
+        </template>
+
+        <!-- Yesterday section -->
+        <template v-if="yesterdayItems.length">
+          <div class="section-header">昨天</div>
+          <div class="history-grid" :style="gridStyle">
+            <div
+              v-for="item in yesterdayItems"
+              :key="`${itemKey(item)}-y`"
+              class="history-card-wrap"
+              :class="{ selected: isSelected(item) }"
+              @click.stop="onCardClick(item)"
+              @contextmenu="onCardContextMenu($event, item)"
+              @touchstart.passive="onCardTouchStart(item)"
+              @touchend="onCardTouchEnd()"
+              @touchcancel="onCardTouchEnd()"
+            >
+              <van-checkbox
+                v-if="multiSelectMode"
+                :model-value="isSelected(item)"
+                class="card-checkbox"
+                @click.stop="toggleSelect(item)"
+              />
+              <ComicCard
+                :comic="item"
+                :source-key="itemSourceKey(item)"
+                :source-name="getSourceName(item)"
+                :read-progress="{ page: item.page, maxPage: item.maxPage ?? undefined }"
+              />
+            </div>
+          </div>
+        </template>
+
         <!-- This week section -->
         <template v-if="thisWeekItems.length">
           <div class="section-header">本周</div>

@@ -126,6 +126,12 @@ onUnmounted(() => {
 
 <template>
   <div class="explore-page">
+    <!-- Search entry -->
+    <div class="explore-search-bar" @click="$router.push('/search')">
+      <van-icon name="search" size="16" />
+      <span>搜索漫画</span>
+    </div>
+
     <!-- Empty state when no sources -->
     <van-empty v-if="!sources.length && !loading['__init']" description="暂无漫画源" />
 
@@ -214,6 +220,19 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   position: relative;
+}
+
+.explore-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 12px;
+  padding: 8px 14px;
+  background: #f5f5f5;
+  border-radius: 20px;
+  color: #999;
+  font-size: 14px;
+  cursor: pointer;
 }
 
 .explore-section {
