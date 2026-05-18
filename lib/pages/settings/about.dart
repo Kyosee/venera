@@ -300,16 +300,27 @@ Future<void> _startWindowsUpdate(AppUpdateInfo updateInfo) async {
   }
 
   try {
-    await AppDio().download(
+    final dio = AppDio();
+    final response = await dio.get<ResponseBody>(
       updateInfo.windowsPackageUrl!,
-      tempFile.path,
       cancelToken: cancelToken,
-      onReceiveProgress: (received, total) {
-        downloadedBytes = received;
-        totalBytes = total;
-        rebuildDialog?.call(() {});
-      },
+      options: Options(responseType: ResponseType.stream),
     );
+    final body = response.data!;
+    totalBytes = int.tryParse(
+      body.headers['content-length']?.first.toString() ?? '',
+    ) ?? 0;
+    final sink = tempFile.openWrite();
+    final subscription = body.stream.listen(null);
+    subscription.onData((chunk) {
+      downloadedBytes += chunk.length;
+      rebuildDialog?.call(() {});
+      sink.add(chunk);
+    });
+    subscription.onDone(() {});
+    subscription.onError((e) => throw e);
+    await subscription.asFuture();
+    await sink.close();
   } catch (e) {
     if (cancelled) return;
     errorMsg = e.toString();
