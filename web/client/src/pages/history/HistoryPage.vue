@@ -48,6 +48,7 @@ const gridStyle = computed(() => {
 
 onMounted(async () => {
   window.addEventListener('resize', handleResize)
+  document.addEventListener('visibilitychange', onVisibilityChange)
   await settingsStore.loadSettings()
   viewMode.value = settingsStore.settings.thumbnailMode === 'brief' ? 'brief' : 'detailed'
   await loadData()
@@ -55,8 +56,13 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   if (undoTimer.value) clearTimeout(undoTimer.value)
 })
+
+function onVisibilityChange() {
+  if (document.visibilityState === 'visible') loadData()
+}
 
 async function loadData() {
   loading.value = true
