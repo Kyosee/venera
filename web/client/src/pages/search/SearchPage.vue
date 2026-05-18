@@ -6,8 +6,8 @@ import { useSettingsStore } from '@/stores/settings'
 import AggregatedSearchResults from './AggregatedSearchResults.vue'
 import type { ComicSource, SourceCapabilities, SourceSearchOption, TagSuggestion } from '@/types'
 import { loadTagData, matchSuggestions, isURL, getTagSuggestionLabel } from '@/utils/tags-translation'
-import { parseOptionEntry, initSearchOptions, toggleMultiSelectOption as toggleMultiOpt, isMultiSelected as isMultiOpt } from '@/utils/options'
-import { applyAutoLangFilter } from '@/utils/search'
+import { parseOptionEntry, initSearchOptions as initOpts, toggleMultiSelectOption as toggleMultiOpt, isMultiSelected as isMultiOpt } from '@/utils/options'
+import { applyAutoLangFilter as applyLangFilter } from '@/utils/search'
 
 const router = useRouter()
 const route = useRoute()
@@ -44,7 +44,7 @@ const enableTagsSuggestions = computed(() => {
 
 watch(selectedSourceKey, async (key) => {
   if (!key || capabilities.value[key] !== undefined) {
-    initSearchOptions()
+    localInitSearchOptions()
     return
   }
   capabilities.value[key] = null
@@ -52,27 +52,11 @@ watch(selectedSourceKey, async (key) => {
     const caps = await getSourceCapabilities(key)
     capabilities.value[key] = caps
   } catch { /* ignore */ }
-  initSearchOptions()
+  localInitSearchOptions()
 })
 
-function initSearchOptions() {
-  const opts = currentSearchOptions.value
-  searchOptions.value = opts.map(opt => {
-    if (opt.default != null) {
-      return Array.isArray(opt.default) ? JSON.stringify(opt.default) : String(opt.default)
-    }
-    if (opt.options.length > 0) {
-      const first = opt.options[0]
-      return first.includes('-') ? first.split('-')[0] : first
-    }
-    return ''
-  })
-}
-
-function parseOptionEntry(entry: string): { key: string, label: string } {
-  const idx = entry.indexOf('-')
-  if (idx > 0) return { key: entry.substring(0, idx), label: entry.substring(idx + 1) }
-  return { key: entry, label: entry }
+function localInitSearchOptions() {
+  searchOptions.value = initOpts(currentSearchOptions.value)
 }
 
 function localToggleMultiSelectOption(groupIndex: number, optionKey: string) {

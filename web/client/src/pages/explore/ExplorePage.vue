@@ -5,7 +5,7 @@ import { apiPost } from '@/services/api'
 import { getComicSources, getSourceCapabilities } from '@/services/server-db'
 import { useSettingsStore } from '@/stores/settings'
 import ComicCard from '@/components/ComicCard.vue'
-import type { ComicSource, SourceCapabilities } from '@/types'
+import type { SourceCapabilities } from '@/types'
 
 interface ExploreTab {
   sourceKey: string
@@ -42,7 +42,6 @@ function tabKey(tab: ExploreTab): string {
 }
 
 const currentTab = computed(() => tabs.value[activeTab.value])
-const currentTabKey = computed(() => currentTab.value ? tabKey(currentTab.value) : '')
 
 const gridStyle = computed(() => {
   const scale = Number(settingsStore.settings.thumbnailSize || 1)
