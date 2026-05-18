@@ -1818,7 +1818,7 @@ function resolveWebDavConfig(payload, webDavConfigPath) {
   return normalizeWebDavConfig(payload);
 }
 
-// WebDAV sync log (in-memory, max 100 entries)
+// WebDAV sync log (in-memory, max 100 entries, persisted to implicitData)
 const syncLogs = [];
 const MAX_SYNC_LOGS = 100;
 function addSyncLog(action, fileName, success, error) {
@@ -1830,6 +1830,55 @@ function addSyncLog(action, fileName, success, error) {
     error: error || null,
   });
   if (syncLogs.length > MAX_SYNC_LOGS) syncLogs.length = MAX_SYNC_LOGS;
+  persistSyncLogs(syncLogs);
+}
+
+function persistSyncLogs(logs) {
+  try {
+    for (const profileRoot of allServerDbProfileRoots()) {
+      const filePath = join(profileRoot, "implicitData.json");
+      let data = {};
+      try { data = JSON.parse(readFileSync(filePath, "utf8")); } catch { /* may not exist */ }
+      if (!data || typeof data !== "object") data = {};
+      data.syncLogs = logs.slice(0, MAX_SYNC_LOGS);
+      mkdirSync(profileRoot, { recursive: true });
+      writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
+    }
+  } catch { /* best-effort */ }
+}
+
+function loadSyncLogs(profileRoot) {
+  try {
+    const filePath = join(profileRoot, "implicitData.json");
+    if (!existsSync(filePath)) return;
+    const data = JSON.parse(readFileSync(filePath, "utf8"));
+    if (data && Array.isArray(data.syncLogs)) {
+      for (const entry of data.syncLogs) {
+        if (syncLogs.length >= MAX_SYNC_LOGS) break;
+        if (!syncLogs.some(e => e.time === entry.time && e.action === entry.action)) {
+          syncLogs.push(entry);
+        }
+      }
+      syncLogs.sort((a, b) => b.time - a.time);
+    }
+  } catch { /* best-effort */ }
+}
+
+function allServerDbProfileRoots() {
+  const roots = [];
+  try {
+    const profilesDir = join(resolve(serverDataRoot), "profiles");
+    if (existsSync(profilesDir)) {
+      for (const entry of readdirSync(profilesDir, { withFileTypes: true })) {
+        if (entry.isDirectory()) roots.push(join(profilesDir, entry.name));
+      }
+    }
+  } catch { /* best-effort */ }
+  if (roots.length === 0) {
+    // Fallback: default profile
+    roots.push(serverDbProfileRoot(serverDataRoot, "default"));
+  }
+  return roots;
 }
 
 function normalizeWebDavBackupName(rawName, { required = false } = {}) {
@@ -5877,6 +5926,7 @@ async function handleServerDbRoute({
     payload.profile || parsedUrl.searchParams.get("profile"),
   );
   const profileRoot = serverDbProfileRoot(serverDataRoot, profileId);
+  loadSyncLogs(profileRoot);
 
   if (parsedUrl.pathname === "/api/server-db/status") {
     sendJson(res, 200, serverDbStatus(serverDataRoot, profileId));

@@ -108,7 +108,7 @@ export async function triggerUpload() {
   const previousVersion = dataVersionFrom(previousAppdata)
   const nextVersion = previousVersion + 1
   const daysSinceEpoch = Math.floor(Date.now() / 86400000)
-  const fileName = `${daysSinceEpoch}-${nextVersion}.venera`
+  const fileName = `${daysSinceEpoch}-${nextVersion}.web.venera`
   const localAppdata = appdataForLocalSave(previousAppdata, nextVersion)
   const uploadAppdata = appdataForUpload(previousAppdata, nextVersion, config.disableSyncFields)
   const payload: Record<string, unknown> = {
@@ -128,6 +128,18 @@ export async function triggerUpload() {
     await apiPost('/api/server-db/appdata/save', { data: previousAppdata }).catch(() => {})
     throw error
   }
+}
+
+export interface SyncLogEntry {
+  time: number
+  action: string
+  fileName: string | null
+  success: boolean
+  error: string | null
+}
+
+export function getSyncLogs() {
+  return apiPost<{ ok: boolean; logs: SyncLogEntry[] }>('/sync/webdav/logs')
 }
 
 export async function getSyncStatus(): Promise<WebDavSyncStatus> {
