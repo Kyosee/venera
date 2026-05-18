@@ -138,6 +138,15 @@ Future<File> exportAppData([bool sync = true]) async {
   } catch (e, s) {
     Log.warning('Export Data', 'Failed to checkpoint domain database: $e\n$s');
   }
+  for (final dbName in ['history.db', 'local_favorite.db']) {
+    try {
+      final db = sqlite3.open(FilePath.join(App.dataPath, dbName));
+      db.execute('PRAGMA wal_checkpoint(TRUNCATE);');
+      db.dispose();
+    } catch (e, s) {
+      Log.warning('Export Data', 'Failed to checkpoint $dbName: $e\n$s');
+    }
+  }
   await Isolate.run(() {
     var zipFile = ZipFile.open(cacheFilePath);
     var historyFile = FilePath.join(dataPath, "history.db");
