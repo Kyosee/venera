@@ -268,6 +268,9 @@ const taskActions = [
 
 // Reconnect to a server-side task that was started in a previous browser session
 async function reconnectToTask(serverTaskId: string) {
+  if (store.tasks.some(t => t.serverTaskId === serverTaskId)) {
+    return
+  }
   const { getFollowUpdateCheckStatus, cancelFollowUpdateCheck } = await import('@/services/server-db')
   try {
     const state = await getFollowUpdateCheckStatus(serverTaskId)

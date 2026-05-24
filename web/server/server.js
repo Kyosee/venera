@@ -7221,12 +7221,68 @@ async function handleServerDbRoute({
     return true;
   }
 
+  if (parsedUrl.pathname === "/api/server-db/sync/safety-check") {
+    const safetyMetadata = readServerDbMetadata(profileRoot);
+    const favDbCheckPath = serverDbEntryPath(profileRoot, "local_favorite.db");
+    const favoriteDbEmpty = !existsSync(favDbCheckPath) || statSync(favDbCheckPath).size === 0;
+    let followFolderEmpty = false;
+    if (!favoriteDbEmpty) {
+      const appdataCheckPath = join(profileRoot, "appdata.json");
+      let followFolder = null;
+      try {
+        if (existsSync(appdataCheckPath)) {
+          const ad = JSON.parse(readFileSync(appdataCheckPath, "utf8"));
+          followFolder = ad?.settings?.followUpdatesFolder;
+        }
+      } catch { /* ignore */ }
+      if (followFolder) {
+        try {
+          const data = readFileSync(favDbCheckPath);
+          const extracted = extractSqliteData(data);
+          const table = extracted.tables.find(t => t.name === followFolder);
+          followFolderEmpty = !table || table.rows.length === 0;
+        } catch { /* can't determine */ }
+      }
+    }
+    sendJson(res, 200, {
+      ok: true,
+      profile: profileId,
+      hasCompletedInitialSync: safetyMetadata.hasCompletedInitialSync === true,
+      favoriteDbEmpty,
+      followFolderEmpty,
+    });
+    return true;
+  }
+
   if (parsedUrl.pathname === "/api/server-db/upload/webdav") {
     if (req.method !== "POST") {
       sendJson(res, 405, { error: "Method not allowed" });
       return true;
     }
     const config = resolveWebDavConfig(payload, webDavConfigPath);
+
+    // Safety: block upload if initial sync not completed (unless force)
+    const uploadMetadata = readServerDbMetadata(profileRoot);
+    if (!uploadMetadata.hasCompletedInitialSync && payload.force !== true) {
+      sendJson(res, 409, {
+        ok: false,
+        error: "Initial sync not completed. Download first.",
+        code: "INITIAL_SYNC_REQUIRED",
+      });
+      return true;
+    }
+
+    // Safety: block upload if favorite db is empty
+    const favDbUploadPath = serverDbEntryPath(profileRoot, "local_favorite.db");
+    if (!existsSync(favDbUploadPath) || statSync(favDbUploadPath).size === 0) {
+      sendJson(res, 409, {
+        ok: false,
+        error: "Favorite database is empty. Upload blocked to prevent data loss.",
+        code: "FAVORITE_DB_EMPTY",
+      });
+      return true;
+    }
+
     const fileName = normalizeWebDavBackupName(payload.fileName, {
       required: true,
     });
@@ -7393,6 +7449,7 @@ async function handleServerDbRoute({
       size: downloaded.size,
       sha256: downloaded.sha256,
       syncedAt: Date.now(),
+      hasCompletedInitialSync: true,
     });
     sendJson(res, 200, {
       ok: true,
@@ -9322,6 +9379,41 @@ export function createServer(options = {}) {
       const stored = readStoredWebDavConfig(webDavConfigPath);
       if (!stored || !stored.url) return;
       const config = normalizeWebDavConfig(stored);
+
+      // Safety: block auto-upload if initial sync not completed
+      const metadata = readServerDbMetadata(profileRoot);
+      if (!metadata.hasCompletedInitialSync) {
+        addSyncLog("auto-upload", null, false, "Blocked: initial sync not completed");
+        return;
+      }
+
+      // Safety: block auto-upload if favorite db or follow folder is empty
+      const favDbPath = serverDbEntryPath(profileRoot, "local_favorite.db");
+      if (!existsSync(favDbPath) || statSync(favDbPath).size === 0) {
+        addSyncLog("auto-upload", null, false, "Blocked: favorite db empty");
+        return;
+      }
+      {
+        const appdataPath = join(profileRoot, "appdata.json");
+        let followFolder = null;
+        try {
+          if (existsSync(appdataPath)) {
+            const ad = JSON.parse(readFileSync(appdataPath, "utf8"));
+            followFolder = ad?.settings?.followUpdatesFolder;
+          }
+        } catch { /* ignore */ }
+        if (followFolder) {
+          try {
+            const data = readFileSync(favDbPath);
+            const extracted = extractSqliteData(data);
+            const table = extracted.tables.find(t => t.name === followFolder);
+            if (table && table.rows.length === 0) {
+              addSyncLog("auto-upload", null, false, "Blocked: follow folder empty");
+              return;
+            }
+          } catch { /* can't determine, allow upload */ }
+        }
+      }
 
       let existingFiles = [];
       try {

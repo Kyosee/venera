@@ -12,6 +12,7 @@ import 'package:venera/foundation/res.dart';
 import 'package:venera/network/app_dio_io.dart';
 import 'package:venera/utils/data.dart';
 import 'package:venera/utils/ext.dart';
+import 'package:sqlite3/sqlite3.dart' as sqlite3_pkg;
 import 'package:webdav_client/webdav_client.dart' hide File;
 import 'package:venera/utils/translations.dart';
 
@@ -168,6 +169,53 @@ class DataSync with ChangeNotifier {
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 
+  bool _hasCompletedInitialSync() {
+    return appdata.implicitData['hasCompletedInitialSync'] == true;
+  }
+
+  void _markInitialSyncCompleted() {
+    appdata.implicitData['hasCompletedInitialSync'] = true;
+    appdata.writeImplicitData();
+  }
+
+  bool _isFavoriteDbValid() {
+    var favDbPath = FilePath.join(App.dataPath, 'local_favorite.db');
+    var favDbFile = File(favDbPath);
+    if (!favDbFile.existsSync() || favDbFile.lengthSync() == 0) {
+      return false;
+    }
+    return true;
+  }
+
+  bool _isFollowFolderEmpty() {
+    var followFolder = appdata.settings['followUpdatesFolder'];
+    if (followFolder is! String || followFolder.isEmpty) {
+      return false;
+    }
+    var favDbPath = FilePath.join(App.dataPath, 'local_favorite.db');
+    if (!File(favDbPath).existsSync()) return true;
+    try {
+      var db = sqlite3_pkg.sqlite3.open(favDbPath);
+      try {
+        var tables = db
+            .select("SELECT name FROM sqlite_master WHERE type='table'")
+            .map((r) => r['name'] as String)
+            .toList();
+        if (!tables.contains(followFolder)) return true;
+        var escaped = followFolder.replaceAll('"', '""');
+        var count = db.select(
+          'SELECT COUNT(*) as c FROM "$escaped"',
+        ).first['c'] as int;
+        return count == 0;
+      } finally {
+        db.dispose();
+      }
+    } catch (e) {
+      Log.warning("DataSync", "Follow folder check failed: $e");
+      return false;
+    }
+  }
+
   Future<Res<bool>> uploadData() async {
     _pendingAutoUpload?.cancel();
     _pendingAutoUpload = null;
@@ -181,6 +229,11 @@ class DataSync with ChangeNotifier {
     _lastError = null;
     notifyListeners();
     try {
+      if (!_hasCompletedInitialSync()) {
+        _lastError = 'Please complete initial sync download first';
+        _addSyncLog('upload', null, false, 'Blocked: initial sync not completed');
+        return const Res.error('Initial sync not completed');
+      }
       var config = _validateConfig();
       if (config == null) {
         _lastError = 'Invalid WebDAV configuration';
@@ -192,6 +245,17 @@ class DataSync with ChangeNotifier {
       String url = config[0];
       String user = config[1];
       String pass = config[2];
+
+      if (!_isFavoriteDbValid()) {
+        _lastError = 'Favorite database is empty, upload blocked';
+        _addSyncLog('upload', null, false, 'Blocked: local_favorite.db empty');
+        return const Res.error('Favorite database is empty');
+      }
+      if (_isFollowFolderEmpty()) {
+        _lastError = 'Follow folder is empty, auto-upload blocked';
+        _addSyncLog('upload', null, false, 'Blocked: follow folder empty');
+        return const Res.error('Follow folder is empty');
+      }
 
       var client = newClient(
         url,
@@ -305,6 +369,9 @@ class DataSync with ChangeNotifier {
         }
         Log.info("Data Sync", "Data downloaded successfully");
         _addSyncLog('download', null, true, null);
+        if (!_hasCompletedInitialSync()) {
+          _markInitialSyncCompleted();
+        }
         return const Res(true);
       } catch (e, s) {
         Log.error("Data Sync", e, s);

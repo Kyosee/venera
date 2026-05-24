@@ -100,7 +100,6 @@ class Appdata with Init {
     "webdav",
     "disableSyncFields",
     "deviceId",
-    "followUpdatesFolder",
   ];
 
   /// Sync data from another device

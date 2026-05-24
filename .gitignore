@@ -60,6 +60,7 @@ data.venera
 .claude
 CLAUDE.md
 .playwright-cli/
+.codegraph/
 
 # Web server user data
 web/server/.venera-helper-data/

@@ -62,13 +62,20 @@ export const useSyncStore = defineStore('sync', () => {
     }
   }
 
-  async function upload() {
+  async function upload(options?: { force?: boolean }) {
     isUploading.value = true
     lastError.value = null
     try {
-      await triggerUpload()
+      await triggerUpload(options)
     } catch (error) {
-      lastError.value = errorMessage(error)
+      const msg = errorMessage(error)
+      if (msg.includes('INITIAL_SYNC_REQUIRED') || msg.includes('Initial sync not completed')) {
+        lastError.value = '请先完成首次同步下载'
+      } else if (msg.includes('FAVORITE_DB_EMPTY') || msg.includes('Favorite database is empty')) {
+        lastError.value = '收藏数据为空，上传已阻止'
+      } else {
+        lastError.value = msg
+      }
       throw error
     } finally {
       isUploading.value = false

@@ -34,6 +34,15 @@ export function triggerDownload() {
   return apiPost('/api/server-db/sync/webdav', {})
 }
 
+export function checkSyncSafety() {
+  return apiPost<{
+    ok: boolean
+    hasCompletedInitialSync: boolean
+    favoriteDbEmpty: boolean
+    followFolderEmpty: boolean
+  }>('/api/server-db/sync/safety-check')
+}
+
 function dataVersionFrom(appdata: Record<string, any>): number {
   const settings = appdata.settings
   const value = settings && typeof settings === 'object' ? settings.dataVersion : appdata.dataVersion
@@ -94,7 +103,7 @@ function appdataForLocalSave(appdata: Record<string, any>, dataVersion: number) 
   return next
 }
 
-export async function triggerUpload() {
+export async function triggerUpload(options?: { force?: boolean }) {
   const [config, dump] = await Promise.all([
     getWebDavConfig(),
     apiPost<any>('/api/server-db/dump'),
@@ -115,6 +124,9 @@ export async function triggerUpload() {
     fileName,
     appdata: uploadAppdata,
     metadata: { dataVersion: nextVersion },
+  }
+  if (options?.force) {
+    payload.force = true
   }
   if (Array.isArray(dump?.comicSources)) {
     payload.comicSources = dump.comicSources
