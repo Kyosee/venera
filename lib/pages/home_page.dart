@@ -194,15 +194,9 @@ class _SyncDataWidgetState extends State<_SyncDataWidget>
                     ),
                   ).paddingRight(4),
                 IconButton(
-                  icon: const Icon(Icons.cloud_upload_outlined),
+                  icon: const Icon(Icons.sync),
                   onPressed: () async {
-                    DataSync().uploadData();
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.cloud_download_outlined),
-                  onPressed: () async {
-                    DataSync().downloadData();
+                    DataSync().syncData();
                   },
                 ),
               ],

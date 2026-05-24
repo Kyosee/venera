@@ -437,7 +437,6 @@ class _WebdavSettingState extends State<_WebdavSetting> {
   bool autoSync = true;
 
   bool isTesting = false;
-  bool upload = true;
 
   @override
   void initState() {
@@ -516,6 +515,33 @@ class _WebdavSettingState extends State<_WebdavSetting> {
       appdata.implicitData['webdavAutoSync'] = value;
       appdata.writeImplicitData();
     });
+  }
+
+  void _showRemoteBackupList(BuildContext context) async {
+    showDialog(
+      context: context,
+      builder: (ctx) => const Center(child: CircularProgressIndicator()),
+    );
+    var result = await DataSync().listRemoteBackups();
+    if (context.mounted) Navigator.of(context).pop();
+    if (result.error) {
+      if (context.mounted) {
+        context.showMessage(message: result.errorMessage!);
+      }
+      return;
+    }
+    var backups = result.data;
+    if (backups.isEmpty) {
+      if (context.mounted) {
+        context.showMessage(message: "No backups found".tl);
+      }
+      return;
+    }
+    if (!context.mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => _RemoteBackupListDialog(backups: backups),
+    );
   }
 
   @override
@@ -613,49 +639,6 @@ class _WebdavSettingState extends State<_WebdavSetting> {
               contentPadding: EdgeInsets.zero,
               trailing: Switch(value: autoSync, onChanged: onAutoSyncChanged),
             ),
-            const SizedBox(height: 12),
-            RadioGroup<bool>(
-              groupValue: upload,
-              onChanged: (value) {
-                setState(() {
-                  upload = value ?? upload;
-                });
-              },
-              child: Row(
-                children: [
-                  Text("Operation".tl),
-                  Radio<bool>(value: true),
-                  Text("Upload".tl),
-                  Radio<bool>(value: false),
-                  Text("Download".tl),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            AnimatedSize(
-              duration: const Duration(milliseconds: 200),
-              child: autoSync
-                  ? Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.info_outline, size: 20),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              "Once the operation is successful, app will automatically sync data with the server."
-                                  .tl,
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  : const SizedBox.shrink(),
-            ),
             const SizedBox(height: 16),
             Center(
               child: Button.filled(
@@ -713,9 +696,7 @@ class _WebdavSettingState extends State<_WebdavSetting> {
                   setState(() {
                     isTesting = true;
                   });
-                  var testResult = upload
-                      ? await DataSync().uploadData()
-                      : await DataSync().downloadData();
+                  var testResult = await DataSync().uploadData();
                   if (testResult.error) {
                     setState(() {
                       isTesting = false;
@@ -733,11 +714,127 @@ class _WebdavSettingState extends State<_WebdavSetting> {
                     App.rootPop();
                   }
                 },
-                child: Text("Continue".tl),
+                child: Text("Save".tl),
               ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Button.outlined(
+                  onPressed: () async {
+                    var result = await DataSync().uploadData();
+                    if (result.error) {
+                      context.showMessage(message: result.errorMessage!);
+                    } else {
+                      context.showMessage(message: "Upload successful".tl);
+                    }
+                  },
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.cloud_upload_outlined, size: 18),
+                      const SizedBox(width: 6),
+                      Text("Upload".tl),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Button.outlined(
+                  onPressed: () => _showRemoteBackupList(context),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.cloud_download_outlined, size: 18),
+                      const SizedBox(width: 6),
+                      Text("Download".tl),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ],
         ).paddingHorizontal(16),
+      ),
+    );
+  }
+}
+
+class _RemoteBackupListDialog extends StatelessWidget {
+  const _RemoteBackupListDialog({required this.backups});
+
+  final List<RemoteBackupInfo> backups;
+
+  String _platformLabel(String platform) {
+    return switch (platform) {
+      'win' => 'Windows',
+      'ios' => 'iOS',
+      'android' => 'Android',
+      'macos' => 'macOS',
+      'linux' => 'Linux',
+      'web' => 'Web',
+      _ => platform,
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ContentDialog(
+      title: "Select Backup".tl,
+      content: SizedBox(
+        width: 400,
+        height: 350,
+        child: ListView.builder(
+          itemCount: backups.length,
+          itemBuilder: (context, index) {
+            var b = backups[index];
+            var dateStr =
+                "${b.date.year}-${b.date.month.toString().padLeft(2, '0')}"
+                "-${b.date.day.toString().padLeft(2, '0')}";
+            return ListTile(
+              title: Text("v${b.version}  ${_platformLabel(b.platform)}"),
+              subtitle: Text(dateStr),
+              trailing: const Icon(Icons.download),
+              onTap: () {
+                Navigator.of(context).pop();
+                _confirmAndDownload(context, b);
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  void _confirmAndDownload(BuildContext context, RemoteBackupInfo backup) {
+    showDialog(
+      context: context,
+      builder: (ctx) => ContentDialog(
+        title: "Confirm Download".tl,
+        content: Text(
+          "This will overwrite all local data. Continue?".tl,
+        ),
+        actions: [
+          Button.filled(
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              var result =
+                  await DataSync().downloadSpecificBackup(backup.fileName);
+              if (context.mounted) {
+                if (result.error) {
+                  context.showMessage(message: result.errorMessage!);
+                } else {
+                  context.showMessage(message: "Download successful".tl);
+                }
+              }
+            },
+            child: Text("Confirm".tl),
+          ),
+          Button.outlined(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text("Cancel".tl),
+          ),
+        ],
       ),
     );
   }

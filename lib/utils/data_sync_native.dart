@@ -392,4 +392,140 @@ class DataSync with ChangeNotifier {
       notifyListeners();
     }
   }
+
+  Future<Res<bool>> syncData() async {
+    var config = _validateConfig();
+    if (config == null || config.isEmpty) {
+      return uploadData();
+    }
+    String url = config[0];
+    String user = config[1];
+    String pass = config[2];
+    try {
+      var client = newClient(url, user: user, password: pass, adapter: RHttpAdapter());
+      var files = await client.readDir('/');
+      files.sort((a, b) => b.name!.compareTo(a.name!));
+      var file = files.firstWhereOrNull((e) => e.name!.endsWith('.venera'));
+      if (file == null) {
+        return uploadData();
+      }
+      var version = file.name!.split('-').elementAtOrNull(1)?.split('.').first;
+      if (version != null && int.tryParse(version) != null) {
+        if (int.parse(version) > _dataVersion()) {
+          return downloadData();
+        }
+      }
+      return uploadData();
+    } catch (e) {
+      return uploadData();
+    }
+  }
+
+  Future<Res<List<RemoteBackupInfo>>> listRemoteBackups() async {
+    var config = _validateConfig();
+    if (config == null) return const Res.error('Invalid WebDAV configuration');
+    if (config.isEmpty) return const Res.error('WebDAV not configured');
+    String url = config[0];
+    String user = config[1];
+    String pass = config[2];
+    try {
+      var client = newClient(url, user: user, password: pass, adapter: RHttpAdapter());
+      var files = await client.readDir('/');
+      var backups = <RemoteBackupInfo>[];
+      for (var f in files) {
+        if (f.name == null || !f.name!.endsWith('.venera')) continue;
+        backups.add(RemoteBackupInfo.fromFileName(f.name!));
+      }
+      backups.sort((a, b) => b.version.compareTo(a.version));
+      return Res(backups);
+    } catch (e) {
+      return Res.error(e.toString());
+    }
+  }
+
+  Future<Res<bool>> downloadSpecificBackup(String fileName) async {
+    if (_haveWaitingTask) return const Res(true);
+    while (isDownloading || isUploading) {
+      _haveWaitingTask = true;
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+    _haveWaitingTask = false;
+    _isDownloading = true;
+    _lastError = null;
+    notifyListeners();
+    try {
+      var config = _validateConfig();
+      if (config == null) return const Res.error('Invalid WebDAV configuration');
+      String url = config[0];
+      String user = config[1];
+      String pass = config[2];
+      var client = newClient(url, user: user, password: pass, adapter: RHttpAdapter());
+      try {
+        var files = await client.readDir('/');
+        files.sort((a, b) => b.name!.compareTo(a.name!));
+        var latest = files.firstWhereOrNull((e) => e.name!.endsWith('.venera'));
+        int maxRemoteVersion = 0;
+        if (latest != null) {
+          var v = latest.name!.split('-').elementAtOrNull(1)?.split('.').first;
+          if (v != null) maxRemoteVersion = int.tryParse(v) ?? 0;
+        }
+
+        var localFile = File(FilePath.join(App.cachePath, fileName));
+        try {
+          await client.read2File(fileName, localFile.path);
+          await importAppData(localFile, false);
+        } finally {
+          localFile.deleteIgnoreError();
+        }
+
+        appdata.settings['dataVersion'] = maxRemoteVersion + 1;
+        await appdata.saveData(false);
+
+        if (!_hasCompletedInitialSync()) _markInitialSyncCompleted();
+        _addSyncLog('download', fileName, true, null);
+        return const Res(true);
+      } catch (e, s) {
+        Log.error("Data Sync", e, s);
+        _lastError = e.toString();
+        _addSyncLog('download', fileName, false, e.toString());
+        return Res.error(e.toString());
+      }
+    } finally {
+      _isDownloading = false;
+      notifyListeners();
+    }
+  }
+}
+
+class RemoteBackupInfo {
+  final String fileName;
+  final int version;
+  final String platform;
+  final DateTime date;
+
+  RemoteBackupInfo({
+    required this.fileName,
+    required this.version,
+    required this.platform,
+    required this.date,
+  });
+
+  factory RemoteBackupInfo.fromFileName(String name) {
+    var parts = name.replaceAll('.venera', '').split('-');
+    var daysSinceEpoch = int.tryParse(parts.firstOrNull ?? '') ?? 0;
+    var versionStr = parts.elementAtOrNull(1)?.split('.').first ?? '0';
+    var version = int.tryParse(versionStr) ?? 0;
+    var platform = 'unknown';
+    var dotParts = parts.elementAtOrNull(1)?.split('.') ?? [];
+    if (dotParts.length >= 2) {
+      platform = dotParts[1];
+    }
+    var date = DateTime.fromMillisecondsSinceEpoch(daysSinceEpoch * 86400000);
+    return RemoteBackupInfo(
+      fileName: name,
+      version: version,
+      platform: platform,
+      date: date,
+    );
+  }
 }
