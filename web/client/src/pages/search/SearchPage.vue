@@ -161,10 +161,15 @@ function showContextMenu(event: MouseEvent, keyword: string) {
   event.preventDefault()
   contextMenuItem.value = keyword
   contextMenuVisible.value = true
-  contextMenuStyle.value = {
-    top: event.clientY + 'px',
-    left: event.clientX + 'px',
-  }
+  const menuWidth = 130
+  const menuHeight = 80
+  let top = event.clientY
+  let left = event.clientX
+  if (left + menuWidth > window.innerWidth) left = window.innerWidth - menuWidth - 8
+  if (top + menuHeight > window.innerHeight) top = event.clientY - menuHeight
+  if (left < 8) left = 8
+  if (top < 8) top = 8
+  contextMenuStyle.value = { top: top + 'px', left: left + 'px' }
   document.addEventListener('click', hideContextMenu, { once: true })
 }
 
@@ -482,8 +487,10 @@ onMounted(async () => {
   flex: 1;
   overflow-y: auto;
   padding: 16px;
+  padding-bottom: calc(16px + 50px + env(safe-area-inset-bottom, 0px));
   -webkit-overflow-scrolling: touch;
   will-change: scroll-position;
+  overscroll-behavior: contain;
 }
 
 .history-section { margin-bottom: 16px; }

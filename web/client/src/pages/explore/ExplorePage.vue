@@ -380,12 +380,21 @@ onUnmounted(() => {
 :deep(.van-tab__panel) { height: 100%; }
 
 .explore-content {
-  height: calc(100vh - 94px);
+  height: calc(100dvh - 94px - 50px - var(--safe-area-bottom, 0px));
+  height: calc(100vh - 94px - 50px - var(--safe-area-bottom, 0px));
   overflow-y: auto;
   padding: 16px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   -webkit-overflow-scrolling: touch;
   will-change: scroll-position;
   transform: translateZ(0);
+  overscroll-behavior: contain;
+}
+
+@supports (height: 100dvh) {
+  .explore-content {
+    height: calc(100dvh - 94px - 50px - var(--safe-area-bottom, 0px));
+  }
 }
 
 .comic-grid {
@@ -469,7 +478,7 @@ onUnmounted(() => {
 
 .fab {
   position: fixed;
-  bottom: 72px;
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
   right: 16px;
   width: 48px;
   height: 48px;

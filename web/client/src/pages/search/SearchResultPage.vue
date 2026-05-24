@@ -387,6 +387,8 @@ onMounted(async () => {
   flex: 1;
   overflow-y: auto;
   padding: 16px;
+  padding-bottom: calc(16px + 50px + env(safe-area-inset-bottom, 0px));
+  overscroll-behavior: contain;
 }
 
 .loading-state {

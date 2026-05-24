@@ -550,7 +550,8 @@ async function handleBatchMove(targetFolderId: string) {
 </template>
 <style scoped>
 .favorites-page {
-  height: 100%;
+  height: calc(100% + 50px + env(safe-area-inset-bottom, 0px));
+  margin-bottom: calc(-50px - env(safe-area-inset-bottom, 0px));
   display: flex;
   flex-direction: column;
 }
