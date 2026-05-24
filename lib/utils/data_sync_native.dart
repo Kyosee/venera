@@ -170,7 +170,12 @@ class DataSync with ChangeNotifier {
   }
 
   bool _hasCompletedInitialSync() {
-    return appdata.implicitData['hasCompletedInitialSync'] == true;
+    if (appdata.implicitData['hasCompletedInitialSync'] == true) return true;
+    if (_dataVersion() > 0) {
+      _markInitialSyncCompleted();
+      return true;
+    }
+    return false;
   }
 
   void _markInitialSyncCompleted() {
@@ -356,6 +361,9 @@ class DataSync with ChangeNotifier {
           var currentVersion = _dataVersion();
           if (int.parse(version) <= currentVersion) {
             Log.info("Data Sync", 'No new data to download');
+            if (!_hasCompletedInitialSync()) {
+              _markInitialSyncCompleted();
+            }
             return const Res(true);
           }
         }
