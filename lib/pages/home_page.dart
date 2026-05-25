@@ -448,7 +448,7 @@ class _LocalState extends State<_Local> {
                       ).paddingHorizontal(8).paddingVertical(2);
                     },
                   ),
-                ).paddingHorizontal(8),
+                ).paddingHorizontal(8).paddingBottom(16),
               if (!App.isWeb && LocalManager().downloadingTasks.isNotEmpty)
                 Row(
                   children: [

@@ -806,8 +806,8 @@ class ComicDescription extends StatelessWidget {
           rating != null,
         );
         return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.start,
           children: [
             if (showTitle) ...[
               Text(
@@ -827,12 +827,10 @@ class ComicDescription extends StatelessWidget {
               const SizedBox(height: 2),
             ],
             if (rows.isNotEmpty)
-              Flexible(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: rows.take(visibleRows).toList(),
-                ),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: rows.take(visibleRows).toList(),
               ),
           ],
         );

@@ -415,9 +415,7 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
                     style: ts.s14,
                   ).paddingVertical(4),
                 const SizedBox(height: 6),
-                SizedBox(
-                  height: 116,
-                  child: () {
+                () {
                     final chapterProgress = _comicStateRepository
                         .chapterProgressFromDetails(comic, history);
                     return ComicDescription(
@@ -448,7 +446,6 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
                       onTapTag: onTapTag,
                     );
                   }(),
-                ),
               ],
             ),
           ),
