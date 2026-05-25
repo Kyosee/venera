@@ -26,7 +26,6 @@
 - WebDAV 备份与同步
 - Windows 自动更新（含回退脚本）
 - Android APK 自动更新
-- 可配置 GitHub 更新源（支持私有仓库）
 
 ## 快速开始
 

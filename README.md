@@ -26,7 +26,6 @@ A cross-platform manga/comic reader with self-hosted Web frontend support.
 - WebDAV backup & sync
 - Windows auto-updater with fallback scripts
 - Android APK auto-update
-- Configurable GitHub update source (supports private repos)
 
 ## Quick Start
 
