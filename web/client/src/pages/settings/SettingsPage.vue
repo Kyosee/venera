@@ -5,6 +5,7 @@ import { showToast } from 'vant'
 import { useSettingsStore } from '../../stores/settings'
 import { useSyncStore } from '../../stores/sync'
 import { apiPost } from '../../services/api'
+import { listBackups, downloadSpecificBackup, type RemoteBackupInfo } from '../../services/sync'
 
 const router = useRouter()
 const settingsStore = useSettingsStore()
@@ -211,6 +212,46 @@ const webdavTesting = ref(false)
 const showSyncLogsPopup = ref(false)
 const syncLogsData = ref<Array<{ time: number; action: string; fileName: string | null; success: boolean; error: string | null }>>([])
 const syncLogsLoading = ref(false)
+
+// Backup list
+const showBackupListDialog = ref(false)
+const backupList = ref<RemoteBackupInfo[]>([])
+const backupListLoading = ref(false)
+
+function platformLabel(p: string) {
+  const map: Record<string, string> = { win: 'Windows', ios: 'iOS', android: 'Android', macos: 'macOS', linux: 'Linux', web: 'Web' }
+  return map[p] || p
+}
+
+async function manualUpload() {
+  try {
+    await syncStore.upload({ force: true })
+    showToast('上传成功')
+  } catch (e: any) {
+    showToast(e.message || '上传失败')
+  }
+}
+
+async function openBackupList() {
+  showBackupListDialog.value = true
+  backupListLoading.value = true
+  try {
+    backupList.value = await listBackups()
+  } catch { backupList.value = [] }
+  finally { backupListLoading.value = false }
+}
+
+async function confirmDownloadBackup(b: RemoteBackupInfo) {
+  if (!confirm(`确认下载 v${b.version} (${platformLabel(b.platform)}) 的备份？\n这将覆盖本地所有数据。`)) return
+  showBackupListDialog.value = false
+  try {
+    await downloadSpecificBackup(b.fileName)
+    showToast('下载成功')
+    location.reload()
+  } catch (e: any) {
+    showToast(e.message || '下载失败')
+  }
+}
 
 async function openSyncLogs() {
   showSyncLogsPopup.value = true
@@ -453,6 +494,28 @@ async function handleImportFile(event: Event) {
         <div class="webdav-actions">
           <van-button size="small" plain :loading="webdavTesting" @click="testWebDavConnection">测试连接</van-button>
           <van-button size="small" type="primary" :loading="webdavSaving" @click="saveWebDavConfig">保存</van-button>
+        </div>
+        <div class="webdav-actions" style="margin-top: 4px;">
+          <van-button size="small" plain @click="manualUpload">上传</van-button>
+          <van-button size="small" plain @click="openBackupList">下载</van-button>
+        </div>
+      </div>
+    </van-popup>
+
+    <!-- Backup List Popup -->
+    <van-popup v-model:show="showBackupListDialog" round position="center" :style="{ width: '400px', maxWidth: '90vw', padding: '24px', background: '#fff', color: '#1a1a1a' }">
+      <div class="webdav-dialog">
+        <h3 class="webdav-title">选择备份</h3>
+        <van-loading v-if="backupListLoading" style="text-align: center; padding: 20px;" />
+        <div v-else-if="backupList.length === 0" style="text-align: center; color: #999; padding: 20px;">暂无备份</div>
+        <div v-else class="sync-logs-list">
+          <div v-for="(b, i) in backupList" :key="i" class="sync-log-item" style="cursor: pointer;" @click="confirmDownloadBackup(b)">
+            <div class="sync-log-header">
+              <span class="sync-log-action success">v{{ b.version }} {{ platformLabel(b.platform) }}</span>
+              <span class="sync-log-time">{{ b.date }}</span>
+            </div>
+            <div class="sync-log-file">{{ b.fileName }}</div>
+          </div>
         </div>
       </div>
     </van-popup>

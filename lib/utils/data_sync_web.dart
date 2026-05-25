@@ -638,4 +638,139 @@ class DataSync with ChangeNotifier {
       notifyListeners();
     }
   }
+
+  Future<Res<bool>> syncData() async {
+    final config = await _resolveConfig();
+    if (config == null || config.isEmpty) {
+      return uploadData();
+    }
+    try {
+      final data = await _callHelper('list', _webDavPayload(config));
+      final files = (data['files'] as List?)?.cast<String>() ?? [];
+      if (files.isEmpty) return uploadData();
+      var latest = files.first;
+      var parts = latest.replaceAll('.venera', '').split('-');
+      var versionStr = parts.elementAtOrNull(1)?.split('.').first ?? '0';
+      var remoteVersion = int.tryParse(versionStr) ?? 0;
+      var localVersion = appdata.settings['dataVersion'] is int
+          ? appdata.settings['dataVersion'] as int
+          : 0;
+      if (remoteVersion > localVersion) {
+        return downloadData();
+      }
+      return uploadData();
+    } catch (e) {
+      return uploadData();
+    }
+  }
+
+  Future<Res<List<RemoteBackupInfo>>> listRemoteBackups() async {
+    final config = await _resolveConfig();
+    if (config == null) return const Res.error('Invalid WebDAV configuration');
+    if (config.isEmpty) return const Res.error('WebDAV not configured');
+    try {
+      final data = await _callHelper('list', _webDavPayload(config));
+      final files = (data['files'] as List?)?.cast<String>() ?? [];
+      var backups = <RemoteBackupInfo>[];
+      for (var name in files) {
+        if (!name.endsWith('.venera')) continue;
+        backups.add(RemoteBackupInfo.fromFileName(name));
+      }
+      backups.sort((a, b) => b.version.compareTo(a.version));
+      return Res(backups);
+    } catch (e) {
+      return Res.error(e.toString());
+    }
+  }
+
+  Future<Res<bool>> downloadSpecificBackup(String fileName) async {
+    if (_haveWaitingTask) return const Res(true);
+    while (isDownloading || isUploading) {
+      _haveWaitingTask = true;
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+    _haveWaitingTask = false;
+    _isDownloading = true;
+    _lastError = null;
+    notifyListeners();
+    try {
+      final config = await _resolveConfig();
+      if (config == null) return const Res.error('Invalid WebDAV configuration');
+
+      final listData = await _callHelper('list', _webDavPayload(config));
+      final files = (listData['files'] as List?)?.cast<String>() ?? [];
+      int maxRemoteVersion = 0;
+      for (var f in files) {
+        var v = f.replaceAll('.venera', '').split('-').elementAtOrNull(1)?.split('.').first;
+        if (v != null) {
+          var ver = int.tryParse(v) ?? 0;
+          if (ver > maxRemoteVersion) maxRemoteVersion = ver;
+        }
+      }
+
+      try {
+        final helperData = await _callHelper('download', {
+          ..._webDavPayload(config),
+          'remoteFileName': fileName,
+          'force': true,
+        });
+        final dataBase64 = helperData['dataBase64']?.toString() ?? '';
+        if (dataBase64.isEmpty) throw StateError('Remote backup file is empty');
+        final localFile = File(FilePath.join(App.cachePath, fileName));
+        try {
+          await localFile.writeAsBytes(base64Decode(dataBase64));
+          await importAppData(localFile, false);
+        } finally {
+          localFile.deleteIgnoreError();
+        }
+
+        appdata.settings['dataVersion'] = maxRemoteVersion + 1;
+        await appdata.saveData(false);
+
+        _addSyncLog('download', fileName, true, null);
+        return const Res(true);
+      } catch (e, s) {
+        Log.error("Data Sync", e, s);
+        _lastError = _formatError(e);
+        _addSyncLog('download', fileName, false, _lastError);
+        return Res.error(_lastError!);
+      }
+    } finally {
+      _isDownloading = false;
+      notifyListeners();
+    }
+  }
+}
+
+class RemoteBackupInfo {
+  final String fileName;
+  final int version;
+  final String platform;
+  final DateTime date;
+
+  RemoteBackupInfo({
+    required this.fileName,
+    required this.version,
+    required this.platform,
+    required this.date,
+  });
+
+  factory RemoteBackupInfo.fromFileName(String name) {
+    var parts = name.replaceAll('.venera', '').split('-');
+    var daysSinceEpoch = int.tryParse(parts.firstOrNull ?? '') ?? 0;
+    var versionStr = parts.elementAtOrNull(1)?.split('.').first ?? '0';
+    var version = int.tryParse(versionStr) ?? 0;
+    var platform = 'unknown';
+    var dotParts = parts.elementAtOrNull(1)?.split('.') ?? [];
+    if (dotParts.length >= 2) {
+      platform = dotParts[1];
+    }
+    var date = DateTime.fromMillisecondsSinceEpoch(daysSinceEpoch * 86400000);
+    return RemoteBackupInfo(
+      fileName: name,
+      version: version,
+      platform: platform,
+      date: date,
+    );
+  }
 }

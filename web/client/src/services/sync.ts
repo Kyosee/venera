@@ -78,6 +78,11 @@ const FIXED_DISABLE_SYNC_FIELDS = [
   'webdav',
   'disableSyncFields',
   'deviceId',
+  'followUpdatesFolder',
+  'updateRepoOwner',
+  'updateRepoName',
+  'updateUsePrivateRepo',
+  'updateRepoToken',
 ]
 
 function appdataForUpload(appdata: Record<string, any>, dataVersion: number, disableSyncFields?: string) {
@@ -173,4 +178,36 @@ export async function getSyncStatus(): Promise<WebDavSyncStatus> {
     configured,
     autoSyncEnabled: configured && config?.autoSync === true,
   }
+}
+
+export interface RemoteBackupInfo {
+  fileName: string
+  version: number
+  platform: string
+  date: string
+}
+
+export async function listBackups(): Promise<RemoteBackupInfo[]> {
+  const data = await apiPost<{ ok: boolean; files: string[] }>('/sync/webdav/list')
+  const files = data.files || []
+  return files
+    .filter(f => f.endsWith('.venera'))
+    .map(parseBackupFileName)
+    .sort((a, b) => b.version - a.version)
+}
+
+function parseBackupFileName(name: string): RemoteBackupInfo {
+  const base = name.replace('.venera', '')
+  const parts = base.split('-')
+  const daysSinceEpoch = parseInt(parts[0] || '0', 10)
+  const versionPart = parts[1] || '0'
+  const dotParts = versionPart.split('.')
+  const version = parseInt(dotParts[0] || '0', 10)
+  const platform = dotParts[1] || 'unknown'
+  const date = new Date(daysSinceEpoch * 86400000).toISOString().slice(0, 10)
+  return { fileName: name, version, platform, date }
+}
+
+export async function downloadSpecificBackup(fileName: string) {
+  return apiPost('/sync/webdav/download', { remoteFileName: fileName, force: true })
 }
