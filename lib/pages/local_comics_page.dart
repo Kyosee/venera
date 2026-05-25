@@ -50,7 +50,7 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
 
   @override
   void initState() {
-    var sort = appdata.implicitData["local_sort"] ?? "name";
+    var sort = appdata.implicitData["local_sort"] ?? "default";
     sortType = LocalSortType.fromString(sort);
     comics = LocalManager().getComics(sortType);
     LocalManager().addListener(update);
@@ -80,16 +80,32 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
               child: Column(
                 children: [
                   RadioListTile<LocalSortType>(
-                    title: Text("Name".tl),
+                    title: Text("Default".tl),
+                    value: LocalSortType.defaultSort,
+                  ),
+                  RadioListTile<LocalSortType>(
+                    title: Text("Name Asc".tl),
                     value: LocalSortType.name,
                   ),
                   RadioListTile<LocalSortType>(
-                    title: Text("Date".tl),
+                    title: Text("Name Desc".tl),
+                    value: LocalSortType.nameDesc,
+                  ),
+                  RadioListTile<LocalSortType>(
+                    title: Text("Newest First".tl),
+                    value: LocalSortType.timeDesc,
+                  ),
+                  RadioListTile<LocalSortType>(
+                    title: Text("Oldest First".tl),
                     value: LocalSortType.timeAsc,
                   ),
                   RadioListTile<LocalSortType>(
-                    title: Text("Date Desc".tl),
-                    value: LocalSortType.timeDesc,
+                    title: Text("Author".tl),
+                    value: LocalSortType.author,
+                  ),
+                  RadioListTile<LocalSortType>(
+                    title: Text("Last Read".tl),
+                    value: LocalSortType.lastRead,
                   ),
                 ],
               ),

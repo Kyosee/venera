@@ -162,11 +162,26 @@ class LocalManager with ChangeNotifier {
   List<LocalComic> getComics(LocalSortType sortType) {
     final result = List<LocalComic>.from(_comics);
     result.sort((a, b) {
-      if (sortType == LocalSortType.name) {
-        return a.title.compareTo(b.title);
+      switch (sortType) {
+        case LocalSortType.name:
+          return a.title.compareTo(b.title);
+        case LocalSortType.nameDesc:
+          return b.title.compareTo(a.title);
+        case LocalSortType.timeAsc:
+          return a.createdAt.compareTo(b.createdAt);
+        case LocalSortType.timeDesc:
+          return b.createdAt.compareTo(a.createdAt);
+        case LocalSortType.author:
+          return a.subtitle.compareTo(b.subtitle);
+        case LocalSortType.lastRead:
+          var historyA = HistoryManager().find(a.id, a.comicType);
+          var historyB = HistoryManager().find(b.id, b.comicType);
+          var timeA = historyA?.time ?? DateTime.fromMillisecondsSinceEpoch(0);
+          var timeB = historyB?.time ?? DateTime.fromMillisecondsSinceEpoch(0);
+          return timeB.compareTo(timeA);
+        case LocalSortType.defaultSort:
+          return b.createdAt.compareTo(a.createdAt);
       }
-      final value = a.createdAt.compareTo(b.createdAt);
-      return sortType == LocalSortType.timeAsc ? value : -value;
     });
     return result;
   }
@@ -299,9 +314,13 @@ extension _FirstWhereOrNull<T> on Iterable<T> {
 }
 
 enum LocalSortType {
+  defaultSort('default'),
   name('name'),
+  nameDesc('name_desc'),
+  timeDesc('time_desc'),
   timeAsc('time_asc'),
-  timeDesc('time_desc');
+  author('author'),
+  lastRead('last_read');
 
   final String value;
 
@@ -313,6 +332,6 @@ enum LocalSortType {
         return type;
       }
     }
-    return name;
+    return defaultSort;
   }
 }

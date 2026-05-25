@@ -48,6 +48,7 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
 
   late String readFilterSelect;
   late Set<String> sourceFilterSelect;
+  late LocalSortType favSortType;
 
   var searchResults = <FavoriteItem>[];
 
@@ -135,6 +136,100 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
 
   void updateFilteredComics() {
     filteredComics = filterComics(comics);
+    _applySorting();
+  }
+
+  void _applySorting() {
+    if (favSortType == LocalSortType.defaultSort) return;
+    filteredComics.sort((a, b) {
+      switch (favSortType) {
+        case LocalSortType.name:
+          return a.name.compareTo(b.name);
+        case LocalSortType.nameDesc:
+          return b.name.compareTo(a.name);
+        case LocalSortType.timeDesc:
+          return b.time.compareTo(a.time);
+        case LocalSortType.timeAsc:
+          return a.time.compareTo(b.time);
+        case LocalSortType.author:
+          return a.author.compareTo(b.author);
+        case LocalSortType.lastRead:
+          var historyA = HistoryManager().find(a.id, a.type);
+          var historyB = HistoryManager().find(b.id, b.type);
+          var timeA = historyA?.time ?? DateTime.fromMillisecondsSinceEpoch(0);
+          var timeB = historyB?.time ?? DateTime.fromMillisecondsSinceEpoch(0);
+          return timeB.compareTo(timeA);
+        case LocalSortType.defaultSort:
+          return 0;
+      }
+    });
+  }
+
+  void showSortDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(builder: (context, setState) {
+          return ContentDialog(
+            title: "Sort".tl,
+            content: RadioGroup<LocalSortType>(
+              groupValue: favSortType,
+              onChanged: (v) {
+                setState(() {
+                  favSortType = v ?? favSortType;
+                });
+              },
+              child: Column(
+                children: [
+                  RadioListTile<LocalSortType>(
+                    title: Text("Default".tl),
+                    value: LocalSortType.defaultSort,
+                  ),
+                  RadioListTile<LocalSortType>(
+                    title: Text("Name Asc".tl),
+                    value: LocalSortType.name,
+                  ),
+                  RadioListTile<LocalSortType>(
+                    title: Text("Name Desc".tl),
+                    value: LocalSortType.nameDesc,
+                  ),
+                  RadioListTile<LocalSortType>(
+                    title: Text("Newest First".tl),
+                    value: LocalSortType.timeDesc,
+                  ),
+                  RadioListTile<LocalSortType>(
+                    title: Text("Oldest First".tl),
+                    value: LocalSortType.timeAsc,
+                  ),
+                  RadioListTile<LocalSortType>(
+                    title: Text("Author".tl),
+                    value: LocalSortType.author,
+                  ),
+                  RadioListTile<LocalSortType>(
+                    title: Text("Last Read".tl),
+                    value: LocalSortType.lastRead,
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              FilledButton(
+                onPressed: () {
+                  appdata.implicitData["local_favorites_sort"] =
+                      favSortType.value;
+                  appdata.writeImplicitData();
+                  Navigator.pop(context);
+                  this.setState(() {
+                    updateFilteredComics();
+                  });
+                },
+                child: Text("Confirm".tl),
+              ),
+            ],
+          );
+        });
+      },
+    );
   }
 
   List<FavoriteItem> get visibleComics {
@@ -237,6 +332,9 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
         readFilterList[0];
     sourceFilterSelect = parseSourceFilter(
       appdata.implicitData["local_favorites_source_filter"],
+    );
+    favSortType = LocalSortType.fromString(
+      appdata.implicitData["local_favorites_sort"] ?? "default",
     );
     favPage = context.findAncestorStateOfType<_FavoritesPageState>()!;
     if (!isAllFolder) {
@@ -404,6 +502,16 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                 child: IconButton(
                   icon: const Icon(Icons.hub_outlined),
                   onPressed: _showAutoLinkSourcesDialog,
+                ),
+              ),
+              Tooltip(
+                message: "Sort".tl,
+                child: IconButton(
+                  icon: const Icon(Icons.sort),
+                  color: favSortType != LocalSortType.defaultSort
+                      ? context.colorScheme.primaryContainer
+                      : null,
+                  onPressed: showSortDialog,
                 ),
               ),
               Tooltip(

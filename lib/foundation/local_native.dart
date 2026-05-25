@@ -9,13 +9,13 @@ import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/comic_state_repository.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/favorites.dart';
+import 'package:venera/foundation/history.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/network/download.dart';
 import 'package:venera/pages/reader/reader.dart';
 import 'package:venera/utils/io.dart';
 
 import 'app.dart';
-import 'history.dart';
 
 class LocalComic with HistoryMixin implements Comic {
   @override
@@ -344,14 +344,55 @@ class LocalManager with ChangeNotifier {
   }
 
   List<LocalComic> getComics(LocalSortType sortType) {
+    if (sortType == LocalSortType.lastRead) {
+      return _getComicsSortedByLastRead();
+    }
+    if (sortType == LocalSortType.author) {
+      return _getComicsSortedByAuthor();
+    }
+    String orderColumn;
+    String orderDir;
+    switch (sortType) {
+      case LocalSortType.name:
+        orderColumn = 'title';
+        orderDir = 'ASC';
+      case LocalSortType.nameDesc:
+        orderColumn = 'title';
+        orderDir = 'DESC';
+      case LocalSortType.timeAsc:
+        orderColumn = 'created_at';
+        orderDir = 'ASC';
+      case LocalSortType.timeDesc:
+        orderColumn = 'created_at';
+        orderDir = 'DESC';
+      default:
+        orderColumn = 'created_at';
+        orderDir = 'DESC';
+    }
     var res = _db.select('''
-      SELECT * FROM comics
-      ORDER BY
-        ${sortType.value == 'name' ? 'title' : 'created_at'}
-        ${sortType.value == 'time_asc' ? 'ASC' : 'DESC'}
-      ;
+      SELECT * FROM comics ORDER BY $orderColumn $orderDir;
     ''');
     return res.map((row) => LocalComic.fromRow(row)).toList();
+  }
+
+  List<LocalComic> _getComicsSortedByAuthor() {
+    var res = _db.select('SELECT * FROM comics;');
+    var comics = res.map((row) => LocalComic.fromRow(row)).toList();
+    comics.sort((a, b) => a.subtitle.compareTo(b.subtitle));
+    return comics;
+  }
+
+  List<LocalComic> _getComicsSortedByLastRead() {
+    var allComics = _db.select('SELECT * FROM comics;');
+    var comics = allComics.map((row) => LocalComic.fromRow(row)).toList();
+    comics.sort((a, b) {
+      var historyA = HistoryManager().find(a.id, a.comicType);
+      var historyB = HistoryManager().find(b.id, b.comicType);
+      var timeA = historyA?.time ?? DateTime.fromMillisecondsSinceEpoch(0);
+      var timeB = historyB?.time ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return timeB.compareTo(timeA);
+    });
+    return comics;
   }
 
   LocalComic? find(String id, ComicType comicType) {
@@ -706,9 +747,13 @@ class LocalManager with ChangeNotifier {
 }
 
 enum LocalSortType {
+  defaultSort("default"),
   name("name"),
+  nameDesc("name_desc"),
+  timeDesc("time_desc"),
   timeAsc("time_asc"),
-  timeDesc("time_desc");
+  author("author"),
+  lastRead("last_read");
 
   final String value;
 
@@ -720,6 +765,6 @@ enum LocalSortType {
         return type;
       }
     }
-    return name;
+    return defaultSort;
   }
 }
