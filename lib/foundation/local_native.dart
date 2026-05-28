@@ -269,6 +269,10 @@ class LocalManager with ChangeNotifier {
     }
   }
 
+  void close() {
+    _db.dispose();
+  }
+
   Future<void> init() async {
     _db = sqlite3.open('${App.dataPath}/local.db');
     _db.execute('''

@@ -10,6 +10,7 @@ import 'package:venera/foundation/domain_database.dart';
 import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/history.dart';
 import 'package:venera/foundation/log.dart';
+import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/source_platform.dart';
 import 'package:venera/network/cookie_jar.dart';
 import 'package:venera/utils/ext.dart';
@@ -138,7 +139,7 @@ Future<File> exportAppData([bool sync = true]) async {
   } catch (e, s) {
     Log.warning('Export Data', 'Failed to checkpoint domain database: $e\n$s');
   }
-  for (final dbName in ['history.db', 'local_favorite.db']) {
+  for (final dbName in ['history.db', 'local_favorite.db', 'local.db']) {
     try {
       final db = sqlite3.open(FilePath.join(App.dataPath, dbName));
       db.execute('PRAGMA wal_checkpoint(TRUNCATE);');
@@ -168,6 +169,10 @@ Future<File> exportAppData([bool sync = true]) async {
     }
     zipFile.addFile("appdata.json", appdata);
     zipFile.addFile("cookie.db", cookies);
+    var localDbFile = FilePath.join(dataPath, "local.db");
+    if (File(localDbFile).existsSync()) {
+      zipFile.addFile("local.db", localDbFile);
+    }
     for (var file in Directory(
       FilePath.join(dataPath, "comic_source"),
     ).listSync()) {
@@ -270,6 +275,13 @@ Future<void> importAppData(File file, [bool checkVersion = false]) async {
     if (await readLaterFile.exists()) {
       File(FilePath.join(App.dataPath, "read_later.db")).deleteIfExistsSync();
       readLaterFile.renameSync(FilePath.join(App.dataPath, "read_later.db"));
+    }
+    var localDbFile = cacheDir.joinFile("local.db");
+    if (await localDbFile.exists()) {
+      LocalManager().close();
+      File(FilePath.join(App.dataPath, "local.db")).deleteIfExistsSync();
+      localDbFile.renameSync(FilePath.join(App.dataPath, "local.db"));
+      await LocalManager().init();
     }
     var comicSourceDir = FilePath.join(cacheDirPath, "comic_source");
     if (Directory(comicSourceDir).existsSync()) {
