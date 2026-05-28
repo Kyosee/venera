@@ -49,10 +49,11 @@ class _LocalComicsPageState extends State<LocalComicsPage>
       all = LocalManager().search(keyword);
     }
     // Merge active downloading tasks that aren't yet in the database
+    var existingIds = all.map((c) => '${c.id}_${c.comicType}').toSet();
     var downloadingComics = LocalManager()
         .downloadingTasks
         .where((task) =>
-            !all.any((c) => c.id == task.id && c.comicType == task.comicType))
+            !existingIds.contains('${task.id}_${task.comicType}'))
         .map((task) => task.toLocalComic())
         .toList();
     all = [...downloadingComics, ...all];

@@ -391,6 +391,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
       var consecutiveFast = 0;
       const throttleThreshold = Duration(seconds: 20);
       var prefetchFutures = <String, Future<Res<List<String>>>>{};
+      var prefetchStartTimes = <String, DateTime>{};
 
       void startPrefetch(int fromIndex) {
         for (var p = fromIndex;
@@ -400,6 +401,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
           if (_images![key] != null || prefetchFutures.containsKey(key)) {
             continue;
           }
+          prefetchStartTimes[key] = DateTime.now();
           prefetchFutures[key] = _runWithRetry(() async {
             var r = await source.loadComicPages!(comicId, key);
             if (r.error) {
@@ -429,7 +431,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
             if (!_isRunning) return;
           }
 
-          var sw = Stopwatch()..start();
+          var startTime = prefetchStartTimes.remove(key) ?? DateTime.now();
           var future = prefetchFutures.remove(key) ?? _runWithRetry(() async {
             var r = await source.loadComicPages!(comicId, key);
             if (r.error) {
@@ -439,7 +441,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
             }
           });
           var res = await future;
-          sw.stop();
+          var elapsed = DateTime.now().difference(startTime);
           if (!_isRunning) return;
           if (res.error) {
             Log.error("Download", res.errorMessage!);
@@ -447,11 +449,12 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
             return;
           }
 
-          if (sw.elapsed > throttleThreshold) {
+          if (elapsed > throttleThreshold) {
             prefetchCount = 0;
             chapterDelay = const Duration(seconds: 5);
             consecutiveFast = 0;
             prefetchFutures.clear();
+            prefetchStartTimes.clear();
           } else {
             consecutiveFast++;
             if (consecutiveFast >= 3 && prefetchCount < 3) {
