@@ -229,35 +229,24 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
         ),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ListTile(leading: Icon(Icons.stars_outlined), title: Text(folder!)),
-          Text(
-            "Automatic update checking enabled.".tl,
-            style: ts.s14,
-          ).paddingHorizontal(16),
-          Text(
-            "The app will check for updates at most once a day.".tl,
-            style: ts.s14,
-          ).paddingHorizontal(16),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              TextButton(
-                onPressed: showSelector,
-                child: Text("Change Folder".tl),
-              ),
-              FilledButton.tonal(
-                onPressed: checkNow,
-                child: Text("Check Now".tl),
-              ),
-              const SizedBox(width: 16),
-            ],
-          ),
-          const SizedBox(height: 16),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            Icon(Icons.stars_outlined),
+            const SizedBox(width: 12),
+            Expanded(child: Text(folder!, style: ts.s14)),
+            TextButton(
+              onPressed: showSelector,
+              child: Text("Change Folder".tl),
+            ),
+            const SizedBox(width: 8),
+            FilledButton.tonal(
+              onPressed: checkNow,
+              child: Text("Check Now".tl),
+            ),
+          ],
+        ),
       ),
     );
   }
