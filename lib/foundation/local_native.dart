@@ -81,6 +81,25 @@ class LocalComic with HistoryMixin implements Comic {
       ? directory
       : FilePath.join(LocalManager().path, directory);
 
+  LocalComicStatus get status {
+    if (LocalManager().isDownloading(id, comicType)) {
+      return LocalComicStatus.downloading;
+    }
+    final dir = Directory(baseDir);
+    if (!dir.existsSync()) return LocalComicStatus.notDownloaded;
+    try {
+      final contents = dir.listSync();
+      if (contents.isEmpty) return LocalComicStatus.notDownloaded;
+      final hasContent = contents.any((e) =>
+          e is File || (e is Directory && e.listSync().isNotEmpty));
+      return hasContent
+          ? LocalComicStatus.downloaded
+          : LocalComicStatus.notDownloaded;
+    } catch (_) {
+      return LocalComicStatus.notDownloaded;
+    }
+  }
+
   @override
   String get description => "";
 
@@ -373,6 +392,16 @@ class LocalManager with ChangeNotifier {
       SELECT * FROM comics ORDER BY $orderColumn $orderDir;
     ''');
     return res.map((row) => LocalComic.fromRow(row)).toList();
+  }
+
+  List<LocalComic> getComicsByStatus(LocalComicStatus status, LocalSortType sortType) {
+    return getComics(sortType).where((c) => c.status == status).toList();
+  }
+
+  bool hasComicsWithImages() {
+    return getComics(LocalSortType.defaultSort).any(
+      (c) => c.status == LocalComicStatus.downloaded,
+    );
   }
 
   List<LocalComic> _getComicsSortedByAuthor() {
@@ -767,4 +796,10 @@ enum LocalSortType {
     }
     return defaultSort;
   }
+}
+
+enum LocalComicStatus {
+  downloaded,
+  downloading,
+  notDownloaded,
 }
