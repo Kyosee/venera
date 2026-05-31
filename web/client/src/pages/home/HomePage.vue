@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, onActivated } from 'vue'
+import { ref, computed, onMounted, onActivated, onDeactivated } from 'vue'
 import { useRouter } from 'vue-router'
 import ProxiedImage from '@/components/ProxiedImage.vue'
 import { listHistory, getComicSources, listFavorites, clearComicSourcesCache } from '@/services/server-db'
@@ -71,11 +71,6 @@ onMounted(async () => {
   await settingsStore.loadSettings()
   await refreshHomeData()
   activatedOnce = true
-
-  visibilityHandler = () => {
-    if (document.visibilityState === 'visible') refreshHomeData()
-  }
-  document.addEventListener('visibilitychange', visibilityHandler)
 })
 
 onActivated(() => {
@@ -83,11 +78,20 @@ onActivated(() => {
   // that one (onMounted already loaded). On later activations (e.g. returning
   // from a comic detail page after reading), refresh so the history list shows
   // the most recently read comic at the front.
-  if (!activatedOnce) return
-  void refreshHomeData()
+  if (activatedOnce) {
+    void refreshHomeData()
+  }
+  // Register the listener only while active so a backgrounded (kept-alive but
+  // deactivated) page doesn't keep firing refreshHomeData on visibilitychange.
+  if (!visibilityHandler) {
+    visibilityHandler = () => {
+      if (document.visibilityState === 'visible') refreshHomeData()
+    }
+  }
+  document.addEventListener('visibilitychange', visibilityHandler)
 })
 
-onUnmounted(() => {
+onDeactivated(() => {
   if (visibilityHandler) {
     document.removeEventListener('visibilitychange', visibilityHandler)
   }

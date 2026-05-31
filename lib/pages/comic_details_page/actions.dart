@@ -281,9 +281,14 @@ abstract mixin class _ComicPageActions {
     // would download `chapter/null`. Resolve authoritative details first.
     var details = comic;
     if (details.chapters == null && source.loadComicInfo != null) {
-      var res = await source.loadComicInfo!(comic.id);
-      if (res.success && res.data.chapters != null) {
-        details = res.data;
+      try {
+        var res = await source.loadComicInfo!(comic.id);
+        if (res.success && res.data.chapters != null) {
+          details = res.data;
+        }
+      } catch (_) {
+        // Network/JS fetch failed; fall back to the current comic info so the
+        // download flow doesn't break or hang.
       }
     }
 

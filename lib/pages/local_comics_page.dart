@@ -412,8 +412,10 @@ class _LocalComicsPageState extends State<LocalComicsPage>
                   }
                 });
               } else {
-                var comic =
-                    LocalManager().find(c.id, ComicType.fromKey(c.sourceKey))!;
+                // `c` is already a LocalComic from the list; re-querying via
+                // find() returns null for a still-downloading comic that isn't
+                // persisted yet, and the `!` would crash. Use it directly.
+                var comic = c as LocalComic;
                 if (comic.status == LocalComicStatus.notDownloaded) {
                   _showNotDownloadedDialog(comic);
                 } else {
