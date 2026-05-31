@@ -565,7 +565,13 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
 
   void setFolder(String folder) async {
     FollowUpdatesService._cancelChecking?.call();
-    LocalFavoritesManager().prepareTableForFollowUpdates(folder);
+    // Do NOT clear has_new_update here. Selecting a follow-updates folder is a
+    // local configuration action; wiping the flags would discard update marks
+    // that were just synced from another device (and, since this is followed
+    // by a sync upload, would propagate the cleared state back to every other
+    // device). Read marks are cleared by the normal read path, and real new
+    // chapters are written incrementally by the update check below.
+    LocalFavoritesManager().prepareTableForFollowUpdates(folder, false);
 
     var count = LocalFavoritesManager().count(folder);
 
@@ -579,7 +585,11 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
         allComics = LocalFavoritesManager().getComicsWithUpdatesInfo(folder);
         sortComics();
       });
-      appdata.saveData();
+      // Persist the folder choice locally without triggering a sync upload:
+      // this is a local config change, and uploading here could push a
+      // transient (pre-check) state over the good data on other devices.
+      // Real update marks propagate later via normal data-change syncs.
+      appdata.saveData(false);
     }
 
     if (count > 0) {
