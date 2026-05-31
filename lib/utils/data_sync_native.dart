@@ -174,6 +174,34 @@ class DataSync with ChangeNotifier {
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 
+  /// Parses the numeric backup version out of a `<days>-<version>.<platform>.venera`
+  /// file name. Returns 0 when the name does not match. Delegates to
+  /// [RemoteBackupInfo.fromFileName] so the whole sync path shares one parser.
+  int _versionOfFileName(String name) {
+    return RemoteBackupInfo.fromFileName(name).version;
+  }
+
+  /// Picks the `.venera` backup with the highest numeric version.
+  ///
+  /// Selecting by version (instead of lexicographic file-name order) is
+  /// essential: once the version crosses into two digits, string ordering
+  /// ranks `...-9.venera` above `...-10.venera`, which used to make a stale
+  /// backup look newer and reverse the sync direction.
+  T? _latestBackup<T>(List<T> files, String? Function(T) nameOf) {
+    T? best;
+    var bestVersion = -1;
+    for (final f in files) {
+      var name = nameOf(f);
+      if (name == null || !name.endsWith('.venera')) continue;
+      var v = _versionOfFileName(name);
+      if (v > bestVersion) {
+        bestVersion = v;
+        best = f;
+      }
+    }
+    return best;
+  }
+
   bool _hasCompletedInitialSync() {
     if (appdata.implicitData['hasCompletedInitialSync'] == true) return true;
     if (_dataVersion() > 0) {
@@ -353,25 +381,18 @@ class DataSync with ChangeNotifier {
 
       try {
         var files = await client.readDir('/');
-        files.sort((a, b) => b.name!.compareTo(a.name!));
-        var file = files.firstWhereOrNull((e) => e.name!.endsWith('.venera'));
+        var file = _latestBackup(files, (e) => e.name);
         if (file == null) {
           throw 'No data file found';
         }
-        var version = file.name!
-            .split('-')
-            .elementAtOrNull(1)
-            ?.split('.')
-            .first;
-        if (version != null && int.tryParse(version) != null) {
-          var currentVersion = _dataVersion();
-          if (int.parse(version) <= currentVersion) {
-            Log.info("Data Sync", 'No new data to download');
-            if (!_hasCompletedInitialSync()) {
-              _markInitialSyncCompleted();
-            }
-            return const Res(true);
+        var remoteVersion = _versionOfFileName(file.name!);
+        var currentVersion = _dataVersion();
+        if (remoteVersion <= currentVersion) {
+          Log.info("Data Sync", 'No new data to download');
+          if (!_hasCompletedInitialSync()) {
+            _markInitialSyncCompleted();
           }
+          return const Res(true);
         }
         Log.info("Data Sync", "Downloading data from WebDAV server");
         var localFile = File(FilePath.join(App.cachePath, file.name!));
@@ -380,6 +401,14 @@ class DataSync with ChangeNotifier {
           await importAppData(localFile, true);
         } finally {
           localFile.deleteIgnoreError();
+        }
+        // Align the local version with the backup we just imported. Without
+        // this, the downloading device keeps its old (lower) dataVersion and
+        // can later be treated as "newer" than the remote, reversing the sync
+        // direction and overwriting good data with the stale local copy.
+        if (remoteVersion > _dataVersion()) {
+          appdata.settings['dataVersion'] = remoteVersion;
+          await appdata.saveData(false);
         }
         Log.info("Data Sync", "Data downloaded successfully");
         _addSyncLog('download', null, true, null);
@@ -413,16 +442,12 @@ class DataSync with ChangeNotifier {
     try {
       var client = newClient(url, user: user, password: pass, adapter: RHttpAdapter());
       var files = await client.readDir('/');
-      files.sort((a, b) => b.name!.compareTo(a.name!));
-      var file = files.firstWhereOrNull((e) => e.name!.endsWith('.venera'));
+      var file = _latestBackup(files, (e) => e.name);
       if (file == null) {
         return uploadData();
       }
-      var version = file.name!.split('-').elementAtOrNull(1)?.split('.').first;
-      if (version != null && int.tryParse(version) != null) {
-        if (int.parse(version) > _dataVersion()) {
-          return downloadData();
-        }
+      if (_versionOfFileName(file.name!) > _dataVersion()) {
+        return downloadData();
       }
       return uploadData();
     } catch (e) {
@@ -471,12 +496,10 @@ class DataSync with ChangeNotifier {
       var client = newClient(url, user: user, password: pass, adapter: RHttpAdapter());
       try {
         var files = await client.readDir('/');
-        files.sort((a, b) => b.name!.compareTo(a.name!));
-        var latest = files.firstWhereOrNull((e) => e.name!.endsWith('.venera'));
+        var latest = _latestBackup(files, (e) => e.name);
         int maxRemoteVersion = 0;
         if (latest != null) {
-          var v = latest.name!.split('-').elementAtOrNull(1)?.split('.').first;
-          if (v != null) maxRemoteVersion = int.tryParse(v) ?? 0;
+          maxRemoteVersion = _versionOfFileName(latest.name!);
         }
 
         var localFile = File(FilePath.join(App.cachePath, fileName));

@@ -104,7 +104,12 @@ class Appdata with Init {
     "syncLocalComicImages",
   ];
 
-  /// Sync data from another device
+  /// Sync data from another device.
+  ///
+  /// This is the "apply remote data locally" path (download / import), so it
+  /// must NOT trigger an upload afterwards — doing so would push the
+  /// just-downloaded (and possibly stale) data straight back to the server.
+  /// Hence the final [saveData] is called with `sync: false`.
   void syncData(Map<String, dynamic> data) {
     if (data['settings'] is Map) {
       var settings = data['settings'] as Map<String, dynamic>;
@@ -113,11 +118,22 @@ class Appdata with Init {
         this.settings["disableSyncFields"] as String,
       );
 
+      int localDataVersion = _asVersion(this.settings['dataVersion']);
+
       for (var key in settings.keys) {
         if (!_disableSync.contains(key) && !customDisableSync.contains(key)) {
           this.settings[key] = settings[key];
         }
       }
+
+      // Never let an imported/older backup pull the local version backwards.
+      // If a restore wrote a lower dataVersion, this device would look "behind"
+      // the server and get overwritten by stale remote data on the next sync.
+      int incomingDataVersion = _asVersion(settings['dataVersion']);
+      this.settings['dataVersion'] =
+          localDataVersion > incomingDataVersion
+              ? localDataVersion
+              : incomingDataVersion;
     }
     searchHistory = List.from(data['searchHistory'] ?? []);
     var implicitDataChanged = false;
@@ -133,7 +149,13 @@ class Appdata with Init {
     if (implicitDataChanged) {
       writeImplicitData();
     }
-    saveData();
+    saveData(false);
+  }
+
+  static int _asVersion(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 
   var implicitData = <String, dynamic>{};

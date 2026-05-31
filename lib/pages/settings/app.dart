@@ -179,6 +179,12 @@ class _AppSettingsState extends State<AppSettings> {
                   }
                 } else {
                   await importAppData(cacheFile);
+                  // Manual import is an explicit "make this the source of
+                  // truth" action, so push it back up. appdata.syncData no
+                  // longer auto-uploads (that would echo downloads back), and
+                  // the version is kept at max(local, backup), so this upload
+                  // lands as localVersion+1 and wins over any stale remote.
+                  unawaited(DataSync().uploadData());
                 }
               } catch (e, s) {
                 Log.error("Import data", e.toString(), s);
