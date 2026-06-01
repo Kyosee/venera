@@ -366,28 +366,48 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
 
       if (_imageInfo != null) {
         // build image
-        Widget result = RawImage(
-          // Do not clone the image, because RawImage is a stateless wrapper.
-          // The image will be disposed by this state object when it is not needed
-          // anymore, such as when it is unmounted or when the image stream pushes
-          // a new image.
-          image: _imageInfo?.image,
-          debugImageLabel: _imageInfo?.debugLabel,
-          width: width,
-          height: height,
-          scale: _imageInfo?.scale ?? 1.0,
-          color: widget.color,
-          opacity: widget.opacity,
-          colorBlendMode: widget.colorBlendMode,
-          fit: widget.fit,
-          alignment: widget.alignment,
-          repeat: widget.repeat,
-          centerSlice: widget.centerSlice,
-          matchTextDirection: widget.matchTextDirection,
-          invertColors: _invertColors,
-          isAntiAlias: widget.isAntiAlias,
-          filterQuality: widget.filterQuality,
-        );
+        final image = _imageInfo!.image;
+        Widget result = ImageEnhanceShader.instance.isEnabled
+            ? EnhancedComicImage(
+                image: image,
+                debugImageLabel: _imageInfo?.debugLabel,
+                width: width,
+                height: height,
+                scale: _imageInfo?.scale ?? 1.0,
+                color: widget.color,
+                opacity: widget.opacity,
+                colorBlendMode: widget.colorBlendMode,
+                fit: widget.fit,
+                alignment: widget.alignment,
+                repeat: widget.repeat,
+                centerSlice: widget.centerSlice,
+                matchTextDirection: widget.matchTextDirection,
+                invertColors: _invertColors,
+                isAntiAlias: widget.isAntiAlias,
+                filterQuality: widget.filterQuality,
+              )
+            : RawImage(
+                // Do not clone the image, because RawImage is a stateless wrapper.
+                // The image will be disposed by this state object when it is not needed
+                // anymore, such as when it is unmounted or when the image stream pushes
+                // a new image.
+                image: image,
+                debugImageLabel: _imageInfo?.debugLabel,
+                width: width,
+                height: height,
+                scale: _imageInfo?.scale ?? 1.0,
+                color: widget.color,
+                opacity: widget.opacity,
+                colorBlendMode: widget.colorBlendMode,
+                fit: widget.fit,
+                alignment: widget.alignment,
+                repeat: widget.repeat,
+                centerSlice: widget.centerSlice,
+                matchTextDirection: widget.matchTextDirection,
+                invertColors: _invertColors,
+                isAntiAlias: widget.isAntiAlias,
+                filterQuality: widget.filterQuality,
+              );
 
         if (!widget.excludeFromSemantics) {
           result = Semantics(

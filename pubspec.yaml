@@ -106,6 +106,8 @@ flutter:
     - assets/tags.json
     - assets/tags_tw.json
     - assets/opencc.txt
+  shaders:
+    - shaders/image_enhance.frag
 # fonts:
 
 flutter_to_arch:

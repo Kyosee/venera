@@ -286,6 +286,11 @@ class Settings with ChangeNotifier {
         false, // show chapter comments at end of chapter
     'galleryFillScreen':
         false, // when true, gallery mode uses BoxFit.cover instead of contain
+    'enableReaderImageEnhance': false, // GPU render-time image sharpening in reader
+    'readerImageEnhanceStrength': 0.5, // unsharp mask strength
+    'readerImageEnhanceClarity': 0.0, // 0.0 - 1.0 mid-radius local contrast
+    'readerImageEnhanceContrast': 0.0, // 0.0 - 1.0 level-stretch amount
+    'readerImageEnhanceVibrance': 0.0, // 0.0 - 1.0 colour-page saturation lift
   };
 
   operator [](String key) {

@@ -422,9 +422,19 @@ class _SliderSettingState extends State<_SliderSetting> {
                 ? appdata.settings.getDeviceReaderSetting(widget.settingsIndex)
                 : appdata.settings[widget.settingsIndex])
             .toDouble();
+    // Decimal places needed to show the current step without float noise,
+    // derived from the interval (0.1 -> 1 digit, 0.05 -> 2 digits, 1 -> 0).
+    final fractionDigits = widget.interval >= 1
+        ? 0
+        : widget.interval.toString().split('.').last.length;
     return ListTile(
       title: Text(widget.title, softWrap: true, maxLines: 2),
-      trailing: Text(value.toString(), style: ts.s12),
+      trailing: Text(
+        value.toInt() == value
+            ? value.toInt().toString()
+            : value.toStringAsFixed(fractionDigits),
+        style: ts.s12,
+      ),
       subtitle: Slider(
         value: value,
         onChanged: (value) {
@@ -448,6 +458,13 @@ class _SliderSettingState extends State<_SliderSetting> {
               appdata.saveData();
             });
           } else {
+            // Slider emits values with floating-point accumulation error
+            // (e.g. 5.699999999999). Snap to the nearest interval step so the
+            // stored and displayed value stays clean.
+            final steps = ((value - widget.min) / widget.interval).round();
+            value = double.parse(
+              (widget.min + steps * widget.interval).toStringAsFixed(4),
+            );
             setState(() {
               if (widget.comicId != null) {
                 appdata.settings.setReaderSetting(

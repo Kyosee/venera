@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/cache_manager.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
+import 'package:venera/foundation/image_enhance_shader.dart';
 import 'package:venera/foundation/js_engine.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/related_source_tasks.dart';
@@ -62,6 +63,7 @@ Future<void> initDeferred() async {
       JsEngine().init().wait(),
       ComicSourceManager().init().wait(),
       OpenCC.init(),
+      ImageEnhanceShader.instance.preload().wait(),
     ];
     await Future.wait(futures);
     CacheManager().setLimitSize(appdata.settings['cacheSize']);

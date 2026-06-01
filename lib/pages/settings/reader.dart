@@ -361,17 +361,6 @@ class _ReaderSettingsState extends State<ReaderSettings> {
             useDeviceSettings: useDeviceSpecificSettings,
           ),
         ),
-        _SwitchSetting(
-          title: 'Limit image width'.tl,
-          subtitle: 'When using Continuous(Top to Bottom) mode'.tl,
-          settingKey: 'limitImageWidth',
-          onChanged: () {
-            widget.onChanged?.call('limitImageWidth');
-          },
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
-        ).toSliver(),
         if (App.isAndroid)
           _SwitchSetting(
             title: 'Turn page by volume keys'.tl,
@@ -431,10 +420,83 @@ class _ReaderSettingsState extends State<ReaderSettings> {
           comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
           useDeviceSettings: useDeviceSpecificSettings,
         ).toSliver(),
-        _CallbackSetting(
-          title: "Custom Image Processing".tl,
-          callback: () => context.to(() => _CustomImageProcessing()),
-          actionTitle: "Edit".tl,
+        ExpansionTile(
+          key: const PageStorageKey('readerImageProcessingGroup'),
+          tilePadding: const EdgeInsets.symmetric(horizontal: 16),
+          childrenPadding: const EdgeInsets.only(bottom: 8),
+          title: Text("Image processing / enhancement".tl),
+          children: [
+            _SwitchSetting(
+              title: 'Limit image width'.tl,
+              subtitle: 'When using Continuous(Top to Bottom) mode'.tl,
+              settingKey: 'limitImageWidth',
+              onChanged: () {
+                widget.onChanged?.call('limitImageWidth');
+              },
+              comicId: isEnabledSpecificSettings ? widget.comicId : null,
+              comicSource:
+                  isEnabledSpecificSettings ? widget.comicSource : null,
+              useDeviceSettings: useDeviceSpecificSettings,
+            ),
+            _CallbackSetting(
+              title: "Custom Image Processing".tl,
+              callback: () => context.to(() => _CustomImageProcessing()),
+              actionTitle: "Edit".tl,
+            ),
+            _SwitchSetting(
+              title: "Image enhancement".tl,
+              subtitle:
+                  "Sharpen blurry images at render time without extra loading or battery cost"
+                      .tl,
+              settingKey: "enableReaderImageEnhance",
+              onChanged: () {
+                setState(() {});
+                widget.onChanged?.call("enableReaderImageEnhance");
+              },
+            ),
+            if (appdata.settings['enableReaderImageEnhance'] == true) ...[
+              _SliderSetting(
+                title: "Sharpen strength".tl,
+                settingsIndex: "readerImageEnhanceStrength",
+                interval: 0.1,
+                min: 0.0,
+                max: ImageEnhanceShader.maxStrength,
+                onChanged: () {
+                  widget.onChanged?.call("readerImageEnhanceStrength");
+                },
+              ),
+              _SliderSetting(
+                title: "Clarity".tl,
+                settingsIndex: "readerImageEnhanceClarity",
+                interval: 0.1,
+                min: 0.0,
+                max: 1.0,
+                onChanged: () {
+                  widget.onChanged?.call("readerImageEnhanceClarity");
+                },
+              ),
+              _SliderSetting(
+                title: "Contrast".tl,
+                settingsIndex: "readerImageEnhanceContrast",
+                interval: 0.1,
+                min: 0.0,
+                max: 1.0,
+                onChanged: () {
+                  widget.onChanged?.call("readerImageEnhanceContrast");
+                },
+              ),
+              _SliderSetting(
+                title: "Color vibrance".tl,
+                settingsIndex: "readerImageEnhanceVibrance",
+                interval: 0.1,
+                min: 0.0,
+                max: 1.0,
+                onChanged: () {
+                  widget.onChanged?.call("readerImageEnhanceVibrance");
+                },
+              ),
+            ],
+          ],
         ).toSliver(),
         _SliderSetting(
           title: "Number of images preloaded".tl,
