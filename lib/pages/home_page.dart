@@ -7,6 +7,7 @@ import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/consts.dart';
 import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/history.dart';
+import 'package:venera/foundation/read_later.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/pages/comic_details_page/comic_page.dart';
@@ -14,6 +15,7 @@ import 'package:venera/pages/comic_source_page.dart';
 import 'package:venera/pages/downloading_page.dart';
 import 'package:venera/pages/follow_updates_page.dart';
 import 'package:venera/pages/history_page.dart';
+import 'package:venera/pages/read_later_page.dart';
 import 'package:venera/pages/image_favorites_page/image_favorites_page.dart';
 import 'package:venera/pages/search_page.dart';
 import 'package:venera/utils/data_sync.dart';
@@ -37,6 +39,7 @@ class HomePage extends StatelessWidget {
         const _SearchBar(),
         const _SyncDataWidget(),
         const _History(),
+        const _ReadLater(),
         if (!App.isWeb) const _Local(),
         const FollowUpdatesWidget(),
         const _ComicSourceWidget(),
@@ -342,6 +345,121 @@ class _HistoryState extends State<_History> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _ReadLater extends StatefulWidget {
+  const _ReadLater();
+
+  @override
+  State<_ReadLater> createState() => _ReadLaterState();
+}
+
+class _ReadLaterState extends State<_ReadLater> {
+  late List<ReadLaterItem> items;
+  late int count;
+
+  void onReadLaterChange() {
+    if (!ReadLaterManager().isInitialized) return;
+    if (mounted) {
+      setState(() {
+        items = ReadLaterManager().getRecent();
+        count = ReadLaterManager().count;
+      });
+    }
+  }
+
+  @override
+  void initState() {
+    items = ReadLaterManager().getRecent();
+    count = ReadLaterManager().count;
+    ReadLaterManager().addListener(onReadLaterChange);
+    DataSync().addListener(onReadLaterChange);
+    super.initState();
+    if (App.isWeb) {
+      ReadLaterManager().loadFromServer();
+    }
+  }
+
+  @override
+  void dispose() {
+    ReadLaterManager().removeListener(onReadLaterChange);
+    DataSync().removeListener(onReadLaterChange);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) {
+      return const SliverToBoxAdapter(child: SizedBox.shrink());
+    }
+    return _readLaterBody(context);
+  }
+
+  Widget _readLaterBody(BuildContext context) {
+    return SliverToBoxAdapter(
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant,
+            width: 0.6,
+          ),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: _readLaterInk(context),
+      ),
+    );
+  }
+
+  Widget _readLaterInk(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () {
+        context.to(() => const ReadLaterPage());
+      },
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            height: 56,
+            child: Row(
+              children: [
+                Text('Read Later'.tl, style: ts.s18),
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.secondaryContainer,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(count.toString(), style: ts.s12),
+                ),
+                const Spacer(),
+                const Icon(Icons.arrow_right),
+              ],
+            ),
+          ).paddingHorizontal(16),
+          SizedBox(
+            height: 136,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: items.length,
+              itemBuilder: (context, index) {
+                final heroID = items[index].id.hashCode;
+                return SimpleComicTile(
+                  comic: items[index],
+                  heroID: heroID,
+                ).paddingHorizontal(8).paddingVertical(2);
+              },
+            ),
+          ).paddingHorizontal(8).paddingBottom(16),
+        ],
       ),
     );
   }

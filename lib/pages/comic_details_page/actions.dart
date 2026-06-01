@@ -96,6 +96,30 @@ abstract mixin class _ComicPageActions {
     App.rootContext.showMessage(message: "Added".tl);
   }
 
+  /// whether the comic is in the "Read Later" list
+  bool get isInReadLater =>
+      ReadLaterManager().isExist(comic.id, comic.comicType);
+
+  void toggleReadLater() async {
+    if (isInReadLater) {
+      await ReadLaterManager().remove(comic.id, comic.comicType);
+      update();
+      App.rootContext.showMessage(message: "Removed from read later".tl);
+    } else {
+      await ReadLaterManager().addItem(ReadLaterItem(
+        id: comic.id,
+        title: comic.title,
+        subtitle: comic.subTitle,
+        cover: comic.cover,
+        type: comic.comicType,
+        tags: comic.plainTags,
+        time: DateTime.now(),
+      ));
+      update();
+      App.rootContext.showMessage(message: "Added to read later".tl);
+    }
+  }
+
   void share() {
     var text = comic.title;
     if (comic.url != null) {

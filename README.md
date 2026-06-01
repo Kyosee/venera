@@ -20,9 +20,7 @@ A cross-platform manga/comic reader with self-hosted Web frontend support.
 
 ## Features
 
-- Multi-platform: Windows, Linux, macOS, Android, iOS
-- JavaScript-based comic source plugins (QuickJS on native, Node.js on server)
-- Self-hosted Web frontend with Docker support
+- Self-hosted Web frontend with Docker support (experimental)
 - WebDAV backup & sync
 - Windows auto-updater with fallback scripts
 - Android APK auto-update
@@ -41,6 +39,8 @@ flutter build macos      # macOS
 ### Web PWA
 
 Vue 3 PWA powered by a Node.js server + Rust image proxy sidecar. Primarily for iOS users who cannot sideload native apps — host on a local server and access via Safari.
+
+> **Experimental:** The Web PWA is still under active development. Expect bugs and incomplete features — many native-app capabilities are not yet fully ported. Use it for personal testing only.
 
 **Docker (Recommended)**
 

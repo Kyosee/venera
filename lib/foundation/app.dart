@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:venera/foundation/history.dart';
+import 'package:venera/foundation/read_later.dart';
 import 'package:venera/utils/io.dart';
 
 import 'appdata.dart';
@@ -72,6 +73,8 @@ class _App {
 
   final HistoryManager history = HistoryManager();
 
+  final ReadLaterManager readLater = ReadLaterManager();
+
   final LocalFavoritesManager favorites = LocalFavoritesManager();
 
   final LocalManager local = LocalManager();
@@ -112,6 +115,7 @@ class _App {
     if (kIsWeb) {
       await data.init();
       await history.init();
+      await readLater.init();
       await favorites.init();
       await domain.init(dataPath);
       await local.init();
@@ -120,6 +124,7 @@ class _App {
     final futures = <Future<void>>[
       data.init(),
       history.init(),
+      readLater.init(),
       favorites.init(),
       domain.init(dataPath),
       local.init(),

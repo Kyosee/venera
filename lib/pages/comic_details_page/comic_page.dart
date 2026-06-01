@@ -18,6 +18,7 @@ import 'package:venera/foundation/consts.dart';
 import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/favorites_meta.dart';
 import 'package:venera/foundation/history.dart';
+import 'package:venera/foundation/read_later.dart';
 import 'package:venera/foundation/image_provider/cached_image.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/res.dart';
@@ -534,6 +535,14 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
                 onPressed: openFavPanel,
                 onLongPressed: quickFavorite,
                 iconColor: context.useTextColor(Colors.purple),
+              ),
+              _ActionButton(
+                icon: const Icon(Icons.watch_later_outlined),
+                activeIcon: const Icon(Icons.watch_later),
+                isActive: isInReadLater,
+                text: 'Read Later'.tl,
+                onPressed: toggleReadLater,
+                iconColor: context.useTextColor(Colors.teal),
               ),
               if (source?.commentsLoader != null)
                 _ActionButton(

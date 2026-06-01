@@ -2,6 +2,7 @@ import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/history.dart';
+import 'package:venera/foundation/read_later.dart';
 
 class ServerHistoryPage {
   const ServerHistoryPage({required this.items, required this.total});
@@ -37,6 +38,22 @@ class ServerDbClient {
   }
 
   Future<bool> clearUnfavoritedHistory() {
+    return Future.value(false);
+  }
+
+  Future<List<ReadLaterItem>?> listReadLater({int limit = 1000}) {
+    return Future.value(null);
+  }
+
+  Future<bool> upsertReadLater(ReadLaterItem item) {
+    return Future.value(false);
+  }
+
+  Future<bool> deleteReadLater(String id, ComicType type) {
+    return Future.value(false);
+  }
+
+  Future<bool> clearReadLater() {
     return Future.value(false);
   }
 

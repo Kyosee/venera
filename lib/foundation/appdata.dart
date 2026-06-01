@@ -230,6 +230,7 @@ class Settings with ChangeNotifier {
     'searchSources': null,
     'showFavoriteStatusOnTile': true,
     'showHistoryStatusOnTile': false,
+    'showReadLaterStatusOnTile': true,
     'blockedWords': [],
     'blockedCommentWords': [],
     'defaultSearchTarget': null,

@@ -5,6 +5,7 @@ import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/history.dart';
 import 'package:venera/foundation/history_tasks.dart';
+import 'package:venera/foundation/read_later.dart';
 import 'package:venera/pages/favorites/favorites_page.dart';
 import 'package:venera/utils/server_db.dart';
 import 'package:venera/utils/translations.dart';
@@ -365,6 +366,26 @@ class _HistoryPageState extends State<HistoryPage> {
             onClick: () {
               if (selectedComics.isEmpty) return;
               addFavorite(List<History>.from(selectedComics.keys));
+            },
+          ),
+          MenuEntry(
+            icon: Icons.watch_later_outlined,
+            text: "Read later".tl,
+            onClick: () async {
+              if (selectedComics.isEmpty) return;
+              final picked = List<History>.from(selectedComics.keys);
+              for (final comic in picked) {
+                await ReadLaterManager().add(comic);
+              }
+              setState(() {
+                multiSelectMode = false;
+                selectedComics.clear();
+              });
+              if (mounted) {
+                App.rootContext.showMessage(
+                  message: "Added to read later".tl,
+                );
+              }
             },
           ),
         ],

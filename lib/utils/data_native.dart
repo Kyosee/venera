@@ -122,6 +122,16 @@ void _rewriteLegacySourceTypes(Directory cacheDir, Map<int, String> typeMap) {
       db.dispose();
     }
   }
+
+  var readLaterFile = cacheDir.joinFile("read_later.db");
+  if (readLaterFile.existsSync()) {
+    var db = sqlite3.open(readLaterFile.path);
+    try {
+      _rewriteLegacyTypeColumn(db, 'read_later', 'type', typeMap);
+    } finally {
+      db.dispose();
+    }
+  }
 }
 
 Future<File> exportAppData([bool sync = true]) async {
@@ -139,7 +149,12 @@ Future<File> exportAppData([bool sync = true]) async {
   } catch (e, s) {
     Log.warning('Export Data', 'Failed to checkpoint domain database: $e\n$s');
   }
-  for (final dbName in ['history.db', 'local_favorite.db', 'local.db']) {
+  for (final dbName in [
+    'history.db',
+    'local_favorite.db',
+    'local.db',
+    'read_later.db',
+  ]) {
     try {
       final db = sqlite3.open(FilePath.join(App.dataPath, dbName));
       db.execute('PRAGMA wal_checkpoint(TRUNCATE);');
@@ -343,10 +358,12 @@ Future<void> importAppData(File file, [bool checkVersion = false]) async {
     }
     var readLaterFile = cacheDir.joinFile("read_later.db");
     if (await readLaterFile.exists()) {
+      App.readLater.close();
       await _replaceDatabaseFile(
         readLaterFile,
         FilePath.join(App.dataPath, "read_later.db"),
       );
+      await App.readLater.init();
     }
     var localDbFile = cacheDir.joinFile("local.db");
     if (await localDbFile.exists()) {

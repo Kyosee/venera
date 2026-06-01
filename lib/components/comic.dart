@@ -121,6 +121,20 @@ class ComicTile extends StatelessWidget {
         },
       ),
       MenuEntry(
+        icon: ReadLaterManager().isExist(comic.id, ComicType.fromKey(comic.sourceKey))
+            ? Icons.bookmark_remove_outlined
+            : Icons.watch_later_outlined,
+        text: ReadLaterManager().isExist(comic.id, ComicType.fromKey(comic.sourceKey))
+            ? 'Remove from read later'.tl
+            : 'Read later'.tl,
+        onClick: () async {
+          final added = await ReadLaterManager().toggle(comic);
+          App.rootContext.showMessage(
+            message: added ? 'Added to read later'.tl : 'Removed from read later'.tl,
+          );
+        },
+      ),
+      MenuEntry(
         icon: Icons.hub_outlined,
         text: 'Related Sources'.tl,
         onClick: () => showRelatedSourcesDialog(context, comic),
@@ -148,6 +162,9 @@ class ComicTile extends StatelessWidget {
     var isFavorite = appdata.settings['showFavoriteStatusOnTile']
         ? LocalFavoritesManager().isExist(comic.id, comicType)
         : false;
+    var isReadLater = appdata.settings['showReadLaterStatusOnTile']
+        ? ReadLaterManager().isExist(comic.id, comicType)
+        : false;
     final showHistoryOnTile = appdata.settings['showHistoryStatusOnTile'];
     final history = showHistoryOnTile || type == 'detailed'
         ? HistoryManager().find(comic.id, comicType)
@@ -165,7 +182,7 @@ class ComicTile extends StatelessWidget {
         ? _buildDetailedMode(context, history, tileHistory, chapterProgress)
         : _buildBriefMode(context, tileHistory, chapterProgress);
 
-    if (!isFavorite && tileHistory == null) {
+    if (!isFavorite && !isReadLater && tileHistory == null) {
       return child;
     }
 
@@ -189,6 +206,17 @@ class ComicTile extends StatelessWidget {
                     child: const Icon(
                       Icons.bookmark_rounded,
                       size: 16,
+                      color: Colors.white,
+                    ),
+                  ),
+                if (isReadLater)
+                  Container(
+                    height: 24,
+                    width: 24,
+                    color: Colors.orange,
+                    child: const Icon(
+                      Icons.watch_later_rounded,
+                      size: 15,
                       color: Colors.white,
                     ),
                   ),
@@ -2273,32 +2301,50 @@ class SimpleComicTile extends StatelessWidget {
             filterQuality: FilterQuality.medium,
           );
 
-    if (showFavorite &&
-        appdata.settings['showFavoriteStatusOnTile'] &&
-        LocalFavoritesManager().isExist(
-          comic.id,
-          ComicType.fromKey(comic.sourceKey),
-        )) {
-      cover = Stack(
-        fit: StackFit.expand,
-        children: [
-          cover,
-          Positioned(
-            left: 0,
-            top: 0,
-            child: Container(
-              height: 24,
-              width: 24,
-              color: Colors.green,
-              child: const Icon(
-                Icons.bookmark_rounded,
-                size: 16,
-                color: Colors.white,
+    if (showFavorite) {
+      final comicType = ComicType.fromKey(comic.sourceKey);
+      final showFav = appdata.settings['showFavoriteStatusOnTile'] &&
+          LocalFavoritesManager().isExist(comic.id, comicType);
+      final showReadLater = appdata.settings['showReadLaterStatusOnTile'] &&
+          ReadLaterManager().isExist(comic.id, comicType);
+      if (showFav || showReadLater) {
+        cover = Stack(
+          fit: StackFit.expand,
+          children: [
+            cover,
+            Positioned(
+              left: 0,
+              top: 0,
+              child: Row(
+                children: [
+                  if (showFav)
+                    Container(
+                      height: 24,
+                      width: 24,
+                      color: Colors.green,
+                      child: const Icon(
+                        Icons.bookmark_rounded,
+                        size: 16,
+                        color: Colors.white,
+                      ),
+                    ),
+                  if (showReadLater)
+                    Container(
+                      height: 24,
+                      width: 24,
+                      color: Colors.orange,
+                      child: const Icon(
+                        Icons.watch_later_rounded,
+                        size: 15,
+                        color: Colors.white,
+                      ),
+                    ),
+                ],
               ),
             ),
-          ),
-        ],
-      );
+          ],
+        );
+      }
     }
 
     Widget child = Container(

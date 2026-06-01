@@ -8,6 +8,7 @@ import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/history.dart';
+import 'package:venera/foundation/read_later.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/res.dart';
 import 'package:venera/utils/data_web.dart';
@@ -31,6 +32,7 @@ class DataSync with ChangeNotifier {
     LocalFavoritesManager().addListener(onDataChanged);
     ComicSourceManager().addListener(onDataChanged);
     ImageFavoriteManager().addListener(onDataChanged);
+    ReadLaterManager().addListener(onDataChanged);
   }
 
   static DataSync? instance;
@@ -514,6 +516,7 @@ class DataSync with ChangeNotifier {
         await HistoryManager().waitServerHistorySync();
         await LocalFavoritesManager().waitServerFavoriteSync();
         await ImageFavoriteManager().syncServerImageFavorites();
+        await ReadLaterManager().waitServerReadLaterSync();
         appdata.settings['dataVersion'] = nextVersion;
         await appdata.saveData(false);
         final daysSinceEpoch =
@@ -588,6 +591,7 @@ class DataSync with ChangeNotifier {
         Log.info("Data Sync", "Server DB synchronized successfully");
         HistoryManager().notifyListeners();
         LocalFavoritesManager().notifyListeners();
+        ReadLaterManager().notifyListeners();
         return const Res(true);
       } catch (e, s) {
         if (!_isMissingServerDbRoute(e)) {

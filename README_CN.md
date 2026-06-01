@@ -20,9 +20,7 @@
 
 ## 功能
 
-- 多平台：Windows、Linux、macOS、Android、iOS
-- 基于 JavaScript 的漫画源插件（原生端 QuickJS，服务端 Node.js）
-- 自托管 Web 前端，支持 Docker 部署
+- 自托管 Web 前端，支持 Docker 部署（实验性）
 - WebDAV 备份与同步
 - Windows 自动更新（含回退脚本）
 - Android APK 自动更新
@@ -41,6 +39,8 @@ flutter build macos      # macOS
 ### Web PWA端
 
 Vue 3 PWA，由 Node.js 服务端 + Rust 图片代理侧车驱动。主要用于 iOS 用户（无法侧载原生应用），部署在本地服务器后通过 Safari 访问。
+
+> **实验性：** Web PWA 仍在积极开发中，可能存在诸多 bug 和未完成功能——大量原生端能力尚未完全移植。建议仅用于个人测试。
 
 **Docker（推荐）**
 

@@ -4,6 +4,7 @@ import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/history.dart';
+import 'package:venera/foundation/read_later.dart';
 
 class ServerHistoryPage {
   const ServerHistoryPage({required this.items, required this.total});
@@ -140,6 +141,80 @@ class ServerDbClient {
   Future<bool> clearUnfavoritedHistory() async {
     final response = await _dio().post(
       '/api/server-db/history/clear-unfavorited',
+      data: {'profile': _profile},
+    );
+    final data = response.data;
+    return data is Map && data['ok'] == true;
+  }
+
+  Map<String, dynamic> _readLaterPayload(ReadLaterItem item) {
+    return {
+      'id': item.id,
+      'title': item.title,
+      'subtitle': item.subtitle,
+      'cover': item.cover,
+      'type': item.type.value,
+      'tags': item.tags,
+      'time': item.time.millisecondsSinceEpoch,
+    };
+  }
+
+  Future<List<ReadLaterItem>?> listReadLater({int limit = 1000}) async {
+    try {
+      final response = await _dio().post(
+        '/api/server-db/read-later/list',
+        data: {'profile': _profile, 'limit': limit},
+      );
+      final data = response.data;
+      if (data is! Map || data['ok'] != true) {
+        return null;
+      }
+      final rawItems = data['items'];
+      if (rawItems is! List) return <ReadLaterItem>[];
+      return rawItems.whereType<Map>().map((item) {
+        final m = item.cast<String, dynamic>();
+        final rawTags = m['tags'];
+        return ReadLaterItem(
+          id: m['id'].toString(),
+          title: (m['title'] ?? '').toString(),
+          subtitle: m['subtitle']?.toString(),
+          cover: (m['cover'] ?? '').toString(),
+          type: ComicType((m['type'] as num?)?.toInt() ?? 0),
+          tags: rawTags is List
+              ? rawTags.map((e) => e.toString()).toList()
+              : const [],
+          time: DateTime.fromMillisecondsSinceEpoch(
+            (m['time'] as num?)?.toInt() ?? 0,
+          ),
+        );
+      }).toList();
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) return null;
+      rethrow;
+    }
+  }
+
+  Future<bool> upsertReadLater(ReadLaterItem item) async {
+    final response = await _dio().post(
+      '/api/server-db/read-later/upsert',
+      data: {'profile': _profile, 'readLater': _readLaterPayload(item)},
+    );
+    final data = response.data;
+    return data is Map && data['ok'] == true;
+  }
+
+  Future<bool> deleteReadLater(String id, ComicType type) async {
+    final response = await _dio().post(
+      '/api/server-db/read-later/delete',
+      data: {'profile': _profile, 'id': id, 'type': type.value},
+    );
+    final data = response.data;
+    return data is Map && data['ok'] == true;
+  }
+
+  Future<bool> clearReadLater() async {
+    final response = await _dio().post(
+      '/api/server-db/read-later/clear',
       data: {'profile': _profile},
     );
     final data = response.data;

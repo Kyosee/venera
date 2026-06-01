@@ -19,6 +19,7 @@ const webPendingDbImportKey = 'webPwaPendingDbImport';
 const _webDbEntries = [
   'data/venera.db',
   'history.db',
+  'read_later.db',
   'local_favorite.db',
   'cookie.db',
 ];
@@ -48,6 +49,7 @@ Future<File> exportAppData([bool sync = true]) async {
 
   final databaseEntries = {
     'history.db': FilePath.join(App.dataPath, 'history.db'),
+    'read_later.db': FilePath.join(App.dataPath, 'read_later.db'),
     'local_favorite.db': FilePath.join(App.dataPath, 'local_favorite.db'),
     'data/venera.db': DomainDatabase.databasePathFor(App.dataPath),
     'cookie.db': FilePath.join(App.dataPath, 'cookie.db'),
@@ -527,6 +529,7 @@ String _webDatabaseTargetPath(String entryName) {
   return switch (entryName) {
     'data/venera.db' => DomainDatabase.databasePathFor(App.dataPath),
     'history.db' => FilePath.join(App.dataPath, 'history.db'),
+    'read_later.db' => FilePath.join(App.dataPath, 'read_later.db'),
     'local_favorite.db' => FilePath.join(App.dataPath, 'local_favorite.db'),
     'cookie.db' => FilePath.join(App.dataPath, 'cookie.db'),
     _ => throw ArgumentError('Unsupported web database entry: $entryName'),
@@ -543,6 +546,11 @@ Future<void> _closeWebDatabase(String entryName) async {
       break;
     case 'history.db':
       HistoryManager().close();
+      break;
+    case 'read_later.db':
+      try {
+        App.readLater.close();
+      } catch (_) {}
       break;
     case 'local_favorite.db':
       try {
@@ -563,6 +571,9 @@ Future<void> _initWebDatabase(String entryName) async {
       break;
     case 'history.db':
       await HistoryManager().init();
+      break;
+    case 'read_later.db':
+      await App.readLater.init();
       break;
     case 'local_favorite.db':
       await LocalFavoritesManager().init();
