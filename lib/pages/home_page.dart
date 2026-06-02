@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:sliver_tools/sliver_tools.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'package:venera/components/components.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/consts.dart';
+import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/history.dart';
+import 'package:venera/foundation/home_layout.dart';
 import 'package:venera/foundation/read_later.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/log.dart';
@@ -27,26 +28,251 @@ import 'package:venera/utils/venera_comics.dart';
 
 import 'local_comics_page.dart';
 
-class HomePage extends StatelessWidget {
+class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
   @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  bool editMode = false;
+
+  late List<HomeSectionConfig> layout;
+
+  @override
+  void initState() {
+    layout = normalizeHomeLayout();
+    appdata.settings.addListener(_onSettingsChanged);
+    super.initState();
+  }
+
+  @override
+  void dispose() {
+    appdata.settings.removeListener(_onSettingsChanged);
+    super.dispose();
+  }
+
+  void _onSettingsChanged() {
+    // Re-read the layout when settings change (e.g. edited from the Appearance
+    // settings page, or a new layout arrived via WebDAV sync download). Skip
+    // while editing so an incoming sync doesn't yank the list out from under
+    // the user mid-drag.
+    if (editMode) return;
+    var next = normalizeHomeLayout();
+    if (!_sameLayout(next, layout) && mounted) {
+      setState(() => layout = next);
+    }
+  }
+
+  static bool _sameLayout(
+    List<HomeSectionConfig> a,
+    List<HomeSectionConfig> b,
+  ) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id || a[i].visible != b[i].visible) return false;
+    }
+    return true;
+  }
+
+  /// Maps a section id to its real widget. Each gets a [ValueKey] so reordering
+  /// preserves the per-section [State] (these widgets hold data and listeners).
+  Widget _sectionWidget(String id) {
+    return switch (id) {
+      'history' => const _History(key: ValueKey('history')),
+      'readLater' => const _ReadLater(key: ValueKey('readLater')),
+      'local' => const _Local(key: ValueKey('local')),
+      'followUpdates' => const FollowUpdatesWidget(key: ValueKey('followUpdates')),
+      'comicSource' => const _ComicSourceWidget(key: ValueKey('comicSource')),
+      'imageFavorites' => const ImageFavorites(key: ValueKey('imageFavorites')),
+      _ => const SliverToBoxAdapter(child: SizedBox.shrink()),
+    };
+  }
+
+  void _enterEditMode() {
+    setState(() {
+      layout = normalizeHomeLayout();
+      editMode = true;
+    });
+  }
+
+  void _exitEditMode() {
+    saveHomeLayout(layout);
+    setState(() => editMode = false);
+  }
+
+  void _resetLayout() {
+    setState(() => layout = defaultHomeLayout());
+  }
+
+  void _toggleVisible(String id) {
+    setState(() {
+      layout = layout
+          .map((e) => e.id == id ? e.copyWith(visible: !e.visible) : e)
+          .toList();
+    });
+  }
+
+  void _onReorder(int oldIndex, int newIndex) {
+    setState(() {
+      if (newIndex > oldIndex) newIndex -= 1;
+      var item = layout.removeAt(oldIndex);
+      layout.insert(newIndex, item);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    var widget = SmoothCustomScrollView(
-      slivers: [
-        SliverPadding(padding: EdgeInsets.only(top: context.padding.top)),
-        const _SearchBar(),
-        const _SyncDataWidget(),
-        const _History(),
-        const _ReadLater(),
-        const _Local(),
-        const FollowUpdatesWidget(),
-        const _ComicSourceWidget(),
-        const ImageFavorites(),
-        SliverPadding(padding: EdgeInsets.only(top: context.padding.bottom)),
-      ],
+    var slivers = <Widget>[
+      SliverPadding(padding: EdgeInsets.only(top: context.padding.top)),
+      const _SearchBar(),
+    ];
+    if (editMode) {
+      slivers.add(_HomeEditBanner(onDone: _exitEditMode, onReset: _resetLayout));
+      slivers.add(
+        SliverReorderableList(
+          itemCount: layout.length,
+          onReorder: _onReorder,
+          itemBuilder: (context, index) {
+            var config = layout[index];
+            var meta = homeSectionMetaById(config.id)!;
+            return _HomeEditTile(
+              key: ValueKey('edit-${config.id}'),
+              meta: meta,
+              visible: config.visible,
+              index: index,
+              onToggle: () => _toggleVisible(config.id),
+            );
+          },
+        ),
+      );
+    } else {
+      var visible = layout.where((e) => e.visible).toList();
+      if (visible.isEmpty) {
+        slivers.add(_AllHiddenHint(onEdit: _enterEditMode));
+      } else {
+        for (var config in visible) {
+          slivers.add(_sectionWidget(config.id));
+        }
+      }
+    }
+    slivers.add(SliverPadding(padding: EdgeInsets.only(top: context.padding.bottom)));
+
+    Widget widget = GestureDetector(
+      onLongPress: editMode ? null : _enterEditMode,
+      child: SmoothCustomScrollView(slivers: slivers),
     );
     return context.width > changePoint ? widget.paddingHorizontal(8) : widget;
+  }
+}
+
+class _HomeEditBanner extends StatelessWidget {
+  const _HomeEditBanner({required this.onDone, required this.onReset});
+
+  final VoidCallback onDone;
+  final VoidCallback onReset;
+
+  @override
+  Widget build(BuildContext context) {
+    return SliverToBoxAdapter(
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        decoration: BoxDecoration(
+          color: context.colorScheme.primaryContainer.toOpacity(0.4),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.edit_outlined, size: 20),
+            const SizedBox(width: 12),
+            Expanded(child: Text('Edit Home'.tl, style: ts.s16)),
+            TextButton(
+              onPressed: onReset,
+              child: Text('Reset to Default'.tl),
+            ),
+            FilledButton(onPressed: onDone, child: Text('Done'.tl)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HomeEditTile extends StatelessWidget {
+  const _HomeEditTile({
+    super.key,
+    required this.meta,
+    required this.visible,
+    required this.index,
+    required this.onToggle,
+  });
+
+  final HomeSectionMeta meta;
+  final bool visible;
+  final int index;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        border: Border.all(
+          color: context.colorScheme.outlineVariant,
+          width: 0.6,
+        ),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Opacity(
+        opacity: visible ? 1 : 0.45,
+        child: Row(
+          children: [
+            const SizedBox(width: 12),
+            Icon(meta.icon, size: 22),
+            const SizedBox(width: 16),
+            Expanded(child: Text(meta.titleKey.tl, style: ts.s16)),
+            IconButton(
+              tooltip: visible ? 'Hide'.tl : 'Show'.tl,
+              icon: Icon(
+                visible ? Icons.visibility : Icons.visibility_off_outlined,
+              ),
+              onPressed: onToggle,
+            ),
+            ReorderableDragStartListener(
+              index: index,
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                child: Icon(Icons.drag_handle),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AllHiddenHint extends StatelessWidget {
+  const _AllHiddenHint({required this.onEdit});
+
+  final VoidCallback onEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    return SliverToBoxAdapter(
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 24),
+        child: Center(
+          child: TextButton.icon(
+            onPressed: onEdit,
+            icon: const Icon(Icons.dashboard_customize_outlined),
+            label: Text('All sections hidden'.tl),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -55,44 +281,53 @@ class _SearchBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final double height = App.isMobile ? 52 : 46;
     return SliverToBoxAdapter(
       child: Container(
-        height: App.isMobile ? 52 : 46,
-        width: double.infinity,
+        height: height,
         margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        child: Material(
-          color: context.colorScheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(32),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(32),
-            onTap: () {
-              context.to(() => const SearchPage());
-            },
-            child: Row(
-              children: [
-                const SizedBox(width: 16),
-                const Icon(Icons.search),
-                const SizedBox(width: 8),
-                Text('Search'.tl, style: ts.s16),
-                const Spacer(),
-              ],
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: Material(
+                color: context.colorScheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(32),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(32),
+                  onTap: () {
+                    context.to(() => const SearchPage());
+                  },
+                  child: Row(
+                    children: [
+                      const SizedBox(width: 16),
+                      const Icon(Icons.search),
+                      const SizedBox(width: 8),
+                      Text('Search'.tl, style: ts.s16),
+                      const Spacer(),
+                    ],
+                  ),
+                ),
+              ),
             ),
-          ),
+            _SyncButton(height: height),
+          ],
         ),
       ),
     );
   }
 }
 
-class _SyncDataWidget extends StatefulWidget {
-  const _SyncDataWidget();
+class _SyncButton extends StatefulWidget {
+  const _SyncButton({required this.height});
+
+  final double height;
 
   @override
-  State<_SyncDataWidget> createState() => _SyncDataWidgetState();
+  State<_SyncButton> createState() => _SyncButtonState();
 }
 
-class _SyncDataWidgetState extends State<_SyncDataWidget>
-    with WidgetsBindingObserver {
+class _SyncButtonState extends State<_SyncButton> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
@@ -129,95 +364,66 @@ class _SyncDataWidgetState extends State<_SyncDataWidget>
 
   @override
   Widget build(BuildContext context) {
-    Widget child;
     if (!DataSync().isEnabled) {
-      child = const SliverPadding(padding: EdgeInsets.zero);
-    } else if (DataSync().isUploading || DataSync().isDownloading) {
-      child = SliverToBoxAdapter(
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-          decoration: BoxDecoration(
-            border: Border.all(color: Theme.of(context).colorScheme.primary),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: ListTile(
-            leading: const Icon(Icons.sync),
-            title: Text('Syncing Data'.tl),
-            trailing: const CircularProgressIndicator(
-              strokeWidth: 2,
-            ).fixWidth(18).fixHeight(18),
-          ),
-        ),
-      );
-    } else {
-      child = SliverToBoxAdapter(
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-          decoration: BoxDecoration(
-            border: Border.all(
-              color: Theme.of(context).colorScheme.outlineVariant,
-            ),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: ListTile(
-            leading: const Icon(Icons.sync),
-            title: Text('Sync Data'.tl),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (DataSync().lastError != null)
-                  InkWell(
-                    borderRadius: BorderRadius.circular(16),
-                    onTap: () {
-                      showDialogMessage(
-                        App.rootContext,
-                        "Error".tl,
-                        DataSync().lastError!,
-                      );
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: context.colorScheme.errorContainer,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.error_outline,
-                            color: Colors.red,
-                            size: 18,
-                          ),
-                          const SizedBox(width: 4),
-                          Text('Error'.tl, style: ts.s12),
-                        ],
-                      ),
-                    ),
-                  ).paddingRight(4),
-                IconButton(
-                  icon: const Icon(Icons.sync),
-                  onPressed: () async {
-                    DataSync().syncData();
-                  },
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
+      return const SizedBox.shrink();
     }
-    return SliverAnimatedPaintExtent(
-      duration: const Duration(milliseconds: 200),
-      child: child,
+
+    var syncing = DataSync().isUploading || DataSync().isDownloading;
+    var hasError = DataSync().lastError != null;
+
+    Widget icon;
+    if (syncing) {
+      icon = const SizedBox(
+        width: 22,
+        height: 22,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      );
+    } else if (hasError) {
+      icon = Icon(Icons.sync_problem, color: context.colorScheme.error);
+    } else {
+      icon = const Icon(Icons.sync);
+    }
+
+    var tooltip = syncing
+        ? 'Syncing Data'.tl
+        : (hasError ? 'Error'.tl : 'Sync Data'.tl);
+
+    return Padding(
+      padding: const EdgeInsets.only(left: 8),
+      child: Material(
+        color: context.colorScheme.surfaceContainerHigh,
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: syncing
+              ? null
+              : () {
+                  if (hasError) {
+                    showDialogMessage(
+                      App.rootContext,
+                      "Error".tl,
+                      DataSync().lastError!,
+                    );
+                  } else {
+                    DataSync().syncData();
+                  }
+                },
+          child: Tooltip(
+            message: tooltip,
+            child: SizedBox(
+              width: widget.height,
+              height: widget.height,
+              child: Center(child: icon),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
 
 class _History extends StatefulWidget {
-  const _History();
+  const _History({super.key});
 
   @override
   State<_History> createState() => _HistoryState();
@@ -330,7 +536,7 @@ class _HistoryState extends State<_History> {
 }
 
 class _ReadLater extends StatefulWidget {
-  const _ReadLater();
+  const _ReadLater({super.key});
 
   @override
   State<_ReadLater> createState() => _ReadLaterState();
@@ -442,7 +648,7 @@ class _ReadLaterState extends State<_ReadLater> {
 }
 
 class _Local extends StatefulWidget {
-  const _Local();
+  const _Local({super.key});
 
   @override
   State<_Local> createState() => _LocalState();
@@ -863,7 +1069,7 @@ class _ImportComicsWidgetState extends State<ImportComicsWidget> {
 }
 
 class _ComicSourceWidget extends StatefulWidget {
-  const _ComicSourceWidget();
+  const _ComicSourceWidget({super.key});
 
   @override
   State<_ComicSourceWidget> createState() => _ComicSourceWidgetState();
@@ -1081,7 +1287,36 @@ class ImageFavorites extends StatefulWidget {
 class _ImageFavoritesState extends State<ImageFavorites> {
   ImageFavoritesComputed? imageFavoritesCompute;
 
-  int displayType = 0;
+  /// Ordered, visible-filtered tab ids (subset of 'tags'/'authors'/'comics').
+  late List<String> tabs = _visibleTabs();
+
+  /// Currently selected tab id. Defaults to the first visible tab.
+  late String currentTab = tabs.isNotEmpty ? tabs.first : 'tags';
+
+  static List<String> _visibleTabs() => normalizeImageFavoritesTabs()
+      .where((e) => e.visible)
+      .map((e) => e.id)
+      .toList();
+
+  void _reloadTabs() {
+    var next = _visibleTabs();
+    if (!_sameIds(next, tabs) && mounted) {
+      setState(() {
+        tabs = next;
+        if (!tabs.contains(currentTab)) {
+          currentTab = tabs.isNotEmpty ? tabs.first : 'tags';
+        }
+      });
+    }
+  }
+
+  static bool _sameIds(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
 
   void refreshImageFavorites() async {
     if (!HistoryManager().isInitialized) return;
@@ -1101,6 +1336,7 @@ class _ImageFavoritesState extends State<ImageFavorites> {
     refreshImageFavorites();
     ImageFavoriteManager().addListener(refreshImageFavorites);
     DataSync().addListener(refreshImageFavorites);
+    appdata.settings.addListener(_reloadTabs);
     super.initState();
   }
 
@@ -1108,6 +1344,7 @@ class _ImageFavoritesState extends State<ImageFavorites> {
   void dispose() {
     ImageFavoriteManager().removeListener(refreshImageFavorites);
     DataSync().removeListener(refreshImageFavorites);
+    appdata.settings.removeListener(_reloadTabs);
     super.dispose();
   }
 
@@ -1162,23 +1399,17 @@ class _ImageFavoritesState extends State<ImageFavorites> {
                 ),
               ).paddingHorizontal(16),
               if (hasData)
-                Row(
-                  children: [
-                    const Spacer(),
-                    buildTypeButton(0, "Tags".tl),
-                    const Spacer(),
-                    buildTypeButton(1, "Authors".tl),
-                    const Spacer(),
-                    buildTypeButton(2, "Comics".tl),
-                    const Spacer(),
-                  ],
-                ),
+                _ImageFavoritesTabBar(
+                  tabs: tabs,
+                  current: currentTab,
+                  onTap: _selectTab,
+                ).paddingHorizontal(16),
               if (hasData) const SizedBox(height: 8),
               if (hasData)
-                buildChart(switch (displayType) {
-                  0 => imageFavoritesCompute!.tags,
-                  1 => imageFavoritesCompute!.authors,
-                  2 => imageFavoritesCompute!.comics,
+                buildChart(switch (currentTab) {
+                  'tags' => imageFavoritesCompute!.tags,
+                  'authors' => imageFavoritesCompute!.authors,
+                  'comics' => imageFavoritesCompute!.comics,
                   _ => [],
                 }).paddingHorizontal(16).paddingBottom(16),
             ],
@@ -1188,38 +1419,18 @@ class _ImageFavoritesState extends State<ImageFavorites> {
     );
   }
 
-  Widget buildTypeButton(int type, String text) {
-    const radius = 24.0;
-    return InkWell(
-      borderRadius: BorderRadius.circular(radius),
-      onTap: () async {
-        setState(() {
-          displayType = type;
-        });
-        await Future.delayed(const Duration(milliseconds: 20));
-        var scrollController = ScrollState.of(context).controller;
-        scrollController.animateTo(
-          scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.ease,
-        );
-      },
-      child: AnimatedContainer(
-        width: 96,
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        decoration: BoxDecoration(
-          color: displayType == type
-              ? context.colorScheme.primaryContainer
-              : null,
-          border: Border.all(
-            color: Theme.of(context).colorScheme.outlineVariant,
-            width: 0.6,
-          ),
-          borderRadius: BorderRadius.circular(radius),
-        ),
-        duration: const Duration(milliseconds: 200),
-        child: Center(child: Text(text, style: ts.s16)),
-      ),
+  void _selectTab(String id) async {
+    if (currentTab == id) return;
+    setState(() {
+      currentTab = id;
+    });
+    await Future.delayed(const Duration(milliseconds: 20));
+    if (!mounted) return;
+    var scrollController = ScrollState.of(context).controller;
+    scrollController.animateTo(
+      scrollController.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.ease,
     );
   }
 
@@ -1232,19 +1443,95 @@ class _ImageFavoritesState extends State<ImageFavorites> {
       constraints: BoxConstraints(maxHeight: 164),
       child: SingleChildScrollView(
         child: Column(
-          key: ValueKey(displayType),
+          key: ValueKey(currentTab),
           children: data.map((e) {
             return _ChartLine(
               text: e.text,
               count: e.count,
               maxCount: maxCount,
-              enableTranslation: displayType != 2,
+              enableTranslation: currentTab != 'comics',
               onTap: (text) {
                 context.to(() => ImageFavoritesPage(initialKeyword: text));
               },
             );
           }).toList(),
         ),
+      ),
+    );
+  }
+}
+
+class _ImageFavoritesTabBar extends StatelessWidget {
+  const _ImageFavoritesTabBar({
+    required this.tabs,
+    required this.current,
+    required this.onTap,
+  });
+
+  final List<String> tabs;
+  final String current;
+  final void Function(String id) onTap;
+
+  static String _label(String id) => switch (id) {
+        'tags' => "Tags".tl,
+        'authors' => "Authors".tl,
+        'comics' => "Comics".tl,
+        _ => id,
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 44,
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: context.colorScheme.outlineVariant,
+            width: 0.6,
+          ),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: tabs.map((id) {
+          var selected = id == current;
+          return Expanded(
+            child: InkWell(
+              onTap: () => onTap(id),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: Center(
+                      child: AnimatedDefaultTextStyle(
+                        duration: const Duration(milliseconds: 200),
+                        style: ts.s16.copyWith(
+                          color: selected
+                              ? context.colorScheme.primary
+                              : context.colorScheme.onSurface,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        child: Text(_label(id), textAlign: TextAlign.center),
+                      ),
+                    ),
+                  ),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    height: 3,
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? context.colorScheme.primary
+                          : Colors.transparent,
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(3),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }).toList(),
       ),
     );
   }

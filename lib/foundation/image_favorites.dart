@@ -444,6 +444,48 @@ class ImageFavoriteManager with ChangeNotifier {
     }
   }
 
+  /// Namespaces that some sources attach to comics as pseudo-tags but which
+  /// are metadata, not genre/character tags. Matched case-insensitively
+  /// against the part before the first ":".
+  static const Set<String> _metadataNamespaces = {
+    'time',
+    'date',
+    'updated',
+    'update',
+    'uploaded',
+    'upload',
+    'posted',
+    'pages',
+    'page',
+    '更新',
+    '更新时间',
+    '更新日期',
+    '日期',
+    '时间',
+    '上传',
+    '上传时间',
+    '页数',
+  };
+
+  /// Matches values that are clearly a date or timestamp, e.g.
+  /// `2024-12-01`, `2024/12/01`, `2024-12-01 12:30`, `2024.12.01`.
+  static final RegExp _dateLike = RegExp(
+    r'^\d{4}[-/.]\d{1,2}([-/.]\d{1,2})?([ T]\d{1,2}:\d{2}(:\d{2})?)?$',
+  );
+
+  /// True when [tag] is metadata that should not appear in the Tags chart.
+  /// Decides by namespace first, then by a date-pattern check on the value
+  /// (catches metadata from sources that use an unknown namespace).
+  static bool _isMetadataTag(String tag) {
+    var idx = tag.indexOf(":");
+    if (idx > 0) {
+      var ns = tag.substring(0, idx).trim().toLowerCase();
+      if (_metadataNamespaces.contains(ns)) return true;
+    }
+    var value = tag.split(":").last.trim();
+    return _dateLike.hasMatch(value);
+  }
+
   static ImageFavoritesComputed _computeImageFavorites() {
     const maxLength = 20;
 
@@ -476,6 +518,9 @@ class ImageFavoriteManager with ChangeNotifier {
     for (var comic in comics) {
       count += comic.images.length;
       for (var tag in comic.tags) {
+        // Skip metadata fields (update date, upload time, page count, etc.)
+        // that some sources mix into the tag list — they pollute the chart.
+        if (_isMetadataTag(tag)) continue;
         String finalTag = tag.split(":").last;
         tagCount[finalTag] = (tagCount[finalTag] ?? 0) + 1;
       }

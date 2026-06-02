@@ -42,6 +42,24 @@ class _AppearanceSettingsState extends State<AppearanceSettings> {
             App.forceRebuild();
           },
         ).toSliver(),
+        ListTile(
+          title: Text("Home Page Layout".tl),
+          subtitle: Text("Reorder or hide home sections".tl),
+          leading: const Icon(Icons.dashboard_customize_outlined),
+          trailing: const Icon(Icons.arrow_right),
+          onTap: () {
+            context.to(() => const HomeLayoutSettings());
+          },
+        ).toSliver(),
+        ListTile(
+          title: Text("Image Favorites Tabs".tl),
+          subtitle: Text("Reorder or hide the Tags / Authors / Comics tabs".tl),
+          leading: const Icon(Icons.tab_outlined),
+          trailing: const Icon(Icons.arrow_right),
+          onTap: () {
+            context.to(() => const ImageFavoritesTabsSettings());
+          },
+        ).toSliver(),
       ],
     );
   }
