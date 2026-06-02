@@ -1675,39 +1675,93 @@ class _ContinuousModeState extends State<_ContinuousMode>
   }
 
   /// Scrolls (animated or instant) so that (chapter,page) sits at the leading
-  /// edge. Falls back to a rebuild + post-frame retry when the target isn't
-  /// laid out yet (e.g. far off-screen jump).
+  /// edge.
+  ///
+  /// The target may be far outside the current cacheExtent and therefore not
+  /// laid out, so we can't read its render box directly. We iterate: estimate a
+  /// scroll offset, jump there, let the frame lay out, then read the real delta
+  /// and correct. The estimate uses the *index distance* from a currently-laid-
+  /// out reference item multiplied by an average item extent — robust to the
+  /// center-keyed coordinate space (negative offsets above the pivot) which a
+  /// naive idx/length * maxScrollExtent mapping got wrong (it ignored the
+  /// negative region, so jumps to the first/middle pages missed).
   Future<void> _goToEntry(int chapter, int page, {required bool animate}) async {
     if (!_scrollController.hasClients) return;
+
+    // Fast path: target already laid out — one precise move.
     final delta = _offsetDeltaToEntry(chapter, page);
-    if (delta == null) {
-      // Target not laid out: jump near it by index proportion, then retry once.
-      final idx = _indexOfEntry(chapter, page);
-      final pos = _scrollController.position;
-      if (_entries.isNotEmpty && pos.maxScrollExtent > 0) {
-        final approx =
-            (idx / _entries.length) * pos.maxScrollExtent;
-        _scrollController.jumpTo(approx.clamp(
-          pos.minScrollExtent,
-          pos.maxScrollExtent,
-        ));
-        await WidgetsBinding.instance.endOfFrame;
-        final d = _offsetDeltaToEntry(chapter, page);
-        if (d != null && _scrollController.hasClients) {
-          final target = (_scrollController.position.pixels + d).clamp(
-            _scrollController.position.minScrollExtent,
-            _scrollController.position.maxScrollExtent,
-          );
-          _scrollController.jumpTo(target);
-        }
-      }
+    if (delta != null) {
+      await _applyScroll(_scrollController.position.pixels + delta,
+          animate: animate);
       return;
     }
+
+    // Iterative approach for off-screen targets.
+    final targetIdx = _indexOfEntry(chapter, page);
+    for (var attempt = 0; attempt < 6; attempt++) {
+      if (!_scrollController.hasClients || !mounted) return;
+      final pos = _scrollController.position;
+
+      // Find any currently laid-out image entry to use as a reference point.
+      final ref = _firstLaidOutEntry();
+      if (ref == null) {
+        // Nothing measurable; nudge toward an edge and retry.
+        await _applyScroll(
+          targetIdx <= _anchorIndex ? pos.minScrollExtent : pos.maxScrollExtent,
+          animate: false,
+        );
+        await WidgetsBinding.instance.endOfFrame;
+        continue;
+      }
+
+      final refDelta = _offsetDeltaToEntry(ref.chapter, ref.page) ?? 0;
+      final refIdx = _indexOfEntry(ref.chapter, ref.page);
+      if (refIdx == targetIdx) {
+        await _applyScroll(pos.pixels + refDelta, animate: animate);
+        return;
+      }
+      // Estimate per-entry extent from the reference item's own size.
+      final unit = _entryExtent(ref) ?? (reader.size.height);
+      final estimate =
+          pos.pixels + refDelta + (targetIdx - refIdx) * unit;
+      await _applyScroll(estimate, animate: false);
+      await WidgetsBinding.instance.endOfFrame;
+
+      // Did the target come into layout? If so, finish precisely.
+      final d = _offsetDeltaToEntry(chapter, page);
+      if (d != null) {
+        await _applyScroll(_scrollController.position.pixels + d,
+            animate: animate);
+        return;
+      }
+    }
+  }
+
+  /// Scroll-axis extent of a laid-out entry, or null if not laid out.
+  double? _entryExtent(_ContinuousReaderEntry entry) {
+    final ctx = _itemKeys['${entry.chapter}:${entry.page}']?.currentContext;
+    final box = ctx?.findRenderObject();
+    if (box is! RenderBox || !box.attached) return null;
+    return reader.mode == ReaderMode.continuousTopToBottom
+        ? box.size.height
+        : box.size.width;
+  }
+
+  /// The first image entry that currently has an attached render box.
+  _ContinuousReaderEntry? _firstLaidOutEntry() {
+    for (final entry in _entries) {
+      if (!entry.isImage) continue;
+      final ctx = _itemKeys['${entry.chapter}:${entry.page}']?.currentContext;
+      final box = ctx?.findRenderObject();
+      if (box is RenderBox && box.attached) return entry;
+    }
+    return null;
+  }
+
+  Future<void> _applyScroll(double offset, {required bool animate}) async {
+    if (!_scrollController.hasClients) return;
     final pos = _scrollController.position;
-    final target = (pos.pixels + delta).clamp(
-      pos.minScrollExtent,
-      pos.maxScrollExtent,
-    );
+    final target = offset.clamp(pos.minScrollExtent, pos.maxScrollExtent);
     if (animate) {
       await _scrollController.animateTo(
         target,

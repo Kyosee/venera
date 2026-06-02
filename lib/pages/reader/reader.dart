@@ -732,10 +732,15 @@ abstract mixin class _ReaderLocation {
         'autoPageTurningInterval',
       );
       autoPageTurningTimer = Timer.periodic(Duration(seconds: interval), (_) {
-        if (page == maxPage) {
-          autoPageTurningTimer!.cancel();
+        // Advance a page; at the end of a chapter continue into the next one
+        // (mirrors the manual tap-to-advance behaviour). Only stop when there
+        // is no next page AND no next chapter.
+        if (!toNextPage()) {
+          if (!toNextChapter()) {
+            autoPageTurningTimer?.cancel();
+            autoPageTurningTimer = null;
+          }
         }
-        toNextPage();
       });
     }
   }
