@@ -363,7 +363,7 @@ class _GalleryModeState extends State<_GalleryMode>
               final fillScreen =
                   appdata.settings['galleryFillScreen'] == true;
               return PhotoViewGalleryPageOptions(
-                filterQuality: kIsWeb ? FilterQuality.low : FilterQuality.medium,
+                filterQuality: FilterQuality.medium,
                 controller: photoViewControllers[index],
                 imageProvider: _createImageProviderFromKey(
                   pageImages[0],
@@ -1319,8 +1319,6 @@ class _ContinuousModeState extends State<_ContinuousMode>
           ? const NeverScrollableScrollPhysics()
           : isZoomedIn
           ? const ClampingScrollPhysics()
-          : kIsWeb
-          ? const ClampingScrollPhysics()
           : const BouncingScrollPhysics(),
       itemBuilder: (context, index) {
         if (seamless) {
@@ -1354,7 +1352,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
           return ColoredBox(
             color: context.colorScheme.surface,
             child: ComicImage(
-              filterQuality: kIsWeb ? FilterQuality.low : FilterQuality.medium,
+              filterQuality: FilterQuality.medium,
               image: image,
               width: width,
               height: height,

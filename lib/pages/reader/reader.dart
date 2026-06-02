@@ -253,25 +253,21 @@ class _ReaderState extends State<Reader>
 
   void setImageCacheSize() async {
     int maxImageCacheSize;
-    if (kIsWeb) {
-      maxImageCacheSize = 150 << 20;
+    var availableRAM = await MemoryInfo.getFreePhysicalMemorySize();
+    if (availableRAM == null) return;
+    if (availableRAM < 1 << 30) {
+      maxImageCacheSize = 100 << 20;
+    } else if (availableRAM < 2 << 30) {
+      maxImageCacheSize = 200 << 20;
+    } else if (availableRAM < 4 << 30) {
+      maxImageCacheSize = 300 << 20;
     } else {
-      var availableRAM = await MemoryInfo.getFreePhysicalMemorySize();
-      if (availableRAM == null) return;
-      if (availableRAM < 1 << 30) {
-        maxImageCacheSize = 100 << 20;
-      } else if (availableRAM < 2 << 30) {
-        maxImageCacheSize = 200 << 20;
-      } else if (availableRAM < 4 << 30) {
-        maxImageCacheSize = 300 << 20;
-      } else {
-        maxImageCacheSize = 500 << 20;
-      }
-      Log.info(
-        "Reader",
-        "Detect available RAM: $availableRAM, set image cache size to $maxImageCacheSize",
-      );
+      maxImageCacheSize = 500 << 20;
     }
+    Log.info(
+      "Reader",
+      "Detect available RAM: $availableRAM, set image cache size to $maxImageCacheSize",
+    );
     PaintingBinding.instance.imageCache.maximumSizeBytes = maxImageCacheSize;
   }
 
@@ -633,9 +629,6 @@ abstract mixin class _ReaderLocation {
   void update();
 
   bool enablePageAnimation(String cid, ComicType type) {
-    if (App.isWeb) {
-      return false;
-    }
     return appdata.settings.getReaderSetting(
       cid,
       type.sourceKey,

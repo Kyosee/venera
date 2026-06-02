@@ -7,7 +7,6 @@ import 'package:venera/foundation/history.dart';
 import 'package:venera/foundation/history_tasks.dart';
 import 'package:venera/foundation/read_later.dart';
 import 'package:venera/pages/favorites/favorites_page.dart';
-import 'package:venera/utils/server_db.dart';
 import 'package:venera/utils/translations.dart';
 
 const _historyReadFilterList = ['All', 'UnCompleted', 'Completed'];
@@ -24,9 +23,6 @@ class _HistoryPageState extends State<HistoryPage> {
   void initState() {
     HistoryManager().addListener(onUpdate);
     super.initState();
-    if (App.isWeb) {
-      _loadServerHistory();
-    }
   }
 
   @override
@@ -37,10 +33,6 @@ class _HistoryPageState extends State<HistoryPage> {
   }
 
   void onUpdate() {
-    if (App.isWeb) {
-      _loadServerHistory();
-      return;
-    }
     setState(() {
       comics = HistoryManager().getAll();
       if (multiSelectMode) {
@@ -61,39 +53,6 @@ class _HistoryPageState extends State<HistoryPage> {
 
   bool multiSelectMode = false;
   Map<History, bool> selectedComics = {};
-
-  Future<void> _loadServerHistory() async {
-    try {
-      final page = await const ServerDbClient().listHistory(limit: 500);
-      if (!mounted) return;
-      if (page != null && page.items.isNotEmpty) {
-        setState(() {
-          comics = page.items;
-          if (multiSelectMode) {
-            selectedComics.removeWhere((comic, _) => !comics.contains(comic));
-            if (selectedComics.isEmpty) {
-              multiSelectMode = false;
-            }
-          }
-        });
-        return;
-      }
-    } catch (_) {}
-    // Fallback to local SQLite if server returns empty or fails
-    if (!mounted) return;
-    final local = HistoryManager().getAll();
-    if (local.isNotEmpty) {
-      setState(() {
-        comics = local;
-        if (multiSelectMode) {
-          selectedComics.removeWhere((comic, _) => !comics.contains(comic));
-          if (selectedComics.isEmpty) {
-            multiSelectMode = false;
-          }
-        }
-      });
-    }
-  }
 
   List<History> get filteredComics {
     return comics.where((comic) {

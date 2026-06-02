@@ -18,9 +18,6 @@ class _ReadLaterPageState extends State<ReadLaterPage> {
   void initState() {
     ReadLaterManager().addListener(onUpdate);
     super.initState();
-    if (App.isWeb) {
-      ReadLaterManager().loadFromServer();
-    }
   }
 
   @override

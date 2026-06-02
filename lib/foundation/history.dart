@@ -14,7 +14,6 @@ import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/sqlite_connection.dart';
 import 'package:venera/utils/channel.dart';
 import 'package:venera/utils/ext.dart';
-import 'package:venera/utils/server_db.dart';
 import 'package:venera/utils/translations.dart';
 
 import 'app.dart';
@@ -370,62 +369,6 @@ class HistoryManager with ChangeNotifier {
     ];
   }
 
-  Future<bool> _upsertServerHistory(History newItem) async {
-    if (!kIsWeb) return false;
-    try {
-      return await const ServerDbClient().upsertHistory(newItem);
-    } catch (e, s) {
-      Log.error('Server DB History', e, s);
-      return false;
-    }
-  }
-
-  Future<bool> _deleteServerHistory(String id, ComicType type) async {
-    if (!kIsWeb) return false;
-    try {
-      return await const ServerDbClient().deleteHistory(id, type);
-    } catch (e, s) {
-      Log.error('Server DB History', e, s);
-      return false;
-    }
-  }
-
-  Future<bool> _clearServerHistory() async {
-    if (!kIsWeb) return false;
-    try {
-      return await const ServerDbClient().clearHistory();
-    } catch (e, s) {
-      Log.error('Server DB History', e, s);
-      return false;
-    }
-  }
-
-  Future<bool> _clearServerUnfavoritedHistory() async {
-    if (!kIsWeb) return false;
-    try {
-      return await const ServerDbClient().clearUnfavoritedHistory();
-    } catch (e, s) {
-      Log.error('Server DB History', e, s);
-      return false;
-    }
-  }
-
-  final _pendingServerHistoryWrites = <Future<void>>{};
-
-  void _trackServerHistoryWrite(Future<void> pending) {
-    _pendingServerHistoryWrites.add(pending);
-    unawaited(
-      pending.whenComplete(() {
-        _pendingServerHistoryWrites.remove(pending);
-      }),
-    );
-  }
-
-  Future<void> waitServerHistorySync() async {
-    if (!kIsWeb || _pendingServerHistoryWrites.isEmpty) return;
-    await Future.wait(_pendingServerHistoryWrites.toList());
-  }
-
   void _writeLocalHistory(History newItem) {
     _db.execute(_insertHistorySql, _historySqlArgs(newItem));
   }
@@ -465,17 +408,8 @@ class HistoryManager with ChangeNotifier {
     }
 
     _haveAsyncTask = true;
-    if (kIsWeb) {
-      _writeLocalHistory(newItem);
-      _mirrorToDomain(newItem);
-      final pendingServerWrite = _upsertServerHistory(
-        newItem,
-      ).then<void>((_) {});
-      _trackServerHistoryWrite(pendingServerWrite);
-    } else {
-      await _addHistoryAsync(_dbPath, newItem);
-      _mirrorToDomain(newItem);
-    }
+    await _addHistoryAsync(_dbPath, newItem);
+    _mirrorToDomain(newItem);
     _haveAsyncTask = false;
     _cacheAddedHistory(newItem);
     notifyListeners();
@@ -490,24 +424,10 @@ class HistoryManager with ChangeNotifier {
     _mirrorToDomain(newItem);
     _cacheAddedHistory(newItem);
     notifyListeners();
-    if (kIsWeb) {
-      final pending = _upsertServerHistory(newItem).then<void>((_) {});
-      _trackServerHistoryWrite(pending);
-    }
   }
 
   void clearHistory() {
     if (!isInitialized) return;
-    if (kIsWeb) {
-      final pending = () async {
-        await _clearServerHistory();
-        _db.execute("delete from history;");
-        updateCache();
-        notifyListeners();
-      }();
-      _trackServerHistoryWrite(pending);
-      return;
-    }
     _db.execute("delete from history;");
     updateCache();
     notifyListeners();
@@ -541,16 +461,6 @@ class HistoryManager with ChangeNotifier {
 
   void clearUnfavoritedHistory() {
     if (!isInitialized) return;
-    if (kIsWeb) {
-      final pending = () async {
-        await _clearServerUnfavoritedHistory();
-        _clearLocalUnfavoritedHistory();
-        updateCache();
-        notifyListeners();
-      }();
-      _trackServerHistoryWrite(pending);
-      return;
-    }
     _clearLocalUnfavoritedHistory();
     updateCache();
     notifyListeners();
@@ -558,9 +468,6 @@ class HistoryManager with ChangeNotifier {
 
   void remove(String id, ComicType type) async {
     if (!isInitialized) return;
-    if (kIsWeb) {
-      await _deleteServerHistory(id, type);
-    }
     _db.execute(
       """
       delete from history

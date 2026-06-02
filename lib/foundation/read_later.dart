@@ -8,7 +8,6 @@ import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/favorites_meta.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/sqlite_connection.dart';
-import 'package:venera/utils/server_db.dart';
 
 /// A single "Read Later" entry. Implements [Comic] so it can be rendered with
 /// the same comic tiles/grids as everything else.
@@ -231,7 +230,6 @@ class ReadLaterManager with ChangeNotifier {
     if (!isInitialized) return;
     _db.execute(_insertSql, _sqlArgs(item));
     _ids.add(_key(item.id, item.type));
-    _trackServerWrite(_upsertServer(item));
     notifyListeners();
   }
 
@@ -248,9 +246,6 @@ class ReadLaterManager with ChangeNotifier {
     } catch (e) {
       _db.execute("ROLLBACK;");
       rethrow;
-    }
-    for (final item in items) {
-      _trackServerWrite(_upsertServer(item));
     }
     notifyListeners();
   }
@@ -281,7 +276,6 @@ class ReadLaterManager with ChangeNotifier {
       [id, type.value],
     );
     _ids.remove(_key(id, type));
-    _trackServerWrite(_deleteServer(id, type));
     notifyListeners();
   }
 
@@ -312,9 +306,6 @@ class ReadLaterManager with ChangeNotifier {
       _db.execute("ROLLBACK;");
       rethrow;
     }
-    for (final item in items) {
-      _trackServerWrite(_deleteServer(item.id, item.type));
-    }
     notifyListeners();
   }
 
@@ -322,60 +313,11 @@ class ReadLaterManager with ChangeNotifier {
     if (!isInitialized) return;
     _db.execute("delete from read_later;");
     _ids.clear();
-    _trackServerWrite(_clearServer());
     notifyListeners();
   }
 
-  // ---- Web server sync (no-ops on native) ----
-
-  final _pendingServerWrites = <Future<void>>{};
-
-  void _trackServerWrite(Future<void> pending) {
-    _pendingServerWrites.add(pending);
-    unawaited(
-      pending.whenComplete(() => _pendingServerWrites.remove(pending)),
-    );
-  }
-
-  /// Wait for in-flight server writes to finish (used before WebDAV upload).
-  Future<void> waitServerReadLaterSync() async {
-    if (!kIsWeb || _pendingServerWrites.isEmpty) return;
-    await Future.wait(_pendingServerWrites.toList());
-  }
-
-  Future<void> _upsertServer(ReadLaterItem item) async {
-    if (!kIsWeb) return;
-    try {
-      await const ServerDbClient().upsertReadLater(item);
-    } catch (e, s) {
-      Log.error("Server DB ReadLater", e, s);
-    }
-  }
-
-  Future<void> _deleteServer(String id, ComicType type) async {
-    if (!kIsWeb) return;
-    try {
-      await const ServerDbClient().deleteReadLater(id, type);
-    } catch (e, s) {
-      Log.error("Server DB ReadLater", e, s);
-    }
-  }
-
-  Future<void> _clearServer() async {
-    if (!kIsWeb) return;
-    try {
-      await const ServerDbClient().clearReadLater();
-    } catch (e, s) {
-      Log.error("Server DB ReadLater", e, s);
-    }
-  }
-
-  /// Reload from disk after an import (native) — re-open DB and refresh cache.
+  /// Reload from disk after an import — re-open DB and refresh cache.
   Future<void> reload() async {
-    if (kIsWeb) {
-      await loadFromServer();
-      return;
-    }
     if (isInitialized) {
       try {
         _db.dispose();
@@ -383,31 +325,6 @@ class ReadLaterManager with ChangeNotifier {
       isInitialized = false;
     }
     await init();
-  }
-
-  /// Web only: pull the full list from the server into the local mirror DB.
-  Future<void> loadFromServer() async {
-    if (!kIsWeb || !isInitialized) return;
-    try {
-      final items = await const ServerDbClient().listReadLater();
-      if (items == null) return;
-      _db.execute("delete from read_later;");
-      _ids.clear();
-      _db.execute("BEGIN TRANSACTION;");
-      try {
-        for (final item in items) {
-          _db.execute(_insertSql, _sqlArgs(item));
-          _ids.add(_key(item.id, item.type));
-        }
-        _db.execute("COMMIT;");
-      } catch (e) {
-        _db.execute("ROLLBACK;");
-        rethrow;
-      }
-      notifyListeners();
-    } catch (e, s) {
-      Log.error("Server DB ReadLater", e, s);
-    }
   }
 
   void close() {

@@ -2,14 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:venera/foundation/log.dart';
 import 'package:venera/network/cache.dart';
-import 'package:venera/network/cors_proxy.dart';
 
-import 'app_dio_io.dart'
-    if (dart.library.html) 'app_dio_web_stub.dart'
-    if (dart.library.js_interop) 'app_dio_web_stub.dart';
+import 'app_dio_io.dart';
 import 'cloudflare.dart';
 import 'cookie_jar.dart';
 
@@ -150,12 +146,11 @@ class AppDio with DioMixin {
 
   static List<Interceptor> _buildDefaultInterceptors() {
     final list = <Interceptor>[];
-    if (!kIsWeb && SingleInstanceCookieJar.instance != null) {
+    if (SingleInstanceCookieJar.instance != null) {
       list.add(CookieManagerSql(SingleInstanceCookieJar.instance!));
     }
     list.add(NetworkCacheManager());
     list.add(CloudflareInterceptor());
-    if (kIsWeb) list.add(CorsProxyInterceptor());
     list.add(MyLogInterceptor());
     return list;
   }
@@ -197,66 +192,3 @@ class AppDio with DioMixin {
   }
 }
 
-class CorsProxyInterceptor extends Interceptor {
-  static const _forbiddenRequestHeaders = {
-    'accept-charset',
-    'accept-encoding',
-    'access-control-request-headers',
-    'access-control-request-method',
-    'connection',
-    'content-length',
-    'cookie',
-    'cookie2',
-    'date',
-    'dnt',
-    'expect',
-    'host',
-    'keep-alive',
-    'origin',
-    'referer',
-    'te',
-    'trailer',
-    'transfer-encoding',
-    'upgrade',
-    'user-agent',
-    'via',
-  };
-
-  static const _forbiddenRequestHeaderPrefixes = {'proxy-', 'sec-'};
-
-  @override
-  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
-    final proxyUrl = resolveCorsProxyEndpoint(useSameOriginDefault: true);
-    if (proxyUrl == null) {
-      _removeForbiddenBrowserHeaders(options.headers);
-      handler.next(options);
-      return;
-    }
-    final originalUri = options.uri.toString();
-    if (originalUri.startsWith(proxyUrl)) {
-      _removeForbiddenBrowserHeaders(options.headers);
-      handler.next(options);
-      return;
-    }
-    if (!originalUri.startsWith('http://') &&
-        !originalUri.startsWith('https://')) {
-      _removeForbiddenBrowserHeaders(options.headers);
-      handler.next(options);
-      return;
-    }
-    preserveCorsProxySourceHeaders(options.headers);
-    _removeForbiddenBrowserHeaders(options.headers);
-    final proxied = buildCorsProxyUrl(proxyUrl, options.uri);
-    options.path = proxied;
-    options.baseUrl = '';
-    handler.next(options);
-  }
-
-  void _removeForbiddenBrowserHeaders(Map<String, dynamic> headers) {
-    headers.removeWhere((key, value) {
-      final lower = key.toString().toLowerCase();
-      return _forbiddenRequestHeaders.contains(lower) ||
-          _forbiddenRequestHeaderPrefixes.any(lower.startsWith);
-    });
-  }
-}

@@ -1,3 +1,5 @@
-export 'archive_native.dart'
-    if (dart.library.html) 'archive_web.dart'
-    if (dart.library.js_interop) 'archive_web.dart';
+import 'package:zip_flutter/zip_flutter.dart';
+
+Future<void> compressFolderAsync(String src, String dst) {
+  return ZipFile.compressFolderAsync(src, dst);
+}

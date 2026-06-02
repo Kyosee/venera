@@ -585,8 +585,7 @@ Future<bool> _runWindowsUpdaterExecutable({
     );
     App.rootContext.showMessage(message: "Updater started. App will restart after update".tl);
     await Future.delayed(const Duration(milliseconds: 400));
-    if (!App.isWeb) exit(0);
-    return true;
+    exit(0);
   } catch (e, s) {
     Log.error("Windows Update", e.toString(), s);
     App.rootContext.showMessage(message: "Failed to start updater, falling back to update script".tl);

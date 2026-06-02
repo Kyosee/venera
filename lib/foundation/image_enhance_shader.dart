@@ -1,6 +1,5 @@
 import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/log.dart';
 
@@ -63,11 +62,6 @@ class ImageEnhanceShader {
   /// call does work. Errors are swallowed and disable the feature.
   Future<void> preload() async {
     if (_available != null) return;
-    if (kIsWeb) {
-      // Render-time enhancement targets native platforms only.
-      _available = false;
-      return;
-    }
     try {
       _program = await ui.FragmentProgram.fromAsset(
         'shaders/image_enhance.frag',

@@ -166,12 +166,6 @@ abstract mixin class _ComicPageActions {
   void onReadEnd();
 
   void download() async {
-    if (App.isWeb) {
-      App.rootContext.showMessage(
-        message: "Download is not supported on WebPWA".tl,
-      );
-      return;
-    }
     final source = comicSource;
     if (source == null) {
       App.rootContext.showMessage(message: "Comic source not found".tl);

@@ -21,7 +21,6 @@ import 'package:venera/pages/search_page.dart';
 import 'package:venera/utils/data_sync.dart';
 import 'package:venera/utils/import_comic.dart';
 import 'package:venera/utils/io.dart';
-import 'package:venera/utils/server_db.dart';
 import 'package:venera/utils/tags_translation.dart';
 import 'package:venera/utils/translations.dart';
 import 'package:venera/utils/venera_comics.dart';
@@ -40,7 +39,7 @@ class HomePage extends StatelessWidget {
         const _SyncDataWidget(),
         const _History(),
         const _ReadLater(),
-        if (!App.isWeb) const _Local(),
+        const _Local(),
         const FollowUpdatesWidget(),
         const _ComicSourceWidget(),
         const ImageFavorites(),
@@ -229,10 +228,6 @@ class _HistoryState extends State<_History> {
   late int count;
 
   void onHistoryChange() {
-    if (App.isWeb) {
-      loadServerHistory();
-      return;
-    }
     if (!HistoryManager().isInitialized) return;
     if (mounted) {
       setState(() {
@@ -242,19 +237,6 @@ class _HistoryState extends State<_History> {
     }
   }
 
-  Future<void> loadServerHistory() async {
-    try {
-      final page = await const ServerDbClient().listHistory(limit: 20);
-      if (!mounted || page == null) {
-        return;
-      }
-      setState(() {
-        history = page.items;
-        count = page.total;
-      });
-    } catch (_) {}
-  }
-
   @override
   void initState() {
     history = HistoryManager().getRecent();
@@ -262,9 +244,6 @@ class _HistoryState extends State<_History> {
     HistoryManager().addListener(onHistoryChange);
     DataSync().addListener(onHistoryChange);
     super.initState();
-    if (App.isWeb) {
-      loadServerHistory();
-    }
   }
 
   @override
@@ -378,9 +357,6 @@ class _ReadLaterState extends State<_ReadLater> {
     ReadLaterManager().addListener(onReadLaterChange);
     DataSync().addListener(onReadLaterChange);
     super.initState();
-    if (App.isWeb) {
-      ReadLaterManager().loadFromServer();
-    }
   }
 
   @override
@@ -535,19 +511,17 @@ class _LocalState extends State<_Local> {
                       child: Text(count.toString(), style: ts.s12),
                     ),
                     const Spacer(),
-                    if (!App.isWeb) ...[
-                      _LocalImportButton(onPressed: import),
-                      if (LocalManager().hasComicsWithImages())
-                        Padding(
-                          padding: const EdgeInsets.only(left: 8),
-                          child: _LocalExportButton(
-                            onPressed: () {
-                              context.to(() => const LocalComicsPage());
-                            },
-                          ),
+                    _LocalImportButton(onPressed: import),
+                    if (LocalManager().hasComicsWithImages())
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8),
+                        child: _LocalExportButton(
+                          onPressed: () {
+                            context.to(() => const LocalComicsPage());
+                          },
                         ),
-                      const SizedBox(width: 8),
-                    ],
+                      ),
+                    const SizedBox(width: 8),
                     const Icon(Icons.arrow_right),
                   ],
                 ),
@@ -578,7 +552,7 @@ class _LocalState extends State<_Local> {
                     },
                   ),
                 ).paddingHorizontal(8).paddingBottom(16),
-              if (!App.isWeb && LocalManager().downloadingTasks.isNotEmpty)
+              if (LocalManager().downloadingTasks.isNotEmpty)
                 Row(
                   children: [
                     Button.outlined(
@@ -610,12 +584,6 @@ class _LocalState extends State<_Local> {
   }
 
   void import() {
-    if (App.isWeb) {
-      App.rootContext.showMessage(
-        message: "Import is not supported on WebPWA".tl,
-      );
-      return;
-    }
     showDialog(
       barrierDismissible: false,
       context: App.rootContext,

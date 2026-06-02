@@ -7,7 +7,6 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:venera/foundation/history.dart';
 import 'package:venera/foundation/read_later.dart';
-import 'package:venera/utils/io.dart';
 
 import 'appdata.dart';
 import 'domain_database.dart';
@@ -94,15 +93,10 @@ class _App {
   }
 
   Future<void> init() async {
-    if (!kIsWeb) {
-      cachePath = (await getApplicationCacheDirectory()).path;
-      dataPath = (await getApplicationSupportDirectory()).path;
-      if (isAndroid) {
-        externalStoragePath = (await getExternalStorageDirectory())!.path;
-      }
-    } else {
-      Directory(dataPath).createSync(recursive: true);
-      Directory(cachePath).createSync(recursive: true);
+    cachePath = (await getApplicationCacheDirectory()).path;
+    dataPath = (await getApplicationSupportDirectory()).path;
+    if (isAndroid) {
+      externalStoragePath = (await getExternalStorageDirectory())!.path;
     }
     try {
       final info = await PackageInfo.fromPlatform();
@@ -112,15 +106,6 @@ class _App {
   }
 
   Future<void> initComponents() async {
-    if (kIsWeb) {
-      await data.init();
-      await history.init();
-      await readLater.init();
-      await favorites.init();
-      await domain.init(dataPath);
-      await local.init();
-      return;
-    }
     final futures = <Future<void>>[
       data.init(),
       history.init(),

@@ -185,7 +185,7 @@ class _LocalComicsPageState extends State<LocalComicsPage>
           addFavorite(selectedComics.keys.toList());
         },
       ),
-      if (!App.isWeb && selectedComics.length == 1)
+      if (selectedComics.length == 1)
         MenuEntry(
           icon: Icons.folder_open,
           text: "Open Folder".tl,
@@ -206,7 +206,7 @@ class _LocalComicsPageState extends State<LocalComicsPage>
         ),
       if (selectedComics.isNotEmpty)
         ...exportActions(selectedComics.keys.toList()),
-      if (!App.isWeb && selectedComics.isNotEmpty)
+      if (selectedComics.isNotEmpty)
         MenuEntry(
           icon: Icons.archive_outlined,
           text: "Export .venera_comics".tl,
@@ -273,18 +273,16 @@ class _LocalComicsPageState extends State<LocalComicsPage>
           onPressed: sort,
         ),
       ),
-      if (!App.isWeb)
-        Tooltip(
-          message: "Downloading".tl,
-          child: IconButton(
-            icon: const Icon(Icons.download),
-            onPressed: () {
-              showPopUpWidget(context, const DownloadingPage());
-            },
-          ),
+      Tooltip(
+        message: "Downloading".tl,
+        child: IconButton(
+          icon: const Icon(Icons.download),
+          onPressed: () {
+            showPopUpWidget(context, const DownloadingPage());
+          },
         ),
-      if (!App.isWeb)
-        MenuButton(entries: [
+      ),
+      MenuButton(entries: [
           MenuEntry(
             icon: Icons.file_download_outlined,
             text: "Import".tl,
@@ -431,14 +429,13 @@ class _LocalComicsPageState extends State<LocalComicsPage>
             },
             menuBuilder: (c) {
               return [
-                if (!App.isWeb)
-                  MenuEntry(
-                    icon: Icons.folder_open,
-                    text: "Open Folder".tl,
-                    onClick: () {
-                      openComicFolder(c as LocalComic);
-                    },
-                  ),
+                MenuEntry(
+                  icon: Icons.folder_open,
+                  text: "Open Folder".tl,
+                  onClick: () {
+                    openComicFolder(c as LocalComic);
+                  },
+                ),
                 MenuEntry(
                   icon: Icons.delete,
                   text: "Delete".tl,
@@ -552,7 +549,7 @@ class _LocalComicsPageState extends State<LocalComicsPage>
     await showDialog(
       context: App.rootContext,
       builder: (context) {
-        bool removeComicFile = !App.isWeb;
+        bool removeComicFile = true;
         bool removeFavoriteAndHistory = true;
         return StatefulBuilder(builder: (context, state) {
           return ContentDialog(
@@ -568,20 +565,19 @@ class _LocalComicsPageState extends State<LocalComicsPage>
                     });
                   },
                 ),
-                if (!App.isWeb)
-                  CheckboxListTile(
-                    title: Text("Also remove files on disk".tl),
-                    value: removeComicFile,
-                    onChanged: (v) {
-                      state(() {
-                        removeComicFile = !removeComicFile;
-                      });
-                    },
-                  )
+                CheckboxListTile(
+                  title: Text("Also remove files on disk".tl),
+                  value: removeComicFile,
+                  onChanged: (v) {
+                    state(() {
+                      removeComicFile = !removeComicFile;
+                    });
+                  },
+                )
               ],
             ),
             actions: [
-              if (!App.isWeb && comics.length == 1 && comics.first.hasChapters)
+              if (comics.length == 1 && comics.first.hasChapters)
                 TextButton(
                   child: Text("Delete Chapters".tl),
                   onPressed: () {
@@ -610,9 +606,6 @@ class _LocalComicsPageState extends State<LocalComicsPage>
   }
 
   List<MenuEntry> exportActions(List<LocalComic> comics) {
-    if (App.isWeb) {
-      return const [];
-    }
     return [
       MenuEntry(
         icon: Icons.outbox_outlined,
@@ -717,12 +710,6 @@ typedef ExportComicFunc = Future<File> Function(
 
 /// Opens the folder containing the comic in the system file explorer
 Future<void> openComicFolder(LocalComic comic) async {
-  if (App.isWeb) {
-    App.rootContext.showMessage(
-      message: "Open folder is not supported on WebPWA".tl,
-    );
-    return;
-  }
   try {
     final folderPath = comic.baseDir;
 

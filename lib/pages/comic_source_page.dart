@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart' hide Cookie;
 import 'package:url_launcher/url_launcher_string.dart';
@@ -12,7 +11,6 @@ import 'package:venera/foundation/comic_source_update_tasks.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/network/app_dio.dart';
 import 'package:venera/network/cookie_jar.dart';
-import 'package:venera/network/web_helper_browser.dart';
 import 'package:venera/pages/webview.dart';
 import 'package:venera/utils/ext.dart';
 import 'package:venera/utils/io.dart';
@@ -1216,9 +1214,7 @@ class _LoginPageState extends State<_LoginPage> {
                 if (widget.config.loginWebsite != null)
                   TextButton(
                     onPressed: () {
-                      if (kIsWeb) {
-                        loginWithWebHelper();
-                      } else if (App.isLinux) {
+                      if (App.isLinux) {
                         loginWithWebview2();
                       } else {
                         loginWithWebview();
@@ -1295,147 +1291,6 @@ class _LoginPageState extends State<_LoginPage> {
     }
   }
 
-  void loginWithWebHelper() async {
-    final loginUrl = widget.config.loginWebsite!;
-    setState(() {
-      loading = true;
-    });
-    final client = WebHelperBrowserClient();
-    final state = await client.createSession(
-      url: loginUrl,
-      sessionId: 'login-${widget.source.key}',
-      syncCookies: true,
-    );
-    if (!mounted) return;
-    setState(() {
-      loading = false;
-    });
-    if (state == null) {
-      context.showMessage(message: "Web Helper browser is not available".tl);
-      await launchUrlString(loginUrl);
-      return;
-    }
-    if (await _applyHelperWebLoginState(state)) {
-      if (!mounted) return;
-      context.showMessage(message: "Login success".tl);
-      context.pop();
-      return;
-    }
-    if (state.viewUrl.isNotEmpty) {
-      await launchUrlString(state.viewUrl);
-    }
-    if (!mounted) return;
-    await _showHelperWebLoginDialog(
-      client: client,
-      sessionId: state.sessionId,
-      loginUrl: loginUrl,
-      viewUrl: state.viewUrl,
-    );
-  }
-
-  Future<void> _showHelperWebLoginDialog({
-    required WebHelperBrowserClient client,
-    required String sessionId,
-    required String loginUrl,
-    required String viewUrl,
-  }) async {
-    var checking = false;
-    var status = "Complete login in the helper browser, then continue here.".tl;
-    await showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (dialogContext, setDialogState) {
-            Future<void> check() async {
-              setDialogState(() {
-                checking = true;
-                status = "Checking login status...".tl;
-              });
-              final state =
-                  await client.syncCookies(sessionId, url: loginUrl) ??
-                  await client.state(sessionId, url: loginUrl);
-              if (state != null && await _applyHelperWebLoginState(state)) {
-                if (dialogContext.mounted) Navigator.pop(dialogContext);
-                if (mounted) {
-                  context.showMessage(message: "Login success".tl);
-                  context.pop();
-                }
-                return;
-              }
-              if (!dialogContext.mounted) return;
-              setDialogState(() {
-                checking = false;
-                status =
-                    "Login status not detected. Please complete login in webview and try again."
-                        .tl;
-              });
-            }
-
-            return AlertDialog(
-              title: Text("Login with webview".tl),
-              content: SizedBox(width: 420, child: Text(status)),
-              actions: [
-                TextButton(
-                  onPressed: checking || viewUrl.isEmpty
-                      ? null
-                      : () => launchUrlString(viewUrl),
-                  child: Text("Open in browser".tl),
-                ),
-                TextButton(
-                  onPressed: checking
-                      ? null
-                      : () => Navigator.pop(dialogContext),
-                  child: Text("Cancel".tl),
-                ),
-                FilledButton(
-                  onPressed: checking ? null : check,
-                  child: checking
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Text("Continue".tl),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Future<bool> _applyHelperWebLoginState(WebHelperBrowserState state) async {
-    final detectedByConfig =
-        widget.config.checkLoginStatus?.call(state.url, state.title) ?? false;
-    if (widget.config.cookieFields != null &&
-        widget.config.validateCookies != null) {
-      final cookies = state.valuesForCookieFields(widget.config.cookieFields!);
-      if (cookies.any((value) => value.isNotEmpty) &&
-          await widget.config.validateCookies!(cookies)) {
-        widget.source.data['account'] = 'ok';
-        await widget.source.saveData();
-        widget.config.onLoginWithWebviewSuccess?.call();
-        return true;
-      }
-    }
-    final token = extractTokenFromHelperBrowserState(state);
-    if (!detectedByConfig && token == null) {
-      return false;
-    }
-    widget.source.data['_localStorage'] = state.localStorage;
-    if (token != null) {
-      widget.source.data['token'] = token;
-    }
-    widget.source.data['account'] = 'ok';
-    await widget.source.saveData();
-    widget.config.onLoginWithWebviewSuccess?.call();
-    Log.info(
-      "WebviewLogin",
-      "Helper login detected url=${state.url} config=$detectedByConfig token=${token != null}",
-    );
-    return true;
-  }
 
   void loginWithWebview() async {
     var url = widget.config.loginWebsite!;

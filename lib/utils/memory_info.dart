@@ -1,3 +1,7 @@
-export 'memory_info_native.dart'
-    if (dart.library.html) 'memory_info_web.dart'
-    if (dart.library.js_interop) 'memory_info_web.dart';
+import 'package:flutter_memory_info/flutter_memory_info.dart' as memory_info;
+
+class MemoryInfo {
+  static Future<int?> getFreePhysicalMemorySize() {
+    return memory_info.MemoryInfo.getFreePhysicalMemorySize();
+  }
+}

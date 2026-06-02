@@ -236,10 +236,6 @@ class ImageFavoriteManager with ChangeNotifier {
 
   ImageFavoriteManager._();
 
-  bool _serverHydrated = false;
-  bool _serverDirty = false;
-  Future<void>? _serverHydrateFuture;
-
   factory ImageFavoriteManager() => (_cache ??= ImageFavoriteManager._());
 
   /// 检查表image_favorites是否存在, 不存在则创建
@@ -260,105 +256,10 @@ class ImageFavoriteManager with ChangeNotifier {
       "PRIMARY KEY (id,source_key)"
       ");",
     );
-    if (kIsWeb) {
-      unawaited(hydrateServerImageFavorites());
-    }
-  }
-
-  Future<void> hydrateServerImageFavorites({
-    bool force = false,
-    bool clearWhenRemoteEmpty = false,
-  }) {
-    if (!kIsWeb) return Future.value();
-    if (force) {
-      _serverHydrated = false;
-    }
-    final activeHydrate = _serverHydrateFuture;
-    if (activeHydrate != null) {
-      if (!force && !clearWhenRemoteEmpty) return activeHydrate;
-      return activeHydrate.then(
-        (_) => hydrateServerImageFavorites(
-          force: force,
-          clearWhenRemoteEmpty: clearWhenRemoteEmpty,
-        ),
-      );
-    }
-    return _serverHydrateFuture ??= _hydrateServerImageFavorites(
-      clearWhenRemoteEmpty: clearWhenRemoteEmpty,
-    ).whenComplete(
-      () {
-        _serverHydrateFuture = null;
-      },
-    );
-  }
-
-  Future<void> _hydrateServerImageFavorites({
-    required bool clearWhenRemoteEmpty,
-  }) async {
-    if (_serverHydrated || _serverDirty) return;
-    try {
-      var offset = 0;
-      const limit = 500;
-      final items = <ImageFavoritesComic>[];
-      var remoteTotal = 0;
-      while (true) {
-        final page = await const ServerDbClient().listImageFavorites(
-          limit: limit,
-          offset: offset,
-        );
-        if (page == null) {
-          return;
-        }
-        remoteTotal = page.total;
-        if (page.items.isEmpty) break;
-        items.addAll(page.items);
-        offset += page.items.length;
-        if (offset >= page.total || page.items.length < limit) break;
-      }
-      if (_serverDirty) return;
-      if (remoteTotal == 0 && items.isEmpty) {
-        if (clearWhenRemoteEmpty && length > 0) {
-          _db.execute('delete from image_favorites;');
-          notifyListeners();
-        }
-        _serverHydrated = true;
-        return;
-      }
-      _db.execute('delete from image_favorites;');
-      for (final item in items) {
-        addOrUpdateOrDelete(item, false);
-      }
-      _serverHydrated = true;
-      notifyListeners();
-    } catch (e, s) {
-      Log.warning('Server DB Image Favorites', 'Hydrate failed: $e\n$s');
-    }
-  }
-
-  Future<void> syncServerImageFavorites() async {
-    if (!kIsWeb) return;
-    try {
-      if (!_serverDirty) {
-        await hydrateServerImageFavorites();
-        return;
-      }
-      final ok = await const ServerDbClient().replaceImageFavorites(getAll());
-      if (!ok) {
-        throw StateError('replaceImageFavorites returned false');
-      }
-      _serverHydrated = true;
-      _serverDirty = false;
-    } catch (e, s) {
-      Log.error('Server DB Image Favorites', e, s);
-      rethrow;
-    }
   }
 
   // 做排序和去重的操作
   void addOrUpdateOrDelete(ImageFavoritesComic favorite, [bool notify = true]) {
-    if (kIsWeb && notify) {
-      _serverDirty = true;
-    }
     // 没有章节了就删掉
     if (favorite.imageFavoritesEp.isEmpty) {
       _db.execute(
@@ -477,9 +378,6 @@ class ImageFavoriteManager with ChangeNotifier {
     if (imageFavoriteList.isEmpty) {
       return;
     }
-    if (kIsWeb) {
-      _serverDirty = true;
-    }
     for (var i in imageFavoriteList) {
       ImageFavoritesProvider.deleteFromCache(i);
     }
@@ -527,7 +425,7 @@ class ImageFavoriteManager with ChangeNotifier {
       var count = ImageFavoriteManager().length;
       if (count == 0) {
         return Future.value(ImageFavoritesComputed([], [], [], 0));
-      } else if (kIsWeb || count <= 100) {
+      } else if (count <= 100) {
         return Future.value(_computeImageFavorites());
       } else {
         final token = ServicesBinding.rootIsolateToken;

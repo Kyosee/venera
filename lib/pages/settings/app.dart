@@ -65,9 +65,8 @@ class _AppSettingsState extends State<AppSettings> {
       slivers: [
         SliverAppbar(title: Text("App".tl)),
         _SettingPartTitle(title: "Data".tl, icon: Icons.storage),
-        if (!App.isWeb) ...[
-          ListTile(
-            title: Text("Storage Path for local comics".tl),
+        ListTile(
+          title: Text("Storage Path for local comics".tl),
             subtitle: Text(LocalManager().path, softWrap: false),
             trailing: IconButton(
               icon: const Icon(Icons.copy),
@@ -145,7 +144,6 @@ class _AppSettingsState extends State<AppSettings> {
             },
             actionTitle: 'Set'.tl,
           ).toSliver(),
-        ],
         _CallbackSetting(
           title: "Export App Data".tl,
           callback: () async {
@@ -161,7 +159,7 @@ class _AppSettingsState extends State<AppSettings> {
           callback: () async {
             var controller = showLoadingDialog(context);
             var file = await selectFile(
-              ext: App.isWeb ? ['venera'] : ['venera', 'picadata'],
+              ext: ['venera', 'picadata'],
             );
             if (file != null) {
               var cacheFile = File(
@@ -170,13 +168,7 @@ class _AppSettingsState extends State<AppSettings> {
               await file.saveTo(cacheFile.path);
               try {
                 if (file.name.endsWith('picadata')) {
-                  if (App.isWeb) {
-                    context.showMessage(
-                      message: "Pica data import is not supported on WebPWA".tl,
-                    );
-                  } else {
-                    await importPicaData(cacheFile);
-                  }
+                  await importPicaData(cacheFile);
                 } else {
                   await importAppData(cacheFile);
                   // Manual import is an explicit "make this the source of
@@ -226,7 +218,7 @@ class _AppSettingsState extends State<AppSettings> {
             App.forceRebuild();
           },
         ).toSliver(),
-        if (!App.isLinux && !App.isWeb)
+        if (!App.isLinux)
           _SwitchSetting(
             title: "Authorization Required".tl,
             settingKey: "authorizationRequired",
@@ -463,34 +455,6 @@ class _WebdavSettingState extends State<_WebdavSetting> {
     }
     autoSync = appdata.implicitData['webdavAutoSync'] ?? true;
     syncLocalComicImages = appdata.settings['syncLocalComicImages'] ?? false;
-    if (App.isWeb) {
-      unawaited(_loadServerWebDavConfig());
-    }
-  }
-
-  Future<void> _loadServerWebDavConfig() async {
-    try {
-      final config = await DataSync().loadWebDavConfig(force: true);
-      if (!mounted || config == null) {
-        return;
-      }
-      final loadedUrl = config['url']?.toString() ?? '';
-      final loadedUser = config['user']?.toString() ?? '';
-      final loadedPass = config['pass']?.toString() ?? '';
-      if (loadedUrl.isEmpty || loadedUser.isEmpty) {
-        return;
-      }
-      setState(() {
-        url = loadedUrl;
-        user = loadedUser;
-        pass = loadedPass;
-        disableSync =
-            config['disableSyncFields']?.toString() ?? disableSync;
-        autoSync = config['autoSync'] == true;
-      });
-    } catch (e, s) {
-      Log.error('WebDAV Config', e, s);
-    }
   }
 
   void onAutoSyncChanged(bool value) {
@@ -749,9 +713,6 @@ class _WebdavSettingState extends State<_WebdavSetting> {
                   if (url.trim().isEmpty &&
                       user.trim().isEmpty &&
                       pass.trim().isEmpty) {
-                    if (App.isWeb) {
-                      await DataSync().clearWebDavConfig();
-                    }
                     appdata.settings['webdav'] = [];
                     appdata.implicitData['webdavAutoSync'] = false;
                     appdata.writeImplicitData();
@@ -762,22 +723,7 @@ class _WebdavSettingState extends State<_WebdavSetting> {
                   }
 
                   final config = [url.trim(), user.trim(), pass];
-                  if (App.isWeb) {
-                    try {
-                      await DataSync().saveWebDavConfig(
-                        config,
-                        autoSync: autoSync,
-                        disableSyncFields: disableSync,
-                      );
-                    } catch (e, s) {
-                      Log.error('WebDAV Config', e, s);
-                      context.showMessage(message: e.toString());
-                      context.showMessage(message: "Saved Failed".tl);
-                      return;
-                    }
-                  }
-
-                  appdata.settings['webdav'] = App.isWeb ? [] : config;
+                  appdata.settings['webdav'] = config;
                   appdata.settings['disableSyncFields'] = disableSync;
                   appdata.implicitData['webdavAutoSync'] = autoSync;
                   appdata.writeImplicitData();

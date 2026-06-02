@@ -352,7 +352,7 @@ class _ReaderGestureDetectorState
           text: "Copy Image".tl,
           onClick: () => copyImage(location),
         ),
-      if (!App.isWeb && !reader.isLoading)
+      if (!reader.isLoading)
         MenuEntry(
           icon: Icons.download_outlined,
           text: "Save Image".tl,
@@ -391,10 +391,6 @@ class _ReaderGestureDetectorState
   }
 
   void saveImage(Offset location) async {
-    if (App.isWeb) {
-      context.showMessage(message: "Save image is not supported on WebPWA".tl);
-      return;
-    }
     var controller = reader._imageViewController;
     var image = await controller!.getImageByOffset(location);
     if (image != null) {

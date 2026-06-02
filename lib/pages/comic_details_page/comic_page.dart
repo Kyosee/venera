@@ -385,7 +385,7 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
         child: Text(comic.title),
       ),
       actions: [
-        if (!App.isWeb && !isDownloaded)
+        if (!isDownloaded)
           IconButton(
             onPressed: download,
             icon: const Icon(Icons.download_outlined),
