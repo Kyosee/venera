@@ -161,264 +161,278 @@ class _ReaderSettingsState extends State<ReaderSettings> {
               Divider().toSliver(),
             ],
           ),
-        _SwitchSetting(
-          title: "Tap to turn Pages".tl,
-          settingKey: "enableTapToTurnPages",
-          onChanged: () {
-            widget.onChanged?.call("enableTapToTurnPages");
-          },
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
+        ExpansionTile(
+          key: const PageStorageKey('readerReadingGroup'),
+          initiallyExpanded: true,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 16),
+          childrenPadding: const EdgeInsets.only(bottom: 8),
+          title: Text("Reading settings".tl),
+          children: [
+            _SwitchSetting(
+              title: "Tap to turn Pages".tl,
+              settingKey: "enableTapToTurnPages",
+              onChanged: () {
+                widget.onChanged?.call("enableTapToTurnPages");
+              },
+              comicId: isEnabledSpecificSettings ? widget.comicId : null,
+              comicSource:
+                  isEnabledSpecificSettings ? widget.comicSource : null,
+              useDeviceSettings: useDeviceSpecificSettings,
+            ),
+            _SwitchSetting(
+              title: "Reverse tap to turn Pages".tl,
+              settingKey: "reverseTapToTurnPages",
+              onChanged: () {
+                widget.onChanged?.call("reverseTapToTurnPages");
+              },
+              comicId: isEnabledSpecificSettings ? widget.comicId : null,
+              comicSource:
+                  isEnabledSpecificSettings ? widget.comicSource : null,
+              useDeviceSettings: useDeviceSpecificSettings,
+            ),
+            _SwitchSetting(
+              title: "Page animation".tl,
+              settingKey: "enablePageAnimation",
+              onChanged: () {
+                widget.onChanged?.call("enablePageAnimation");
+              },
+              comicId: isEnabledSpecificSettings ? widget.comicId : null,
+              comicSource:
+                  isEnabledSpecificSettings ? widget.comicSource : null,
+              useDeviceSettings: useDeviceSpecificSettings,
+            ),
+            SelectSetting(
+              title: "Reading mode".tl,
+              settingKey: "readerMode",
+              optionTranslation: {
+                "galleryLeftToRight": "Gallery (Left to Right)".tl,
+                "galleryRightToLeft": "Gallery (Right to Left)".tl,
+                "galleryTopToBottom": "Gallery (Top to Bottom)".tl,
+                "continuousLeftToRight": "Continuous (Left to Right)".tl,
+                "continuousRightToLeft": "Continuous (Right to Left)".tl,
+                "continuousTopToBottom": "Continuous (Top to Bottom)".tl,
+              },
+              onChanged: () {
+                setState(() {});
+                var readerMode = appdata.settings['readerMode'];
+                if (readerMode?.toLowerCase().startsWith('continuous') ??
+                    false) {
+                  appdata.settings['readerScreenPicNumberForLandscape'] = 1;
+                  widget.onChanged?.call('readerScreenPicNumberForLandscape');
+                  appdata.settings['readerScreenPicNumberForPortrait'] = 1;
+                  widget.onChanged?.call('readerScreenPicNumberForPortrait');
+                }
+                widget.onChanged?.call("readerMode");
+              },
+              comicId: isEnabledSpecificSettings ? widget.comicId : null,
+              comicSource:
+                  isEnabledSpecificSettings ? widget.comicSource : null,
+              useDeviceSettings: useDeviceSpecificSettings,
+            ),
+            _SwitchSetting(
+              title: "Seamless chapter reading".tl,
+              subtitle: "Join chapters in continuous reading modes".tl,
+              settingKey: "enableContinuousChapterReading",
+              onChanged: () {
+                widget.onChanged?.call("enableContinuousChapterReading");
+              },
+              comicId: isEnabledSpecificSettings ? widget.comicId : null,
+              comicSource:
+                  isEnabledSpecificSettings ? widget.comicSource : null,
+              useDeviceSettings: useDeviceSpecificSettings,
+            ),
+            if (appdata.settings['readerMode']!.startsWith('gallery'))
+              _SliderSetting(
+                title:
+                    "The number of pic in screen for landscape (Only Gallery Mode)"
+                        .tl,
+                settingsIndex: "readerScreenPicNumberForLandscape",
+                interval: 1,
+                min: 1,
+                max: 5,
+                onChanged: () {
+                  setState(() {});
+                  widget.onChanged?.call("readerScreenPicNumberForLandscape");
+                },
+                comicId: isEnabledSpecificSettings ? widget.comicId : null,
+                comicSource:
+                    isEnabledSpecificSettings ? widget.comicSource : null,
+                useDeviceSettings: useDeviceSpecificSettings,
+              ),
+            if (appdata.settings['readerMode']!.startsWith('gallery'))
+              _SliderSetting(
+                title:
+                    "The number of pic in screen for portrait (Only Gallery Mode)"
+                        .tl,
+                settingsIndex: "readerScreenPicNumberForPortrait",
+                interval: 1,
+                min: 1,
+                max: 5,
+                onChanged: () {
+                  widget.onChanged?.call("readerScreenPicNumberForPortrait");
+                },
+                comicId: isEnabledSpecificSettings ? widget.comicId : null,
+                comicSource:
+                    isEnabledSpecificSettings ? widget.comicSource : null,
+                useDeviceSettings: useDeviceSpecificSettings,
+              ),
+            if (appdata.settings['readerMode']!.startsWith('gallery') &&
+                (appdata.settings['readerScreenPicNumberForLandscape'] > 1 ||
+                    appdata.settings['readerScreenPicNumberForPortrait'] > 1))
+              _SwitchSetting(
+                title: "Show single image on first page".tl,
+                settingKey: "showSingleImageOnFirstPage",
+                onChanged: () {
+                  widget.onChanged?.call("showSingleImageOnFirstPage");
+                },
+                comicId: isEnabledSpecificSettings ? widget.comicId : null,
+                comicSource:
+                    isEnabledSpecificSettings ? widget.comicSource : null,
+                useDeviceSettings: useDeviceSpecificSettings,
+              ),
+            if (appdata.settings['readerMode']!.startsWith('gallery'))
+              _SwitchSetting(
+                title: "Fill screen".tl,
+                subtitle:
+                    "Crop image to fill screen instead of letterboxing".tl,
+                settingKey: "galleryFillScreen",
+                onChanged: () {
+                  widget.onChanged?.call("galleryFillScreen");
+                },
+                comicId: isEnabledSpecificSettings ? widget.comicId : null,
+                comicSource:
+                    isEnabledSpecificSettings ? widget.comicSource : null,
+                useDeviceSettings: useDeviceSpecificSettings,
+              ),
+            _SwitchSetting(
+              title: 'Double tap to zoom'.tl,
+              settingKey: 'enableDoubleTapToZoom',
+              onChanged: () {
+                setState(() {});
+                widget.onChanged?.call('enableDoubleTapToZoom');
+              },
+              comicId: isEnabledSpecificSettings ? widget.comicId : null,
+              comicSource:
+                  isEnabledSpecificSettings ? widget.comicSource : null,
+              useDeviceSettings: useDeviceSpecificSettings,
+            ),
+            _SwitchSetting(
+              title: 'Long press to zoom'.tl,
+              settingKey: 'enableLongPressToZoom',
+              onChanged: () {
+                setState(() {});
+                widget.onChanged?.call('enableLongPressToZoom');
+              },
+              comicId: isEnabledSpecificSettings ? widget.comicId : null,
+              comicSource:
+                  isEnabledSpecificSettings ? widget.comicSource : null,
+              useDeviceSettings: useDeviceSpecificSettings,
+            ),
+            if (appdata.settings['enableLongPressToZoom'] == true)
+              SelectSetting(
+                title: "Long press zoom position".tl,
+                settingKey: "longPressZoomPosition",
+                optionTranslation: {
+                  "press": "Press position".tl,
+                  "center": "Screen center".tl,
+                },
+                comicId: isEnabledSpecificSettings ? widget.comicId : null,
+                comicSource:
+                    isEnabledSpecificSettings ? widget.comicSource : null,
+                useDeviceSettings: useDeviceSpecificSettings,
+              ),
+            if (App.isAndroid)
+              _SwitchSetting(
+                title: 'Turn page by volume keys'.tl,
+                settingKey: 'enableTurnPageByVolumeKey',
+                onChanged: () {
+                  widget.onChanged?.call('enableTurnPageByVolumeKey');
+                },
+                comicId: isEnabledSpecificSettings ? widget.comicId : null,
+                comicSource:
+                    isEnabledSpecificSettings ? widget.comicSource : null,
+                useDeviceSettings: useDeviceSpecificSettings,
+              ),
+            _SliderSetting(
+              title: "Auto page turning interval".tl,
+              settingsIndex: "autoPageTurningInterval",
+              interval: 1,
+              min: 1,
+              max: 20,
+              onChanged: () {
+                setState(() {});
+                widget.onChanged?.call("autoPageTurningInterval");
+              },
+              comicId: isEnabledSpecificSettings ? widget.comicId : null,
+              comicSource:
+                  isEnabledSpecificSettings ? widget.comicSource : null,
+              useDeviceSettings: useDeviceSpecificSettings,
+            ),
+            if (appdata.settings['readerMode']!.startsWith('continuous'))
+              _SliderSetting(
+                title: "Mouse scroll speed".tl,
+                settingsIndex: "readerScrollSpeed",
+                interval: 0.1,
+                min: 0.5,
+                max: 3,
+                onChanged: () {
+                  widget.onChanged?.call("readerScrollSpeed");
+                },
+                comicId: isEnabledSpecificSettings ? widget.comicId : null,
+                comicSource:
+                    isEnabledSpecificSettings ? widget.comicSource : null,
+                useDeviceSettings: useDeviceSpecificSettings,
+              ),
+            _SliderSetting(
+              title: "Number of images preloaded".tl,
+              settingsIndex: "preloadImageCount",
+              interval: 1,
+              min: 1,
+              max: 16,
+              comicId: isEnabledSpecificSettings ? widget.comicId : null,
+              comicSource:
+                  isEnabledSpecificSettings ? widget.comicSource : null,
+              useDeviceSettings: useDeviceSpecificSettings,
+            ),
+          ],
         ).toSliver(),
-        _SwitchSetting(
-          title: "Reverse tap to turn Pages".tl,
-          settingKey: "reverseTapToTurnPages",
-          onChanged: () {
-            widget.onChanged?.call("reverseTapToTurnPages");
-          },
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
-        ).toSliver(),
-        _SwitchSetting(
-          title: "Page animation".tl,
-          settingKey: "enablePageAnimation",
-          onChanged: () {
-            widget.onChanged?.call("enablePageAnimation");
-          },
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
-        ).toSliver(),
-        SelectSetting(
-          title: "Reading mode".tl,
-          settingKey: "readerMode",
-          optionTranslation: {
-            "galleryLeftToRight": "Gallery (Left to Right)".tl,
-            "galleryRightToLeft": "Gallery (Right to Left)".tl,
-            "galleryTopToBottom": "Gallery (Top to Bottom)".tl,
-            "continuousLeftToRight": "Continuous (Left to Right)".tl,
-            "continuousRightToLeft": "Continuous (Right to Left)".tl,
-            "continuousTopToBottom": "Continuous (Top to Bottom)".tl,
-          },
-          onChanged: () {
-            setState(() {});
-            var readerMode = appdata.settings['readerMode'];
-            if (readerMode?.toLowerCase().startsWith('continuous') ?? false) {
-              appdata.settings['readerScreenPicNumberForLandscape'] = 1;
-              widget.onChanged?.call('readerScreenPicNumberForLandscape');
-              appdata.settings['readerScreenPicNumberForPortrait'] = 1;
-              widget.onChanged?.call('readerScreenPicNumberForPortrait');
-            }
-            widget.onChanged?.call("readerMode");
-          },
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
-        ).toSliver(),
-        _SwitchSetting(
-          title: "Seamless chapter reading".tl,
-          subtitle: "Join chapters in continuous reading modes".tl,
-          settingKey: "enableContinuousChapterReading",
-          onChanged: () {
-            widget.onChanged?.call("enableContinuousChapterReading");
-          },
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
-        ).toSliver(),
-        _SliderSetting(
-          title: "Auto page turning interval".tl,
-          settingsIndex: "autoPageTurningInterval",
-          interval: 1,
-          min: 1,
-          max: 20,
-          onChanged: () {
-            setState(() {});
-            widget.onChanged?.call("autoPageTurningInterval");
-          },
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
-        ).toSliver(),
-        SliverAnimatedVisibility(
-          visible: appdata.settings['readerMode']!.startsWith('gallery'),
-          child: _SliderSetting(
-            title:
-                "The number of pic in screen for landscape (Only Gallery Mode)"
-                    .tl,
-            settingsIndex: "readerScreenPicNumberForLandscape",
-            interval: 1,
-            min: 1,
-            max: 5,
-            onChanged: () {
-              setState(() {});
-              widget.onChanged?.call("readerScreenPicNumberForLandscape");
-            },
-            comicId: isEnabledSpecificSettings ? widget.comicId : null,
-            comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-            useDeviceSettings: useDeviceSpecificSettings,
-          ),
-        ),
-        SliverAnimatedVisibility(
-          visible: appdata.settings['readerMode']!.startsWith('gallery'),
-          child: _SliderSetting(
-            title:
-                "The number of pic in screen for portrait (Only Gallery Mode)"
-                    .tl,
-            settingsIndex: "readerScreenPicNumberForPortrait",
-            interval: 1,
-            min: 1,
-            max: 5,
-            onChanged: () {
-              widget.onChanged?.call("readerScreenPicNumberForPortrait");
-            },
-            comicId: isEnabledSpecificSettings ? widget.comicId : null,
-            comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-            useDeviceSettings: useDeviceSpecificSettings,
-          ),
-        ),
-        SliverAnimatedVisibility(
-          visible:
-              appdata.settings['readerMode']!.startsWith('gallery') &&
-              (appdata.settings['readerScreenPicNumberForLandscape'] > 1 ||
-                  appdata.settings['readerScreenPicNumberForPortrait'] > 1),
-          child: _SwitchSetting(
-            title: "Show single image on first page".tl,
-            settingKey: "showSingleImageOnFirstPage",
-            onChanged: () {
-              widget.onChanged?.call("showSingleImageOnFirstPage");
-            },
-            comicId: isEnabledSpecificSettings ? widget.comicId : null,
-            comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-            useDeviceSettings: useDeviceSpecificSettings,
-          ),
-        ),
-        SliverAnimatedVisibility(
-          visible: appdata.settings['readerMode']!.startsWith('gallery'),
-          child: _SwitchSetting(
-            title: "Fill screen".tl,
-            subtitle: "Crop image to fill screen instead of letterboxing".tl,
-            settingKey: "galleryFillScreen",
-            onChanged: () {
-              widget.onChanged?.call("galleryFillScreen");
-            },
-            comicId: isEnabledSpecificSettings ? widget.comicId : null,
-            comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-            useDeviceSettings: useDeviceSpecificSettings,
-          ),
-        ),
-        SliverAnimatedVisibility(
-          visible: appdata.settings['readerMode']!.startsWith('continuous'),
-          child: _SliderSetting(
-            title: "Mouse scroll speed".tl,
-            settingsIndex: "readerScrollSpeed",
-            interval: 0.1,
-            min: 0.5,
-            max: 3,
-            onChanged: () {
-              widget.onChanged?.call("readerScrollSpeed");
-            },
-            comicId: isEnabledSpecificSettings ? widget.comicId : null,
-            comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-            useDeviceSettings: useDeviceSpecificSettings,
-          ),
-        ),
-        _SwitchSetting(
-          title: 'Double tap to zoom'.tl,
-          settingKey: 'enableDoubleTapToZoom',
-          onChanged: () {
-            setState(() {});
-            widget.onChanged?.call('enableDoubleTapToZoom');
-          },
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
-        ).toSliver(),
-        _SwitchSetting(
-          title: 'Long press to zoom'.tl,
-          settingKey: 'enableLongPressToZoom',
-          onChanged: () {
-            setState(() {});
-            widget.onChanged?.call('enableLongPressToZoom');
-          },
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
-        ).toSliver(),
-        SliverAnimatedVisibility(
-          visible: appdata.settings['enableLongPressToZoom'] == true,
-          child: SelectSetting(
-            title: "Long press zoom position".tl,
-            settingKey: "longPressZoomPosition",
-            optionTranslation: {
-              "press": "Press position".tl,
-              "center": "Screen center".tl,
-            },
-            comicId: isEnabledSpecificSettings ? widget.comicId : null,
-            comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-            useDeviceSettings: useDeviceSpecificSettings,
-          ),
-        ),
-        if (App.isAndroid)
-          _SwitchSetting(
-            title: 'Turn page by volume keys'.tl,
-            settingKey: 'enableTurnPageByVolumeKey',
-            onChanged: () {
-              widget.onChanged?.call('enableTurnPageByVolumeKey');
-            },
-            comicId: isEnabledSpecificSettings ? widget.comicId : null,
-            comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-            useDeviceSettings: useDeviceSpecificSettings,
-          ).toSliver(),
-        _SwitchSetting(
-          title: "Display time & battery info in reader".tl,
-          settingKey: "enableClockAndBatteryInfoInReader",
-          onChanged: () {
-            widget.onChanged?.call("enableClockAndBatteryInfoInReader");
-          },
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
-        ).toSliver(),
-        _SwitchSetting(
-          title: "Show system status bar".tl,
-          settingKey: "showSystemStatusBar",
-          onChanged: () {
-            widget.onChanged?.call("showSystemStatusBar");
-          },
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
-        ).toSliver(),
-        _SwitchSetting(
-          title: "Also collect chapter cover when collecting image".tl,
-          settingKey: "autoFavoriteCover",
-          onChanged: () {
-            widget.onChanged?.call("autoFavoriteCover");
-          },
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
-        ).toSliver(),
-        SelectSetting(
-          title: "Quick collect image".tl,
-          settingKey: "quickCollectImage",
-          optionTranslation: {
-            "No": "Not enable".tl,
-            "DoubleTap": "Double Tap".tl,
-            "Swipe": "Swipe".tl,
-          },
-          onChanged: () {
-            widget.onChanged?.call("quickCollectImage");
-          },
-          help:
-              "On the image browsing page, you can quickly collect images by sliding horizontally or vertically according to your reading mode"
-                  .tl,
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
+        ExpansionTile(
+          key: const PageStorageKey('readerFavoritesGroup'),
+          tilePadding: const EdgeInsets.symmetric(horizontal: 16),
+          childrenPadding: const EdgeInsets.only(bottom: 8),
+          title: Text("Favorites settings".tl),
+          children: [
+            _SwitchSetting(
+              title: "Also collect chapter cover when collecting image".tl,
+              settingKey: "autoFavoriteCover",
+              onChanged: () {
+                widget.onChanged?.call("autoFavoriteCover");
+              },
+              comicId: isEnabledSpecificSettings ? widget.comicId : null,
+              comicSource:
+                  isEnabledSpecificSettings ? widget.comicSource : null,
+              useDeviceSettings: useDeviceSpecificSettings,
+            ),
+            SelectSetting(
+              title: "Quick collect image".tl,
+              settingKey: "quickCollectImage",
+              optionTranslation: {
+                "No": "Not enable".tl,
+                "DoubleTap": "Double Tap".tl,
+                "Swipe": "Swipe".tl,
+              },
+              onChanged: () {
+                widget.onChanged?.call("quickCollectImage");
+              },
+              help:
+                  "On the image browsing page, you can quickly collect images by sliding horizontally or vertically according to your reading mode"
+                      .tl,
+              comicId: isEnabledSpecificSettings ? widget.comicId : null,
+              comicSource:
+                  isEnabledSpecificSettings ? widget.comicSource : null,
+              useDeviceSettings: useDeviceSpecificSettings,
+            ),
+          ],
         ).toSliver(),
         ExpansionTile(
           key: const PageStorageKey('readerImageProcessingGroup'),
@@ -498,47 +512,68 @@ class _ReaderSettingsState extends State<ReaderSettings> {
             ],
           ],
         ).toSliver(),
-        _SliderSetting(
-          title: "Number of images preloaded".tl,
-          settingsIndex: "preloadImageCount",
-          interval: 1,
-          min: 1,
-          max: 16,
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
+        ExpansionTile(
+          key: const PageStorageKey('readerDisplayGroup'),
+          tilePadding: const EdgeInsets.symmetric(horizontal: 16),
+          childrenPadding: const EdgeInsets.only(bottom: 8),
+          title: Text("Display settings".tl),
+          children: [
+            _SwitchSetting(
+              title: "Display time & battery info in reader".tl,
+              settingKey: "enableClockAndBatteryInfoInReader",
+              onChanged: () {
+                widget.onChanged?.call("enableClockAndBatteryInfoInReader");
+              },
+              comicId: isEnabledSpecificSettings ? widget.comicId : null,
+              comicSource:
+                  isEnabledSpecificSettings ? widget.comicSource : null,
+              useDeviceSettings: useDeviceSpecificSettings,
+            ),
+            _SwitchSetting(
+              title: "Show system status bar".tl,
+              settingKey: "showSystemStatusBar",
+              onChanged: () {
+                widget.onChanged?.call("showSystemStatusBar");
+              },
+              comicId: isEnabledSpecificSettings ? widget.comicId : null,
+              comicSource:
+                  isEnabledSpecificSettings ? widget.comicSource : null,
+              useDeviceSettings: useDeviceSpecificSettings,
+            ),
+            _SwitchSetting(
+              title: "Show Page Number".tl,
+              settingKey: "showPageNumberInReader",
+              onChanged: () {
+                widget.onChanged?.call("showPageNumberInReader");
+              },
+              comicId: isEnabledSpecificSettings ? widget.comicId : null,
+              comicSource:
+                  isEnabledSpecificSettings ? widget.comicSource : null,
+              useDeviceSettings: useDeviceSpecificSettings,
+            ),
+            _SwitchSetting(
+              title: "Show Chapter Comments".tl,
+              settingKey: "showChapterComments",
+              onChanged: _onShowChapterCommentsChanged,
+              comicId: isEnabledSpecificSettings ? widget.comicId : null,
+              comicSource:
+                  isEnabledSpecificSettings ? widget.comicSource : null,
+              useDeviceSettings: useDeviceSpecificSettings,
+            ),
+            if (_isChapterCommentsAtEndSupported())
+              _SwitchSetting(
+                title: "Show Comments at Chapter End".tl,
+                settingKey: "showChapterCommentsAtEnd",
+                onChanged: () {
+                  widget.onChanged?.call("showChapterCommentsAtEnd");
+                },
+                comicId: isEnabledSpecificSettings ? widget.comicId : null,
+                comicSource:
+                    isEnabledSpecificSettings ? widget.comicSource : null,
+                useDeviceSettings: useDeviceSpecificSettings,
+              ),
+          ],
         ).toSliver(),
-        _SwitchSetting(
-          title: "Show Page Number".tl,
-          settingKey: "showPageNumberInReader",
-          onChanged: () {
-            widget.onChanged?.call("showPageNumberInReader");
-          },
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
-        ).toSliver(),
-        _SwitchSetting(
-          title: "Show Chapter Comments".tl,
-          settingKey: "showChapterComments",
-          onChanged: _onShowChapterCommentsChanged,
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
-        ).toSliver(),
-        SliverAnimatedVisibility(
-          visible: _isChapterCommentsAtEndSupported(),
-          child: _SwitchSetting(
-            title: "Show Comments at Chapter End".tl,
-            settingKey: "showChapterCommentsAtEnd",
-            onChanged: () {
-              widget.onChanged?.call("showChapterCommentsAtEnd");
-            },
-            comicId: isEnabledSpecificSettings ? widget.comicId : null,
-            comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-            useDeviceSettings: useDeviceSpecificSettings,
-          ),
-        ),
       ],
     );
   }
