@@ -12,6 +12,7 @@ import 'package:sqlite3/sqlite3.dart' as sql;
 import 'package:venera/utils/ext.dart';
 import 'package:venera/utils/translations.dart';
 import 'cbz.dart';
+import 'comic_metadata_resolver.dart';
 import 'io.dart';
 
 class ImportComic {
@@ -300,11 +301,17 @@ class ImportComic {
       return null;
     }
     var directoryPath = useRelativePath ? directory.name : directory.path;
+    // 调用方未显式传入元数据时，尝试从目录内 details.json/ComicInfo.xml/metadata.json 解析
+    final meta = resolveMetadata(directory);
+    final resolvedSubtitle = (subtitle != null && subtitle.isNotEmpty)
+        ? subtitle
+        : (meta.author.isNotEmpty ? meta.author : meta.artist);
+    final resolvedTags = (tags != null && tags.isNotEmpty) ? tags : meta.tags;
     return LocalComic(
       id: id ?? '0',
       title: name,
-      subtitle: subtitle ?? '',
-      tags: tags ?? [],
+      subtitle: resolvedSubtitle,
+      tags: resolvedTags,
       directory: directoryPath,
       chapters: hasChapters
           ? ComicChapters(Map.fromIterables(chapters, chapters))
@@ -313,6 +320,7 @@ class ImportComic {
       comicType: ComicType.local,
       downloadedChapters: chapters,
       createdAt: createTime ?? DateTime.now(),
+      description: meta.description,
     );
   }
 
@@ -377,6 +385,7 @@ class ImportComic {
             comicType: c.comicType,
             downloadedChapters: c.downloadedChapters,
             createdAt: c.createdAt,
+            description: c.description,
           ));
         }
       } catch (e, s) {

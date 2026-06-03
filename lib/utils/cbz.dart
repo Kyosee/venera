@@ -7,6 +7,7 @@ import 'package:venera/foundation/local.dart';
 import 'package:venera/utils/ext.dart';
 import 'package:venera/utils/file_type.dart';
 import 'package:venera/utils/io.dart';
+import 'package:venera/utils/comic_metadata_resolver.dart';
 import 'package:zip_flutter/zip_flutter.dart';
 
 class ComicMetaData {
@@ -106,14 +107,7 @@ abstract class CBZ {
     if (f.length == 1 && f.first is Directory) {
       cache = f.first as Directory;
     }
-    var metaDataFile = File(FilePath.join(cache.path, 'metadata.json'));
-    ComicMetaData? metaData;
-    if (metaDataFile.existsSync()) {
-      try {
-        metaData =
-            ComicMetaData.fromJson(jsonDecode(metaDataFile.readAsStringSync()));
-      } catch (_) {}
-    }
+    var metaData = resolveMetadataOrNull(cache);
     metaData ??= ComicMetaData(
       title: file.name.substring(0, file.name.lastIndexOf('.')),
       author: "",
@@ -188,7 +182,7 @@ abstract class CBZ {
     var comic = LocalComic(
       id: LocalManager().findValidId(ComicType.local),
       title: metaData.title,
-      subtitle: metaData.author,
+      subtitle: metaData.author.isNotEmpty ? metaData.author : metaData.artist,
       tags: metaData.tags,
       comicType: ComicType.local,
       directory: dest.name,
@@ -196,6 +190,7 @@ abstract class CBZ {
       downloadedChapters: cpMap?.keys.toList() ?? [],
       cover: 'cover.${coverFile.extension}',
       createdAt: DateTime.now(),
+      description: metaData.description,
     );
     await cache.delete(recursive: true);
     return comic;
