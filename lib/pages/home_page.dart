@@ -21,10 +21,8 @@ import 'package:venera/pages/image_favorites_page/image_favorites_page.dart';
 import 'package:venera/pages/search_page.dart';
 import 'package:venera/utils/data_sync.dart';
 import 'package:venera/utils/import_comic.dart';
-import 'package:venera/utils/io.dart';
 import 'package:venera/utils/tags_translation.dart';
 import 'package:venera/utils/translations.dart';
-import 'package:venera/utils/venera_comics.dart';
 
 import 'local_comics_page.dart';
 
@@ -917,14 +915,12 @@ class _ImportComicsWidgetState extends State<ImportComicsWidget> {
       "Select a folder; single/multiple will be detected.".tl,
       "Select an EhViewer database and a download folder.".tl,
       "Scan the current local path and restore the local database.".tl,
-      "Select a .venera_comics file to import comics with metadata and images.".tl,
     ][type];
     List<String> importMethods = [
       "Import files".tl,
       "Import folder".tl,
       "EhViewer downloads".tl,
       "Restore local downloads".tl,
-      ".venera_comics file".tl,
     ];
 
     return ContentDialog(
@@ -1030,7 +1026,6 @@ class _ImportComicsWidgetState extends State<ImportComicsWidget> {
       1 => await _importFolderWithConfirm(importer),
       2 => await importer.ehViewer(),
       3 => await importer.localDownloads(),
-      4 => await _importVeneraComics(),
       int() => true,
     };
     if (result) {
@@ -1091,20 +1086,6 @@ class _ImportComicsWidgetState extends State<ImportComicsWidget> {
     );
     if (confirmed != true) return false;
     return importer.directoryAt(r.dir, single: !asMulti);
-  }
-
-  Future<bool> _importVeneraComics() async {
-    var file = await selectFile(ext: ['venera_comics']);
-    if (file == null) return false;
-    try {
-      await importVeneraComics(File(file.path));
-      return true;
-    } catch (e) {
-      if (mounted) {
-        context.showMessage(message: e.toString());
-      }
-      return false;
-    }
   }
 }
 
