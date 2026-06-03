@@ -50,6 +50,9 @@ class LocalComic with HistoryMixin implements Comic {
 
   final DateTime createdAt;
 
+  @override
+  final String description;
+
   const LocalComic({
     required this.id,
     required this.title,
@@ -61,19 +64,23 @@ class LocalComic with HistoryMixin implements Comic {
     required this.comicType,
     required this.downloadedChapters,
     required this.createdAt,
+    this.description = "",
   });
 
   LocalComic.fromRow(Row row)
-    : id = row[0] as String,
-      title = row[1] as String,
-      subtitle = row[2] as String,
-      tags = List.from(jsonDecode(row[3] as String)),
-      directory = row[4] as String,
-      chapters = ComicChapters.fromJsonOrNull(jsonDecode(row[5] as String)),
-      cover = row[6] as String,
-      comicType = ComicType(row[7] as int),
-      downloadedChapters = List.from(jsonDecode(row[8] as String)),
-      createdAt = DateTime.fromMillisecondsSinceEpoch(row[9] as int);
+    : id = row['id'] as String,
+      title = row['title'] as String,
+      subtitle = row['subtitle'] as String,
+      tags = List.from(jsonDecode(row['tags'] as String)),
+      directory = row['directory'] as String,
+      chapters =
+          ComicChapters.fromJsonOrNull(jsonDecode(row['chapters'] as String)),
+      cover = row['cover'] as String,
+      comicType = ComicType(row['comic_type'] as int),
+      downloadedChapters =
+          List.from(jsonDecode(row['downloadedChapters'] as String)),
+      createdAt = DateTime.fromMillisecondsSinceEpoch(row['created_at'] as int),
+      description = (row['description'] as String?) ?? "";
 
   File get coverFile => File(FilePath.join(baseDir, cover));
 
@@ -99,9 +106,6 @@ class LocalComic with HistoryMixin implements Comic {
       return LocalComicStatus.notDownloaded;
     }
   }
-
-  @override
-  String get description => "";
 
   @override
   String get sourceKey => comicType.sourceKey;
@@ -287,9 +291,18 @@ class LocalManager with ChangeNotifier {
         comic_type INTEGER NOT NULL,
         downloadedChapters TEXT NOT NULL,
         created_at INTEGER,
+        description TEXT NOT NULL DEFAULT '',
         PRIMARY KEY (id, comic_type)
       );
     ''');
+    final cols = _db
+        .select('PRAGMA table_info(comics);')
+        .map((r) => r['name'] as String)
+        .toList();
+    if (!cols.contains('description')) {
+      _db.execute(
+          "ALTER TABLE comics ADD COLUMN description TEXT NOT NULL DEFAULT '';");
+    }
     if (File(FilePath.join(App.dataPath, 'local_path')).existsSync()) {
       path = File(FilePath.join(App.dataPath, 'local_path')).readAsStringSync();
       if (!directory.existsSync()) {
@@ -333,7 +346,10 @@ class LocalManager with ChangeNotifier {
       downloaded.addAll(old.downloadedChapters);
     }
     _db.execute(
-      'INSERT OR REPLACE INTO comics VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+      'INSERT OR REPLACE INTO comics '
+      '(id, title, subtitle, tags, directory, chapters, cover, comic_type, '
+      'downloadedChapters, created_at, description) '
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
       [
         id ?? comic.id,
         comic.title,
@@ -345,6 +361,7 @@ class LocalManager with ChangeNotifier {
         comic.comicType.value,
         jsonEncode(downloaded),
         comic.createdAt.millisecondsSinceEpoch,
+        comic.description,
       ],
     );
     try {
