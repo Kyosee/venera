@@ -913,19 +913,15 @@ class _ImportComicsWidgetState extends State<ImportComicsWidget> {
   @override
   Widget build(BuildContext context) {
     String info = [
-      "Select a directory which contains the comic files.".tl,
-      "Select a directory which contains the comic directories.".tl,
-      "Select an archive file (cbz, zip, 7z, cb7)".tl,
-      "Select a directory which contains multiple archive files.".tl,
+      "Select comic files (cbz, zip, 7z, cb7, or .venera_comics).".tl,
+      "Select a folder; single/multiple will be detected.".tl,
       "Select an EhViewer database and a download folder.".tl,
       "Scan the current local path and restore the local database.".tl,
       "Select a .venera_comics file to import comics with metadata and images.".tl,
     ][type];
     List<String> importMethods = [
-      "Single Comic".tl,
-      "Multiple Comics".tl,
-      "An archive file".tl,
-      "Multiple archive files".tl,
+      "Import files".tl,
+      "Import folder".tl,
       "EhViewer downloads".tl,
       "Restore local downloads".tl,
       ".venera_comics file".tl,
@@ -945,7 +941,7 @@ class _ImportComicsWidgetState extends State<ImportComicsWidget> {
               onChanged: (value) {
                 setState(() {
                   type = value ?? type;
-                  if (type == 5 || type == 6) {
+                  if (type >= 2) {
                     selectedFolder = null;
                   }
                 });
@@ -961,7 +957,7 @@ class _ImportComicsWidgetState extends State<ImportComicsWidget> {
                       value: index,
                     );
                   }),
-                  if (type != 4 && type != 5 && type != 6)
+                  if (type == 0 || type == 1)
                     ListTile(
                       title: Text("Add to favorites".tl),
                       trailing: Select(
@@ -975,12 +971,7 @@ class _ImportComicsWidgetState extends State<ImportComicsWidget> {
                         },
                       ),
                     ).paddingHorizontal(8),
-                  if (!App.isIOS &&
-                      !App.isMacOS &&
-                      type != 2 &&
-                      type != 3 &&
-                      type != 5 &&
-                      type != 6)
+                  if (!App.isIOS && !App.isMacOS && (type == 0 || type == 1))
                     CheckboxListTile(
                       enabled: true,
                       title: Text("Copy to app local path".tl),
@@ -1035,13 +1026,11 @@ class _ImportComicsWidgetState extends State<ImportComicsWidget> {
       copyToLocal: copyToLocalFolder,
     );
     var result = switch (type) {
-      0 => await importer.directory(true),
-      1 => await importer.directory(false),
-      2 => await importer.cbz(),
-      3 => await importer.multipleCbz(),
-      4 => await importer.ehViewer(),
-      5 => await importer.localDownloads(),
-      6 => await _importVeneraComics(),
+      0 => await importer.files(),
+      1 => await _importFolderWithConfirm(importer),
+      2 => await importer.ehViewer(),
+      3 => await importer.localDownloads(),
+      4 => await _importVeneraComics(),
       int() => true,
     };
     if (result) {
@@ -1051,6 +1040,57 @@ class _ImportComicsWidgetState extends State<ImportComicsWidget> {
         loading = false;
       });
     }
+  }
+
+  Future<bool> _importFolderWithConfirm(ImportComic importer) async {
+    final r = await importer.inspectFolder();
+    if (r == null) return false;
+    if (r.kind == 'cbz') {
+      return importer.multipleCbzFromDir(r.dir);
+    }
+    bool asMulti = r.guessMulti;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => ContentDialog(
+          title: "Import Folder".tl,
+          content: RadioGroup<bool>(
+            groupValue: asMulti,
+            onChanged: (v) => setLocal(() => asMulti = v ?? asMulti),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text("How should this folder be imported?".tl)
+                    .paddingHorizontal(16),
+                RadioListTile<bool>(
+                  title:
+                      Text("As a single comic (subfolders are chapters)".tl),
+                  value: false,
+                ),
+                RadioListTile<bool>(
+                  title:
+                      Text("As multiple comics (each subfolder is one)".tl),
+                  value: true,
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            Button.text(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text("Cancel".tl),
+            ),
+            Button.filled(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text("Import".tl),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true) return false;
+    return importer.directoryAt(r.dir, single: !asMulti);
   }
 
   Future<bool> _importVeneraComics() async {
