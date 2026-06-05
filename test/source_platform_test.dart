@@ -14,38 +14,44 @@ void main() {
 
   test('preserves remote plugin source keys as canonical keys', () {
     final platform = SourcePlatformResolver.fromSourceKey(
-      'picacg',
-      name: 'PicaCG',
+      'source_a',
+      name: 'Source A',
     );
 
-    expect(platform.platformId, 'remote:picacg');
-    expect(platform.canonicalKey, 'picacg');
-    expect(platform.displayName, 'PicaCG');
+    expect(platform.platformId, 'remote:source_a');
+    expect(platform.canonicalKey, 'source_a');
+    expect(platform.displayName, 'Source A');
     expect(platform.kind, SourcePlatformKind.remote);
     expect(platform.matchedAliasType, SourceAliasType.pluginKey);
   });
 
-  test('resolves legacy source ints only as alias metadata', () {
+  test('resolves ancient enum source ints only as alias metadata', () {
+    // Enum values 1-6 are the only hardcoded legacy mapping kept (for one-time
+    // migration of very old backups); they are not key.hashCode values.
     final platform = SourcePlatformResolver.fromLegacyInt(5);
 
-    expect(platform?.canonicalKey, 'nhentai');
     expect(platform?.matchedAlias, '5');
     expect(platform?.matchedAliasType, SourceAliasType.legacyInt);
     expect(platform?.legacyIntType, 5);
+    expect(platform?.canonicalKey, isNotEmpty);
   });
 
-  test('resolves native persisted source hashes on web', () {
-    expect(
-      SourcePlatformResolver.sourceKeyFromLegacyInt(557997769),
-      'copy_manga',
-    );
-    expect(SourcePlatformResolver.sourceKeyFromLegacyInt(769844263), 'jm');
-    expect(
-      SourcePlatformResolver.legacyIntFromSourceKey('copy_manga'),
-      557997769,
-    );
-    expect(ComicType.fromKey('copy_manga').value, 557997769);
-    expect(ComicType.fromKey('nhentai').value, 264196719);
+  test('learns hashCode-based source mappings at runtime', () {
+    // Plugin sources register their own key.hashCode -> key mapping when
+    // loaded; there is no hardcoded per-source table anymore.
+    final intKey = 'source_b'.hashCode;
+    expect(SourcePlatformResolver.sourceKeyFromLegacyInt(intKey), isNull);
+
+    SourcePlatformResolver.registerLegacyIntSourceKey(intKey, 'source_b');
+
+    expect(SourcePlatformResolver.sourceKeyFromLegacyInt(intKey), 'source_b');
+    expect(SourcePlatformResolver.legacyIntFromSourceKey('source_b'), intKey);
+  });
+
+  test('ComicType falls back to key.hashCode without a learned mapping', () {
+    // With nothing registered, fromKey uses the key's hashCode directly, so a
+    // round-trip through the type value stays stable.
+    expect(ComicType.fromKey('source_c').value, 'source_c'.hashCode);
   });
 
   test('keeps unknown legacy source ints as stable platform refs', () {

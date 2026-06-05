@@ -45,44 +45,17 @@ class SourcePlatformResolver {
   static const localCanonicalKey = 'local';
   static const localDisplayName = 'Local';
   static const _unknownPrefix = 'Unknown:';
-  static const _legacyRemoteSourceKeys = <int, String>{
-    0: 'picacg',
-    1: 'ehentai',
-    2: 'jm',
-    3: 'hitomi',
-    4: 'wnacg',
-    5: 'nhentai',
-    6: 'nhentai',
-    29663848: 'hot_manga',
-    42816288: 'manwaba',
-    150465061: 'zaimanhua',
-    233488852: 'baozi',
-    236897507: 'hcomic',
-    258019538: 'hitomi',
-    264196719: 'nhentai',
-    331263271: 'shonen_jump_plus',
-    385625716: 'ehentai',
-    550146035: 'goda',
-    553570794: 'picacg',
-    557997769: 'copy_manga',
-    577341847: 'mh1234',
-    577718694: 'manga_dex',
-    631413104: 'manhuaren',
-    637999886: 'Komiic',
-    716010982: 'ikmmh',
-    740690276: 'jcomic',
-    769844263: 'jm',
-    771282371: 'mxs',
-    778108598: 'mh18',
-    798816513: 'ykmh',
-    807338462: 'ccc',
-    823512256: 'wnacg',
-    964788560: 'comick',
-    977805693: 'happy',
-    981441865: 'ManHuaGui',
-  };
 
+  /// Maps a legacy integer source type to its string key. Plugin sources
+  /// register their own `key.hashCode -> key` mapping at load time (see
+  /// [registerLegacyIntSourceKey]); that learned mapping is persisted per-device
+  /// (and exported with backups) and is the sole source of truth.
   static final _runtimeLegacySourceKeys = <int, String>{};
+
+  /// Persistence hook invoked whenever a new `legacyIntType -> sourceKey`
+  /// mapping is learned, so it can be stored per-device (and exported with
+  /// backups). Wired up by the storage layer to avoid a dependency cycle.
+  static void Function(int legacyIntType, String sourceKey)? onLegacyKeyLearned;
 
   static const local = SourcePlatformRef(
     platformId: localPlatformId,
@@ -101,7 +74,11 @@ class SourcePlatformResolver {
         sourceKey == localCanonicalKey) {
       return;
     }
+    final existing = _runtimeLegacySourceKeys[legacyIntType];
     _runtimeLegacySourceKeys[legacyIntType] = sourceKey;
+    if (existing != sourceKey) {
+      onLegacyKeyLearned?.call(legacyIntType, sourceKey);
+    }
   }
 
   static void registerLegacyIntSourceKeys(Map<int, String> sourceKeys) {
@@ -111,18 +88,12 @@ class SourcePlatformResolver {
   }
 
   static String? sourceKeyFromLegacyInt(int legacyIntType) {
-    return _runtimeLegacySourceKeys[legacyIntType] ??
-        _legacyRemoteSourceKeys[legacyIntType];
+    return _runtimeLegacySourceKeys[legacyIntType];
   }
 
   static int? legacyIntFromSourceKey(String sourceKey) {
     if (isLocalKey(sourceKey)) {
       return 0;
-    }
-    for (var entry in _legacyRemoteSourceKeys.entries) {
-      if (entry.key > 6 && entry.value == sourceKey) {
-        return entry.key;
-      }
     }
     for (var entry in _runtimeLegacySourceKeys.entries) {
       if (entry.value == sourceKey) {

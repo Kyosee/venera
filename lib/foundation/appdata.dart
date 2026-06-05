@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/log.dart';
+import 'package:venera/foundation/source_platform.dart';
 import 'package:venera/utils/data_sync.dart';
 import 'package:venera/utils/init.dart';
 import 'package:venera/utils/io.dart';
@@ -75,7 +76,12 @@ class Appdata with Init {
     return {'settings': settings._data, 'searchHistory': searchHistory};
   }
 
-  static const syncImplicitDataKeys = ['follow_update_task_history'];
+  static const sourceTypeRegistryKey = 'sourceTypeRegistry';
+
+  static const syncImplicitDataKeys = [
+    'follow_update_task_history',
+    sourceTypeRegistryKey,
+  ];
 
   Map<String, dynamic> implicitDataForSync() {
     return {
@@ -160,6 +166,36 @@ class Appdata with Init {
 
   var implicitData = <String, dynamic>{};
 
+  /// Loads the learned `legacyIntType -> sourceKey` registry into the resolver
+  /// and wires the persistence hook so future learned mappings are saved. The
+  /// registry lives in [implicitData] (per-device, synced with backups), which
+  /// replaces the old hardcoded source-key table.
+  void _initSourceTypeRegistry() {
+    final stored = implicitData[sourceTypeRegistryKey];
+    if (stored is Map) {
+      final restored = <int, String>{};
+      for (final entry in stored.entries) {
+        final intKey = int.tryParse(entry.key.toString());
+        final sourceKey = entry.value?.toString();
+        if (intKey != null && sourceKey != null && sourceKey.isNotEmpty) {
+          restored[intKey] = sourceKey;
+        }
+      }
+      // Restore without triggering the persistence hook (not yet attached).
+      SourcePlatformResolver.registerLegacyIntSourceKeys(restored);
+    }
+    SourcePlatformResolver.onLegacyKeyLearned = (legacyIntType, sourceKey) {
+      final registry = (implicitData[sourceTypeRegistryKey] as Map?) ?? {};
+      final stringKey = legacyIntType.toString();
+      if (registry[stringKey] == sourceKey) {
+        return;
+      }
+      registry[stringKey] = sourceKey;
+      implicitData[sourceTypeRegistryKey] = registry;
+      writeImplicitData();
+    };
+  }
+
   void writeImplicitData() async {
     while (_isSavingData) {
       await Future.delayed(const Duration(milliseconds: 20));
@@ -208,6 +244,7 @@ class Appdata with Init {
       var implicitDataFile = File(FilePath.join(dataPath, 'implicitData.json'));
       implicitDataFile.deleteIgnoreError();
     }
+    _initSourceTypeRegistry();
   }
 }
 
@@ -422,5 +459,4 @@ async function processImage(image, cid, eid, page, sourceKey) {
 }
 ''';
 
-const _defaultSourceListUrl =
-    "https://cdn.jsdelivr.net/gh/venera-app/venera-configs@main/index.json";
+const _defaultSourceListUrl = "";

@@ -4,8 +4,8 @@
 //! through reqwest+rustls and stream the upstream response back.
 //!
 //! Why: browser fetch() and Node's native fetch() cannot reproduce the app's
-//! request path and headers. Several comic sources (CopyManga in particular)
-//! ban cookies that arrive with a suspicious fingerprint. The sidecar defaults
+//! request path and headers. Some upstreams ban cookies that arrive with a
+//! suspicious fingerprint. The sidecar defaults
 //! to HTTP/1.1, which is closer to the current Dart HttpClient-based app path,
 //! and reports diagnostics back to Node for verification.
 

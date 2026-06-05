@@ -10,9 +10,13 @@
 
 A cross-platform manga/comic reader with self-hosted Web frontend support.
 
-> **Original Project:** This project is forked from [venera-app/venera](https://github.com/venera-app/venera). Thanks to the original author for the excellent work.
+> **Original Project:** This project is forked from [venera-app/venera](https://github.com/venera-app/venera).
 
-> **Disclaimer:** This repository is for personal learning and use only. Feature development and maintenance are AI-driven.
+> **Disclaimer:** The software in this repository is provided "AS IS", without warranty of any kind, express or implied. The maintainers do not guarantee its accuracy, completeness, or fitness for any particular purpose; use it at your own risk.
+>
+> This project is for personal learning and research only, and its feature development and maintenance are AI-driven. This repository does **not** contain, provide, host, or distribute any content. For any third-party content that users access, obtain, or process through this software, the project makes no guarantee as to its legality, accuracy, or completeness and assumes no liability for it. Users are solely responsible for their own use and must comply with all applicable laws and regulations in their jurisdiction.
+>
+> By downloading, copying, modifying, or using this project, you are deemed to have read and accepted this disclaimer. The maintainers reserve the right to modify or supplement this disclaimer at any time.
 
 ## Warning
 
@@ -20,10 +24,15 @@ A cross-platform manga/comic reader with self-hosted Web frontend support.
 
 ## Features
 
-- Self-hosted Web frontend with Docker support (experimental)
-- WebDAV backup & sync
-- Windows auto-updater with fallback scripts
-- Android APK auto-update
+- [x] Self-hosted Web frontend with Docker support (experimental)
+- [x] Improved WebDAV backup & sync
+- [x] Windows auto-updater with fallback scripts
+- [x] Android APK auto-update
+- [x] Seamless continuous-chapter reading
+- [x] Improved local library, follow-updates & favorites
+- [x] Task system with background execution and related views
+- [ ] Chapter read-status changes
+- [ ] Night-view mode
 
 ## Quick Start
 
@@ -83,14 +92,3 @@ npm ci && npm run dev
 ## Migration
 
 If migrating from [venera-app/venera](https://github.com/venera-app/venera), use a separate WebDAV sync directory. Back up your old data before migrating.
-
-## Documentation
-
-| Document | Link |
-|----------|------|
-| Local Comic Import | [doc/import_comic.md](doc/import_comic.md) |
-| Headless Mode | [doc/headless_doc.md](doc/headless_doc.md) |
-
-## Acknowledgments
-
-- [EhTagTranslation](https://github.com/EhTagTranslation/Database) — Chinese tag translations

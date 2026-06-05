@@ -14,18 +14,21 @@ const moduleUrl = `data:text/javascript;base64,${Buffer.from(outputText).toStrin
 const { normalizeComicSources, resolveSourceKey } = await import(moduleUrl)
 
 const deduped = normalizeComicSources([
-  { name: 'comic_source/copy_manga.js', key: 'copy_manga (1)' },
-  { name: 'comic_source/copy_manga.js', key: 'copy_manga (2)' },
-  { name: 'comic_source/ehentai.js', key: 'ehentai' },
-  { name: 'comic_source/copy_manga.data', key: 'copy_manga.data' },
+  { name: 'comic_source/source_a.js', key: 'source_a (1)' },
+  { name: 'comic_source/source_a.js', key: 'source_a (2)' },
+  { name: 'comic_source/source_b.js', key: 'source_b' },
+  { name: 'comic_source/source_a.data', key: 'source_a.data' },
 ])
 
 assert.equal(deduped.length, 2)
-assert.deepEqual(deduped.map(item => item.key).sort(), ['copy_manga (1)', 'ehentai'])
+assert.deepEqual(deduped.map(item => item.key).sort(), ['source_a (1)', 'source_b'])
 assert.equal(
-  resolveSourceKey({ type: 557997769 }, [{ key: 'copy_manga (1)', canonicalKey: 'copy_manga' }]),
-  'copy_manga (1)',
+  resolveSourceKey(
+    { type: 557997769 },
+    [{ key: 'source_a (1)', canonicalKey: 'source_a', type: 557997769 }],
+  ),
+  'source_a (1)',
 )
-assert.equal(resolveSourceKey({ sourceKey: 'copy_manga' }, [{ key: 'copy_manga (1)', canonicalKey: 'copy_manga' }]), 'copy_manga (1)')
+assert.equal(resolveSourceKey({ sourceKey: 'source_a' }, [{ key: 'source_a (1)', canonicalKey: 'source_a' }]), 'source_a (1)')
 
 console.log('source utils verification passed')

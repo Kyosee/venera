@@ -77,16 +77,16 @@ void main() {
         containsPair('canonical_key', 'local'),
       );
       domain.ensureSourcePlatform(
-        SourcePlatformResolver.fromSourceKey('picacg'),
+        SourcePlatformResolver.fromSourceKey('source_a'),
         timestamp: 2,
       );
       expect(
         db.select('''
           SELECT alias, alias_type
           FROM source_platform_aliases
-          WHERE platform_id = 'remote:picacg';
+          WHERE platform_id = 'remote:source_a';
           ''').single,
-        containsPair('alias', 'picacg'),
+        containsPair('alias', 'source_a'),
       );
     } finally {
       domain.close();
@@ -165,7 +165,7 @@ void main() {
     try {
       await domain.init(tempDir.path);
       final comicId = domain.ensureComicSource(
-        platform: SourcePlatformResolver.fromSourceKey('picacg'),
+        platform: SourcePlatformResolver.fromSourceKey('source_a'),
         sourceComicId: 'abc',
         title: 'Title',
         subtitle: 'Sub',
@@ -185,7 +185,7 @@ void main() {
       );
       domain.markRead(comicId: comicId, occurredAt: 12);
 
-      expect(comicId, 'remote:picacg:abc');
+      expect(comicId, 'remote:source_a:abc');
       expect(
         domain.db.select('SELECT subtitle FROM comics WHERE comic_id = ?;', [
           comicId,
@@ -224,18 +224,18 @@ void main() {
 
       try {
         await domain.init(tempDir.path);
-        final picacg = SourcePlatformResolver.fromSourceKey('picacg');
-        final ehentai = SourcePlatformResolver.fromSourceKey('ehentai');
+        final sourceA = SourcePlatformResolver.fromSourceKey('source_a');
+        final sourceB = SourcePlatformResolver.fromSourceKey('source_b');
 
         final firstId = domain.ensureComicSource(
-          platform: picacg,
+          platform: sourceA,
           sourceComicId: 'same-a',
           title: 'Same Title',
           author: 'Same Author',
           timestamp: 20,
         );
         final secondId = domain.ensureComicSource(
-          platform: ehentai,
+          platform: sourceB,
           sourceComicId: 'same-b',
           title: 'Same Title',
           author: 'Same Author',
@@ -261,9 +261,9 @@ void main() {
         );
 
         final workId = domain.linkSourceComics(
-          sourcePlatform: picacg,
+          sourcePlatform: sourceA,
           sourceComicId: 'same-a',
-          targetPlatform: ehentai,
+          targetPlatform: sourceB,
           targetSourceComicId: 'same-b',
           timestamp: 24,
         );

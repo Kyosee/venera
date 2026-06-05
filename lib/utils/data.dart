@@ -163,6 +163,18 @@ Future<File> exportAppData([bool sync = true]) async {
       Log.warning('Export Data', 'Failed to checkpoint $dbName: $e\n$s');
     }
   }
+  // Serialize the learned legacy-int -> source-key registry so orphan data
+  // (sources that may not be installed on the importing device) can still be
+  // resolved after migration. Built in the main isolate; the zip write below
+  // runs in a separate isolate without access to appdata.
+  Uint8List? sourceTypeMapBytes;
+  final sourceTypeRegistry =
+      appdata.implicitData[Appdata.sourceTypeRegistryKey];
+  if (sourceTypeRegistry is Map && sourceTypeRegistry.isNotEmpty) {
+    sourceTypeMapBytes = utf8.encode(
+      jsonEncode({'types': sourceTypeRegistry}),
+    );
+  }
   await Isolate.run(() {
     var zipFile = ZipFile.open(cacheFilePath);
     var historyFile = FilePath.join(dataPath, "history.db");
@@ -175,6 +187,9 @@ Future<File> exportAppData([bool sync = true]) async {
     var cookies = FilePath.join(dataPath, "cookie.db");
     zipFile.addFile("history.db", historyFile);
     zipFile.addFile("local_favorite.db", localFavoriteFile);
+    if (sourceTypeMapBytes != null) {
+      zipFile.addFileFromBytes("source_type_map.json", sourceTypeMapBytes);
+    }
     if (File(domainFile).existsSync()) {
       zipFile.addFile("data/venera.db", domainFile);
     }
@@ -425,9 +440,6 @@ Future<void> importPicaData(File file) async {
         for (var folderSyncValue in db.select("SELECT * FROM folder_sync;")) {
           var folderName = folderSyncValue["folder_name"];
           String sourceKey = folderSyncValue["key"];
-          sourceKey = sourceKey.toLowerCase() == "htmanga"
-              ? "wnacg"
-              : sourceKey;
           // 有值就跳过
           if (LocalFavoritesManager().findLinked(folderName).$1 != null) {
             continue;
@@ -490,10 +502,6 @@ Future<void> importPicaData(File file) async {
             ImageFavoriteManager().comics;
         for (var comic in db.select("SELECT * FROM image_favorites;")) {
           String sourceKey = comic["id"].split("-")[0];
-          // 换名字了, 绅士漫画
-          if (sourceKey.toLowerCase() == "htmanga") {
-            sourceKey = "wnacg";
-          }
           if (ComicSource.find(sourceKey) == null) {
             continue;
           }

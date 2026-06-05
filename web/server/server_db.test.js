@@ -1987,14 +1987,14 @@ test("server-db source runtime supports canonical fallback and Map chapters", as
   });
 
   const upstreamUrl = await listen(upstream);
-  await writeFile(join(sourceDir, "copy_manga.js"), "");
-  await writeFile(join(sourceDir, "copy_manga(0).js"), "");
+  await writeFile(join(sourceDir, "source_a.js"), "");
+  await writeFile(join(sourceDir, "source_a(0).js"), "");
   await writeFile(
-    join(sourceDir, "copy_manga(1).js"),
+    join(sourceDir, "source_a(1).js"),
     `
-class CopyManga extends ComicSource {
-  key = "copy_manga";
-  name = "拷贝漫画";
+class SourceA extends ComicSource {
+  key = "source_a";
+  name = "Source A";
   get endpoint() { return this.loadSetting("endpoint"); }
   async getComicInfo(id) {
     const secret = Convert.encodeBase64(Convert.encodeUtf8("secret"));
@@ -2026,7 +2026,7 @@ class CopyManga extends ComicSource {
 `,
   );
   await writeFile(
-    join(sourceDir, "copy_manga.data"),
+    join(sourceDir, "source_a.data"),
     JSON.stringify({ settings: { endpoint: upstreamUrl } }),
   );
 
@@ -2051,14 +2051,14 @@ class CopyManga extends ComicSource {
     assert.equal(addFavoriteResponse.status, 200);
 
     const detailResponse = await post("/api/server-db/comic/detail", {
-      sourceKey: "copy_manga(0)",
+      sourceKey: "source_a(0)",
       comicId: "comic-1",
     });
     assert.equal(detailResponse.status, 200);
     const detailPayload = await detailResponse.json();
-    assert.equal(detailPayload.comic.sourceKey, "copy_manga(0)");
+    assert.equal(detailPayload.comic.sourceKey, "source_a(0)");
     assert.equal(detailPayload.comic.favoriteId, "默认:comic-1");
-    assert.equal(detailPayload.sourceName, "拷贝漫画");
+    assert.equal(detailPayload.sourceName, "Source A");
     assert.deepEqual(
       detailPayload.chapters.find((item) => item.title === "卷一"),
       { title: "卷一", chapters: [{ id: "chapter-1", title: "第一话" }] },
@@ -2071,7 +2071,7 @@ class CopyManga extends ComicSource {
     assert.ok(seenRequests[0].sig);
 
     const pagesResponse = await post("/api/server-db/reader/pages", {
-      sourceKey: "copy_manga(0)",
+      sourceKey: "source_a(0)",
       comicId: "comic-1",
       chapterId: "chapter-1",
     });
@@ -2085,12 +2085,12 @@ class CopyManga extends ComicSource {
     const sourcesResponse = await post("/api/server-db/comic-sources", {});
     assert.equal(sourcesResponse.status, 200);
     const sourcesPayload = await sourcesResponse.json();
-    const sourceItem = sourcesPayload.items.find((item) => item.name === "copy_manga(1).js");
-    assert.equal(sourceItem.sourceName, "拷贝漫画");
-    assert.equal(sourceItem.canonicalKey, "copy_manga");
+    const sourceItem = sourcesPayload.items.find((item) => item.name === "source_a(1).js");
+    assert.equal(sourceItem.sourceName, "Source A");
+    assert.equal(sourceItem.canonicalKey, "source_a");
 
     const sourceData = JSON.parse(
-      await readFile(join(sourceDir, "copy_manga.data"), "utf8"),
+      await readFile(join(sourceDir, "source_a.data"), "utf8"),
     );
     assert.equal(sourceData.lastComicId, "comic-1");
   } finally {

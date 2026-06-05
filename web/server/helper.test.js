@@ -1010,12 +1010,12 @@ test("json proxy preserves explicit source user-agent", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         url: upstreamUrl,
-        headers: { "User-Agent": "CopyMangaSource/1.0" },
+        headers: { "User-Agent": "SourceAClient/1.0" },
       }),
     });
 
     assert.equal(response.status, 200);
-    assert.equal(seenUserAgent, "CopyMangaSource/1.0");
+    assert.equal(seenUserAgent, "SourceAClient/1.0");
   } finally {
     await close(helper);
     await close(upstream);
@@ -1031,7 +1031,7 @@ test("query proxy metadata forwards source headers and strips browser headers", 
     "user-agent": "Browser UA",
     cookie: "helper_session=ignored",
     "sec-fetch-site": "same-origin",
-    "x-venera-user-agent": "CopyMangaSource/1.0",
+    "x-venera-user-agent": "SourceAClient/1.0",
     "x-venera-cookie": "token=abc",
     "x-venera-referer": "https://www.2026copy.com/comic/demo",
     "x-venera-origin": "https://www.2026copy.com",
@@ -1050,7 +1050,7 @@ test("query proxy metadata forwards source headers and strips browser headers", 
     Authorization: "Bearer token",
     "X-Copy-Platform": "3",
     "Content-Type": "application/json",
-    "User-Agent": "CopyMangaSource/1.0",
+    "User-Agent": "SourceAClient/1.0",
     Cookie: "token=abc",
     Referer: "https://www.2026copy.com/comic/demo",
     Origin: "https://www.2026copy.com",
@@ -1305,7 +1305,7 @@ test("cookie bulk import/export preserves app-synced domain cookies", async () =
 test("login import endpoint stores shortcut payload by code", async () => {
   const helper = createServer();
   const helperUrl = await listen(helper);
-  const code = "copy-manga-import-abcdefghijklmnopqrstuvwxyz";
+  const code = "login-import-abcdefghijklmnopqrstuvwxyz";
   try {
     const pending = await fetch(`${helperUrl}/login-import/${code}`);
     assert.equal(pending.status, 200);
@@ -1315,7 +1315,7 @@ test("login import endpoint stores shortcut payload by code", async () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        url: "https://www.mangacopy.com/comic/demo",
+        url: "https://www.example.com/comic/demo",
         cookie: "webp=1; token=abcdefghijklmnopqrstuvwxyz",
         localStorage: { access_token: "Bearer zyxwvutsrqponmlkjihgfedcba" },
       }),
@@ -1329,7 +1329,7 @@ test("login import endpoint stores shortcut payload by code", async () => {
     assert.equal(completedPayload.status, "completed");
     assert.equal(
       completedPayload.payload.url,
-      "https://www.mangacopy.com/comic/demo",
+      "https://www.example.com/comic/demo",
     );
     assert.equal(
       completedPayload.payload.localStorage.access_token,

@@ -10,9 +10,13 @@
 
 跨平台漫画阅读器，支持自托管 Web 前端。
 
-> **原始项目：** 本项目 fork 自 [venera-app/venera](https://github.com/venera-app/venera)，感谢原作者的优秀工作。
+> **原始项目：** 本项目 fork 自 [venera-app/venera](https://github.com/venera-app/venera)。
 
-> **声明：** 此仓库仅用于个人学习。功能开发和维护由 AI 驱动。
+> **声明：** 本项目的软件代码以"原样"提供，不附带任何明示或暗示的担保；本项目维护者不保证其准确性、完整性或适用于任何特定用途，使用风险由使用者自行承担。
+>
+> 本项目仅用于个人学习与研究，功能开发和维护由 AI 驱动。本项目**不**包含、不提供、不托管、也不分发任何内容；对于使用者通过本软件访问、获取或处理的任何第三方内容，本项目不保证其合法性、准确性或完整性，亦不对其承担任何责任。使用者须自行判断、对自身使用行为负责，并遵守所在司法管辖区的全部适用法律法规。
+>
+> 一旦下载、复制、修改或使用本项目，即视为已阅读并接受本声明。本项目维护者保留随时修改或补充本声明的权利。
 
 ## 警告
 
@@ -20,10 +24,15 @@
 
 ## 功能
 
-- 自托管 Web 前端，支持 Docker 部署（实验性）
-- WebDAV 备份与同步
-- Windows 自动更新（含回退脚本）
-- Android APK 自动更新
+- [x] 自托管 Web 前端，支持 Docker 部署（实验性）
+- [x] WebDAV 备份与同步优化
+- [x] Windows 自动更新（含回退脚本）
+- [x] Android APK 自动更新
+- [x] 连续章节无缝阅读
+- [x] 本地、追更、收藏优化
+- [x] 新增任务功能，支持后台执行任务及相关视图界面
+- [ ] 章节阅读状态变更
+- [ ] 夜览模式
 
 ## 快速开始
 
@@ -83,14 +92,3 @@ npm ci && npm run dev
 ## 迁移提示
 
 从 [venera-app/venera](https://github.com/venera-app/venera) 迁移时，请为 WebDAV 同步指定独立目录，不要与原项目共用。迁移前建议备份旧数据。
-
-## 文档
-
-| 文档 | 链接 |
-|------|------|
-| 本地漫画导入 | [doc/import_comic.md](doc/import_comic.md) |
-| Headless 模式 | [doc/headless_doc.md](doc/headless_doc.md) |
-
-## 致谢
-
-- [EhTagTranslation](https://github.com/EhTagTranslation/Database) — 漫画标签中文翻译

@@ -24,12 +24,12 @@ void main() {
     final repository = ComicStateRepository();
 
     final local = repository.identityFor('local', 'abc');
-    final remote = repository.identityFor('picacg', 'abc');
+    final remote = repository.identityFor('source_a', 'abc');
     final unknown = repository.identityFor('Unknown:999', 'abc');
 
     expect(local.comicId, 'local:abc');
     expect(local.isLocal, isTrue);
-    expect(remote.comicId, 'remote:picacg:abc');
+    expect(remote.comicId, 'remote:source_a:abc');
     expect(remote.isLocal, isFalse);
     expect(unknown.comicId, 'legacy:999:abc');
     expect(unknown.type.value, 999);
@@ -53,7 +53,7 @@ void main() {
           'Sub',
           const ['genre:Action', 'status:连载中'],
           'Desc',
-          'picacg',
+          'source_a',
           null,
           'zh',
         );
@@ -69,12 +69,12 @@ void main() {
           [comicId],
         );
 
-        expect(comicId, 'remote:picacg:remote-id');
+        expect(comicId, 'remote:source_a:remote-id');
         expect(rows.single['title'], 'Title');
         expect(rows.single['subtitle'], 'Sub');
         expect(rows.single['description'], 'Desc');
         expect(rows.single['status'], '连载中');
-        expect(rows.single['platform_id'], 'remote:picacg');
+        expect(rows.single['platform_id'], 'remote:source_a');
 
         final display = repository.displayInfoFor(comic);
         expect(display.title, 'Title');
@@ -105,7 +105,7 @@ void main() {
         'Author',
         const ['status:连载中'],
         'Desc',
-        'picacg',
+        'source_a',
         null,
         'zh',
       );
@@ -113,10 +113,10 @@ void main() {
       final links = repository.relatedSourcesFor(comic);
 
       expect(links, hasLength(1));
-      expect(links.single.comicId, 'remote:picacg:self-id');
+      expect(links.single.comicId, 'remote:source_a:self-id');
       expect(links.single.sourceComicId, 'self-id');
       expect(links.single.status, 'accepted');
-      expect(links.single.sourceName, 'picacg');
+      expect(links.single.sourceName, 'source_a');
     } finally {
       domain.close();
       tempDir.deleteSync(recursive: true);
@@ -132,7 +132,7 @@ void main() {
         name: 'Favorite',
         coverPath: 'cover.jpg',
         author: 'Author',
-        type: ComicType.fromKey('picacg'),
+        type: ComicType.fromKey('source_a'),
         tags: const ['status:连载中', 'genre:Drama'],
       );
       final updateInfo = FavoriteItemWithUpdateInfo(
@@ -167,7 +167,7 @@ void main() {
         'description': '',
         'tags': <String, List<String>>{},
         'chapters': {for (var i = 1; i <= 8; i++) '$i': '第$i話'},
-        'sourceKey': 'picacg',
+        'sourceKey': 'source_a',
         'comicId': 'comic-id',
       });
       final comic = ComicDetails.fromJson({
@@ -184,7 +184,7 @@ void main() {
           '5': '第2.3話',
           '6': '第11話',
         },
-        'sourceKey': 'picacg',
+        'sourceKey': 'source_a',
         'comicId': 'comic-id',
       });
       repository.mirrorComicDetails(staleComic);
@@ -198,7 +198,7 @@ void main() {
           'Author',
           const [],
           '第8話',
-          'picacg',
+          'source_a',
           null,
           null,
         ),
@@ -243,7 +243,7 @@ void main() {
         '单行本': {'v1': '第一卷'},
         '连载版': {'c1': '第1话', 'c2': '第2话'},
       },
-      'sourceKey': 'picacg',
+      'sourceKey': 'source_a',
       'comicId': 'comic-id',
     });
 
@@ -271,7 +271,7 @@ void main() {
         'cover': 'cover.jpg',
         'description': '',
         'tags': <String, List<String>>{},
-        'sourceKey': 'picacg',
+        'sourceKey': 'source_a',
         'comicId': 'comic-id',
       });
       final comic = Comic(
@@ -281,7 +281,7 @@ void main() {
         'Author',
         const [],
         '',
-        'picacg',
+        'source_a',
         null,
         null,
       );
@@ -315,7 +315,7 @@ void main() {
         'cover': 'cover.jpg',
         'description': '',
         'tags': <String, List<String>>{},
-        'sourceKey': 'picacg',
+        'sourceKey': 'source_a',
         'comicId': 'comic-id',
       });
       final favorite = FavoriteItem(
@@ -323,7 +323,7 @@ void main() {
         name: 'Title',
         coverPath: 'cover.jpg',
         author: 'Author',
-        type: ComicType.fromKey('picacg'),
+        type: ComicType.fromKey('source_a'),
         tags: const [],
       );
       final updateInfo = FavoriteItemWithUpdateInfo(

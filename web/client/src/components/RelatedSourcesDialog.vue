@@ -410,7 +410,7 @@ watch(() => props.show, (val) => {
                   v-model="advancedSourceKey"
                   type="text"
                   class="advanced-input"
-                  placeholder="来源 Key (如: copy_manga)"
+                  placeholder="来源 Key"
                 />
                 <input
                   v-model="advancedComicId"

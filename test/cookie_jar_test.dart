@@ -18,18 +18,18 @@ void main() {
   test('deleteByName removes matching cookie across paths only', () {
     final tempDir = Directory.systemTemp.createTempSync('venera_cookie_jar_');
     final jar = CookieJarSql('${tempDir.path}/cookie.db');
-    final uri = Uri.parse('https://wnacg.com/path/page');
+    final uri = Uri.parse('https://example.com/path/page');
 
     try {
       jar.saveFromResponse(uri, [
         Cookie('cf_clearance', 'root')
-          ..domain = '.wnacg.com'
+          ..domain = '.example.com'
           ..path = '/',
         Cookie('cf_clearance', 'nested')
-          ..domain = '.wnacg.com'
+          ..domain = '.example.com'
           ..path = '/path',
         Cookie('MPIC_bnS5', 'keep')
-          ..domain = '.wnacg.com'
+          ..domain = '.example.com'
           ..path = '/',
       ]);
 
@@ -49,7 +49,7 @@ void main() {
   test('saveFromResponse normalizes empty cookie domain and path', () {
     final tempDir = Directory.systemTemp.createTempSync('venera_cookie_jar_');
     final jar = CookieJarSql('${tempDir.path}/cookie.db');
-    final uri = Uri.parse('https://wnacg.com/path/page');
+    final uri = Uri.parse('https://example.com/path/page');
 
     try {
       jar.saveFromResponse(uri, [

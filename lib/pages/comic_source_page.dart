@@ -105,8 +105,12 @@ class ComicSourcePage extends StatelessWidget {
     if (ComicSource.all().isEmpty) {
       return 0;
     }
+    var listUrl = appdata.settings['comicSourceListUrl']?.toString() ?? '';
+    if (listUrl.isEmpty) {
+      return 0;
+    }
     var dio = AppDio();
-    var res = await dio.get<String>(appdata.settings['comicSourceListUrl']);
+    var res = await dio.get<String>(listUrl);
     if (res.statusCode != 200) {
       return -1;
     }

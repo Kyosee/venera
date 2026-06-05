@@ -24,72 +24,7 @@ export interface NormalizedComicSource extends SourceKeySource {
   [key: string]: unknown
 }
 
-const LEGACY_SOURCE_KEYS: Record<number, string> = {
-  0: 'local',
-  1: 'ehentai',
-  2: 'jm',
-  3: 'hitomi',
-  4: 'wnacg',
-  5: 'nhentai',
-  6: 'nhentai',
-  29663848: 'hot_manga',
-  42816288: 'manwaba',
-  150465061: 'zaimanhua',
-  233488852: 'baozi',
-  236897507: 'hcomic',
-  258019538: 'hitomi',
-  264196719: 'nhentai',
-  331263271: 'shonen_jump_plus',
-  385625716: 'ehentai',
-  550146035: 'goda',
-  553570794: 'picacg',
-  557997769: 'copy_manga',
-  577341847: 'mh1234',
-  577718694: 'manga_dex',
-  631413104: 'manhuaren',
-  637999886: 'Komiic',
-  716010982: 'ikmmh',
-  740690276: 'jcomic',
-  769844263: 'jm',
-  771282371: 'mxs',
-  778108598: 'mh18',
-  798816513: 'ykmh',
-  807338462: 'ccc',
-  823512256: 'wnacg',
-  964788560: 'comick',
-  977805693: 'happy',
-  981441865: 'ManHuaGui',
-}
-
-const SOURCE_DISPLAY_NAMES: Record<string, string> = {
-  copy_manga: '拷贝漫画',
-  ehentai: 'E-Hentai',
-  jm: '禁漫天堂',
-  hitomi: 'Hitomi',
-  wnacg: '绅士漫画',
-  nhentai: 'NHentai',
-  hot_manga: 'Hot Manga',
-  manwaba: '漫蛙',
-  zaimanhua: '再漫画',
-  baozi: '包子漫画',
-  hcomic: 'H-Comic',
-  shonen_jump_plus: '少年 Jump+',
-  goda: 'Goda',
-  picacg: '哔咔漫画',
-  mh1234: '漫画1234',
-  manga_dex: 'MangaDex',
-  manhuaren: '漫画人',
-  Komiic: 'Komiic',
-  ikmmh: '爱看漫',
-  jcomic: 'JComic',
-  mxs: '漫小肆',
-  mh18: 'MH18',
-  ykmh: '优酷漫画',
-  ccc: 'CCC',
-  comick: 'Comick',
-  happy: '快乐漫画',
-  ManHuaGui: '漫画柜',
-}
+const SOURCE_DISPLAY_NAMES: Record<string, string> = {}
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -227,7 +162,8 @@ export function normalizeComicSources(items: unknown[]): NormalizedComicSource[]
 export function sourceKeyFromType(type: number | string | null | undefined): string {
   const value = numberValue(type)
   if (value === null) return stringValue(type)
-  return LEGACY_SOURCE_KEYS[value] ?? `Unknown:${value}`
+  if (value === 0) return 'local'
+  return `Unknown:${value}`
 }
 
 export function sourceTypeFromKey(sourceKey: string | number | null | undefined): number {
@@ -236,9 +172,6 @@ export function sourceTypeFromKey(sourceKey: string | number | null | undefined)
   if (!key || key === 'local') return 0
   if (/^-?\d+$/.test(key)) return Number(key)
   if (key.startsWith('Unknown:')) return Number(key.slice('Unknown:'.length)) || 0
-  const legacy = Object.entries(LEGACY_SOURCE_KEYS)
-    .find(([, value]) => value === key)
-  if (legacy) return Number(legacy[0])
   return stableSourceTypeHash(key)
 }
 

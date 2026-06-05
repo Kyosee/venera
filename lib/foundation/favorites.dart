@@ -195,9 +195,6 @@ class FavoriteItem implements Comic {
 
   static FavoriteItem fromJson(Map<String, dynamic> json) {
     var type = json["type"] as int;
-    if (type == 0 && json['coverPath'].toString().startsWith('http')) {
-      type = ComicType.fromKey('picacg').value;
-    }
     final favorite = FavoriteItem(
       id: json["id"] ?? json['target'],
       name: json["name"],

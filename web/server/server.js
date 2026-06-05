@@ -541,7 +541,7 @@ try {
         error: String(error && error.message ? error.message : error),
         ...summary,
         payload
-      }, 'Venera import failed. If CopyManga is HTTPS and helper is HTTP, use HTTPS for the Venera helper.');
+      }, 'Venera import failed. If the upstream is HTTPS and helper is HTTP, use HTTPS for the Venera helper.');
     });
 } catch (error) {
   veneraFinish({
@@ -1350,8 +1350,8 @@ function normalizeImageProxyPayload(payload) {
 // --- venera-fetch sidecar integration ---
 //
 // The Rust sidecar at $VENERA_FETCH_SIDECAR (default http://127.0.0.1:9876)
-// performs upstream HTTP outside the browser sandbox. CopyManga and friends
-// are sensitive to request fingerprints, so the sidecar defaults to an
+// performs upstream HTTP outside the browser sandbox. Some upstreams are
+// sensitive to request fingerprints, so the sidecar defaults to an
 // app-like HTTP/1.1 path and exposes debug headers for verification.
 //
 // We pass the upstream call to the sidecar and wrap its HTTP response in an
@@ -3322,23 +3322,11 @@ function extractComicUpdateTime(comic) {
   return null;
 }
 
-// Legacy numeric type → source key mapping (mirrors client-side LEGACY_SOURCE_KEYS)
-const LEGACY_SOURCE_KEYS = {
-  1: "ehentai", 2: "jm", 3: "hitomi", 4: "wnacg", 5: "nhentai", 6: "nhentai",
-  29663848: "hot_manga", 42816288: "manwaba", 150465061: "zaimanhua",
-  233488852: "baozi", 236897507: "hcomic", 258019538: "hitomi",
-  264196719: "nhentai", 331263271: "shonen_jump_plus", 385625716: "ehentai",
-  550146035: "goda", 553570794: "picacg", 557997769: "copy_manga",
-  577341847: "mh1234", 577718694: "manga_dex", 631413104: "manhuaren",
-  637999886: "Komiic", 716010982: "ikmmh", 740690276: "jcomic",
-  769844263: "jm", 771282371: "mxs", 778108598: "mh18",
-  798816513: "ykmh", 807338462: "ccc", 823512256: "wnacg",
-  964788560: "comick", 977805693: "happy", 981441865: "ManHuaGui",
-};
-
-function sourceKeyFromType(type) {
-  if (type == null || type === 0) return "";
-  return LEGACY_SOURCE_KEYS[type] || "";
+function sourceKeyFromType() {
+  // A numeric source type is a one-way hash of the source key and cannot be
+  // reversed. Modern favorite rows carry an explicit string `sourceKey`; rows
+  // that only have a numeric type are unresolvable and skipped by the caller.
+  return "";
 }
 
 async function checkFollowUpdatesFolder(
@@ -5154,36 +5142,22 @@ function normalizeComicPages(result) {
   return [];
 }
 
-const legacySourceTypesByKey = new Map([
-  ["local", 0],
-  ["ehentai", 1],
-  ["jm", 769844263],
-  ["hitomi", 258019538],
-  ["wnacg", 823512256],
-  ["nhentai", 264196719],
-  ["hot_manga", 29663848],
-  ["manwaba", 42816288],
-  ["zaimanhua", 150465061],
-  ["baozi", 233488852],
-  ["hcomic", 236897507],
-  ["shonen_jump_plus", 331263271],
-  ["goda", 550146035],
-  ["picacg", 553570794],
-  ["copy_manga", 557997769],
-  ["mh1234", 577341847],
-  ["manga_dex", 577718694],
-  ["manhuaren", 631413104],
-  ["Komiic", 637999886],
-  ["ikmmh", 716010982],
-  ["jcomic", 740690276],
-  ["mxs", 771282371],
-  ["mh18", 778108598],
-  ["ykmh", 798816513],
-  ["ccc", 807338462],
-  ["comick", 964788560],
-  ["happy", 977805693],
-  ["ManHuaGui", 981441865],
-]);
+// The native app persists a favorite's source as a numeric `type` equal to the
+// Dart VM String.hashCode of the source key. Recomputing it from the runtime
+// key lets us match rows by key without hardcoding any per-source table.
+function comicSourceTypeFromKey(sourceKey) {
+  let h = 0;
+  for (let i = 0; i < sourceKey.length; i++) {
+    h = (h + sourceKey.charCodeAt(i)) >>> 0;
+    h = (h + ((h << 10) >>> 0)) >>> 0;
+    h = (h ^ (h >>> 6)) >>> 0;
+  }
+  h = (h + ((h << 3) >>> 0)) >>> 0;
+  h = (h ^ (h >>> 11)) >>> 0;
+  h = (h + ((h << 15) >>> 0)) >>> 0;
+  h = h & 0x3fffffff;
+  return h === 0 ? 1 : h;
+}
 
 function sourceTypeCandidates(sourceKey) {
   const candidates = new Set();
@@ -5193,8 +5167,11 @@ function sourceTypeCandidates(sourceKey) {
     if (!key) continue;
     const numeric = Number(key);
     if (Number.isInteger(numeric)) candidates.add(numeric);
-    const legacy = legacySourceTypesByKey.get(key);
-    if (Number.isInteger(legacy)) candidates.add(legacy);
+    if (key === "local") {
+      candidates.add(0);
+      continue;
+    }
+    candidates.add(comicSourceTypeFromKey(key));
   }
   return [...candidates];
 }
