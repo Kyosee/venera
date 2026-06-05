@@ -15,6 +15,172 @@ class _ComicChapters extends StatelessWidget {
   }
 }
 
+/// Shared multi-select state & actions for the chapters list.
+///
+/// Selection keys use the SAME string format the reader writes into
+/// [History.readEpisode]: plain chapter index ("3") for normal comics, and
+/// "group-chapter" ("2-5") for grouped comics. Keeping the format identical is
+/// what makes a manual mark actually toggle the "visited" style.
+mixin _ChapterSelectionMixin<T extends StatefulWidget> on State<T> {
+  bool selectMode = false;
+
+  /// Selected chapter keys (in reader format).
+  final Set<String> selected = {};
+
+  _ComicPageState get pageState;
+
+  History? get history;
+
+  set history(History? value);
+
+  /// All selectable chapter keys in the current context.
+  /// Normal: every chapter. Grouped: only the current group's chapters.
+  Set<String> get selectableKeys;
+
+  void enterSelectMode() {
+    setState(() {
+      selectMode = true;
+      selected.clear();
+    });
+  }
+
+  void exitSelectMode() {
+    setState(() {
+      selectMode = false;
+      selected.clear();
+    });
+  }
+
+  void toggleSelect(String key) {
+    setState(() {
+      if (!selected.remove(key)) {
+        selected.add(key);
+      }
+    });
+  }
+
+  void selectAll() {
+    setState(() {
+      selected.addAll(selectableKeys);
+    });
+  }
+
+  void invertSelection() {
+    setState(() {
+      final keys = selectableKeys;
+      final next = keys.where((k) => !selected.contains(k)).toSet();
+      selected
+        ..removeAll(keys)
+        ..addAll(next);
+    });
+  }
+
+  /// Apply read/unread to the current selection, persist, and refresh.
+  void _applyMark(bool read) {
+    if (selected.isEmpty) {
+      exitSelectMode();
+      return;
+    }
+    final current = Set<String>.from(history?.readEpisode ?? const <String>{});
+    if (read) {
+      current.addAll(selected);
+    } else {
+      current.removeAll(selected);
+    }
+    final updated = HistoryManager().updateReadEpisodes(
+      pageState.comic,
+      current,
+    );
+    pageState.history = updated;
+    setState(() {
+      history = updated;
+      selectMode = false;
+      selected.clear();
+    });
+  }
+
+  /// The toolbar shown in place of the title row while selecting.
+  Widget buildSelectionBar(BuildContext context) {
+    return Row(
+      children: [
+        Tooltip(
+          message: "Cancel".tl,
+          child: IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: exitSelectMode,
+          ),
+        ),
+        Expanded(
+          child: Text(
+            "Selected @count".tlParams({"count": selected.length}),
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+        ),
+        Tooltip(
+          message: "Select All".tl,
+          child: IconButton(
+            icon: const Icon(Icons.select_all),
+            onPressed: selectAll,
+          ),
+        ),
+        Tooltip(
+          message: "Invert Selection".tl,
+          child: IconButton(
+            icon: const Icon(Icons.flip),
+            onPressed: invertSelection,
+          ),
+        ),
+        Tooltip(
+          message: "Mark as read".tl,
+          child: IconButton(
+            icon: const Icon(Icons.done_all),
+            onPressed: selected.isEmpty ? null : () => _applyMark(true),
+          ),
+        ),
+        Tooltip(
+          message: "Mark as unread".tl,
+          child: IconButton(
+            icon: const Icon(Icons.remove_done),
+            onPressed: selected.isEmpty ? null : () => _applyMark(false),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// The trailing controls of the title row when NOT selecting.
+  Widget buildNormalTitle(
+    BuildContext context, {
+    required bool reverse,
+    required VoidCallback onToggleOrder,
+  }) {
+    return ListTile(
+      title: Text("Chapters".tl),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Tooltip(
+            message: "Batch manage".tl,
+            child: IconButton(
+              icon: const Icon(Icons.checklist),
+              onPressed: enterSelectMode,
+            ),
+          ),
+          Tooltip(
+            message: "Order".tl,
+            child: IconButton(
+              icon: Icon(
+                reverse ? Icons.arrow_upward : Icons.arrow_downward,
+              ),
+              onPressed: onToggleOrder,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _NormalComicChapters extends StatefulWidget {
   const _NormalComicChapters(this.history);
 
@@ -24,22 +190,36 @@ class _NormalComicChapters extends StatefulWidget {
   State<_NormalComicChapters> createState() => _NormalComicChaptersState();
 }
 
-class _NormalComicChaptersState extends State<_NormalComicChapters> {
+class _NormalComicChaptersState extends State<_NormalComicChapters>
+    with _ChapterSelectionMixin {
   late _ComicPageState state;
 
   late bool reverse;
 
   bool showAll = false;
 
-  late History? history;
+  History? _history;
 
   late ComicChapters chapters;
+
+  @override
+  _ComicPageState get pageState => state;
+
+  @override
+  History? get history => _history;
+
+  @override
+  set history(History? value) => _history = value;
+
+  @override
+  Set<String> get selectableKeys =>
+      List.generate(chapters.length, (i) => (i + 1).toString()).toSet();
 
   @override
   void initState() {
     super.initState();
     reverse = appdata.settings["reverseChapterOrder"] ?? false;
-    history = widget.history;
+    _history = widget.history;
   }
 
   @override
@@ -52,9 +232,11 @@ class _NormalComicChaptersState extends State<_NormalComicChapters> {
   @override
   void didUpdateWidget(covariant _NormalComicChapters oldWidget) {
     super.didUpdateWidget(oldWidget);
-    setState(() {
-      history = widget.history;
-    });
+    if (!selectMode) {
+      setState(() {
+        _history = widget.history;
+      });
+    }
   }
 
   @override
@@ -62,8 +244,8 @@ class _NormalComicChaptersState extends State<_NormalComicChapters> {
     return SliverLayoutBuilder(
       builder: (context, constrains) {
         int length = chapters.length;
-        bool canShowAll = showAll;
-        if (!showAll) {
+        bool canShowAll = showAll || selectMode;
+        if (!canShowAll) {
           var width = constrains.crossAxisExtent - 16;
           var crossItems = width ~/ 200;
           if (width % 200 != 0) {
@@ -78,22 +260,13 @@ class _NormalComicChaptersState extends State<_NormalComicChapters> {
         return SliverMainAxisGroup(
           slivers: [
             SliverToBoxAdapter(
-              child: ListTile(
-                title: Text("Chapters".tl),
-                trailing: Tooltip(
-                  message: "Order".tl,
-                  child: IconButton(
-                    icon: Icon(reverse
-                        ? Icons.arrow_upward
-                        : Icons.arrow_downward),
-                    onPressed: () {
-                      setState(() {
-                        reverse = !reverse;
-                      });
-                    },
-                  ),
-                ),
-              ),
+              child: selectMode
+                  ? buildSelectionBar(context).paddingHorizontal(8)
+                  : buildNormalTitle(
+                      context,
+                      reverse: reverse,
+                      onToggleOrder: () => setState(() => reverse = !reverse),
+                    ),
             ),
             SliverGrid(
               delegate: SliverChildBuilderDelegate(
@@ -104,16 +277,27 @@ class _NormalComicChaptersState extends State<_NormalComicChapters> {
                   }
                   var key = chapters.ids.elementAt(i);
                   var value = chapters[key]!;
-                  bool visited = (history?.readEpisode ?? {}).contains(
-                    (i + 1).toString(),
-                  );
+                  var epKey = (i + 1).toString();
+                  bool visited =
+                      (_history?.readEpisode ?? const {}).contains(epKey);
+                  bool isSelected = selected.contains(epKey);
                   return Padding(
                     padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
                     child: Material(
-                      color: context.colorScheme.surfaceContainer,
+                      color: isSelected
+                          ? context.colorScheme.primaryContainer
+                          : context.colorScheme.surfaceContainer,
                       borderRadius: BorderRadius.circular(16),
                       child: InkWell(
-                        onTap: () => state.read(i + 1),
+                        onTap: () => selectMode
+                            ? toggleSelect(epKey)
+                            : state.read(i + 1),
+                        onLongPress: selectMode
+                            ? null
+                            : () {
+                                enterSelectMode();
+                                toggleSelect(epKey);
+                              },
                         borderRadius: BorderRadius.circular(16),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -124,9 +308,11 @@ class _NormalComicChaptersState extends State<_NormalComicChapters> {
                               textAlign: TextAlign.center,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                color: visited
-                                    ? context.colorScheme.outline
-                                    : null,
+                                color: isSelected
+                                    ? context.colorScheme.onPrimaryContainer
+                                    : visited
+                                        ? context.colorScheme.outline
+                                        : null,
                               ),
                             ),
                           ),
@@ -176,14 +362,14 @@ class _GroupedComicChapters extends StatefulWidget {
 }
 
 class _GroupedComicChaptersState extends State<_GroupedComicChapters>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, _ChapterSelectionMixin {
   late _ComicPageState state;
 
   late bool reverse;
 
   bool showAll = false;
 
-  late History? history;
+  History? _history;
 
   late ComicChapters chapters;
 
@@ -194,12 +380,41 @@ class _GroupedComicChaptersState extends State<_GroupedComicChapters>
   late int index;
 
   @override
+  _ComicPageState get pageState => state;
+
+  @override
+  History? get history => _history;
+
+  @override
+  set history(History? value) => _history = value;
+
+  /// 0-based flat index of the first chapter in the current group.
+  int get _groupOffset {
+    var offset = 0;
+    for (var j = 0; j < index; j++) {
+      offset += chapters.getGroupByIndex(j).length;
+    }
+    return offset;
+  }
+
+  /// Selectable keys = ONLY the current group's chapters, in reader format
+  /// "group-chapter" (both 1-based).
+  @override
+  Set<String> get selectableKeys {
+    final group = chapters.getGroupByIndex(index);
+    return List.generate(
+      group.length,
+      (i) => "${index + 1}-${i + 1}",
+    ).toSet();
+  }
+
+  @override
   void initState() {
     super.initState();
     reverse = appdata.settings["reverseChapterOrder"] ?? false;
-    history = widget.history;
-    if (history?.group != null) {
-      index = history!.group! - 1;
+    _history = widget.history;
+    if (_history?.group != null) {
+      index = _history!.group! - 1;
     } else {
       index = 0;
     }
@@ -240,6 +455,8 @@ class _GroupedComicChaptersState extends State<_GroupedComicChapters>
       setState(() {
         index = tabController.index;
         showAll = false;
+        // Selection is scoped to a group; leaving the group clears it.
+        selected.clear();
       });
     }
   }
@@ -247,9 +464,11 @@ class _GroupedComicChaptersState extends State<_GroupedComicChapters>
   @override
   void didUpdateWidget(covariant _GroupedComicChapters oldWidget) {
     super.didUpdateWidget(oldWidget);
-    setState(() {
-      history = widget.history;
-    });
+    if (!selectMode) {
+      setState(() {
+        _history = widget.history;
+      });
+    }
   }
 
   @override
@@ -261,6 +480,42 @@ class _GroupedComicChaptersState extends State<_GroupedComicChapters>
     super.dispose();
   }
 
+  /// In grouped mode the reader historically may have stored a chapter either
+  /// as "group-chapter" (current format) or as a flat "rawIndex" (legacy /
+  /// [chapters.dart] visited check tolerates both). When marking read we add
+  /// the canonical "group-chapter" key; when marking unread we must also strip
+  /// the matching flat key so the chapter doesn't stay greyed out.
+  @override
+  void _applyMark(bool read) {
+    if (selected.isEmpty) {
+      exitSelectMode();
+      return;
+    }
+    final current = Set<String>.from(history?.readEpisode ?? const <String>{});
+    final offset = _groupOffset;
+    for (final groupedKey in selected) {
+      // groupedKey == "${index+1}-${i+1}"; derive the flat 1-based index.
+      final dashAt = groupedKey.indexOf('-');
+      final within = int.tryParse(groupedKey.substring(dashAt + 1)) ?? 0;
+      final rawKey = (offset + within).toString();
+      if (read) {
+        current.add(groupedKey);
+      } else {
+        current..remove(groupedKey)..remove(rawKey);
+      }
+    }
+    final updated = HistoryManager().updateReadEpisodes(
+      pageState.comic,
+      current,
+    );
+    pageState.history = updated;
+    setState(() {
+      history = updated;
+      selectMode = false;
+      selected.clear();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     if (chapters.groupCount == 0 || !_hasTabController) {
@@ -270,8 +525,8 @@ class _GroupedComicChaptersState extends State<_GroupedComicChapters>
       builder: (context, constrains) {
         var group = chapters.getGroupByIndex(index);
         int length = group.length;
-        bool canShowAll = showAll;
-        if (!showAll) {
+        bool canShowAll = showAll || selectMode;
+        if (!canShowAll) {
           var width = constrains.crossAxisExtent - 16;
           var crossItems = width ~/ 200;
           if (width % 200 != 0) {
@@ -286,22 +541,13 @@ class _GroupedComicChaptersState extends State<_GroupedComicChapters>
         return SliverMainAxisGroup(
           slivers: [
             SliverToBoxAdapter(
-              child: ListTile(
-                title: Text("Chapters".tl),
-                trailing: Tooltip(
-                  message: "Order".tl,
-                  child: IconButton(
-                    icon: Icon(reverse
-                        ? Icons.arrow_upward
-                        : Icons.arrow_downward),
-                    onPressed: () {
-                      setState(() {
-                        reverse = !reverse;
-                      });
-                    },
-                  ),
-                ),
-              ),
+              child: selectMode
+                  ? buildSelectionBar(context).paddingHorizontal(8)
+                  : buildNormalTitle(
+                      context,
+                      reverse: reverse,
+                      onToggleOrder: () => setState(() => reverse = !reverse),
+                    ),
             ),
             SliverToBoxAdapter(
               child: AppTabBar(
@@ -320,28 +566,32 @@ class _GroupedComicChaptersState extends State<_GroupedComicChapters>
                   }
                   var key = group.keys.elementAt(i);
                   var value = group[key]!;
-                  var chapterIndex = 0;
-                  for (var j = 0; j < chapters.groupCount; j++) {
-                    if (j == index) {
-                      chapterIndex += i;
-                      break;
-                    }
-                    chapterIndex += chapters.getGroupByIndex(j).length;
-                  }
+                  var chapterIndex = _groupOffset + i;
                   String rawIndex = (chapterIndex + 1).toString();
                   String groupedIndex = "${index + 1}-${i + 1}";
                   bool visited = false;
-                  if (history != null) {
-                    visited = history!.readEpisode.contains(groupedIndex) ||
-                        history!.readEpisode.contains(rawIndex);
+                  if (_history != null) {
+                    visited = _history!.readEpisode.contains(groupedIndex) ||
+                        _history!.readEpisode.contains(rawIndex);
                   }
+                  bool isSelected = selected.contains(groupedIndex);
                   return Padding(
                     padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
                     child: Material(
-                      color: context.colorScheme.surfaceContainerLow,
+                      color: isSelected
+                          ? context.colorScheme.primaryContainer
+                          : context.colorScheme.surfaceContainerLow,
                       borderRadius: BorderRadius.circular(12),
                       child: InkWell(
-                        onTap: () => state.read(chapterIndex + 1),
+                        onTap: () => selectMode
+                            ? toggleSelect(groupedIndex)
+                            : state.read(chapterIndex + 1),
+                        onLongPress: selectMode
+                            ? null
+                            : () {
+                                enterSelectMode();
+                                toggleSelect(groupedIndex);
+                              },
                         borderRadius: BorderRadius.circular(12),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -352,9 +602,11 @@ class _GroupedComicChaptersState extends State<_GroupedComicChapters>
                               textAlign: TextAlign.center,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                color: visited
-                                    ? context.colorScheme.outline
-                                    : null,
+                                color: isSelected
+                                    ? context.colorScheme.onPrimaryContainer
+                                    : visited
+                                        ? context.colorScheme.outline
+                                        : null,
                               ),
                             ),
                           ),

@@ -426,6 +426,42 @@ class HistoryManager with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Update the set of read episodes for a comic and persist it.
+  ///
+  /// Used by the manual "mark as read/unread" feature on the chapters list.
+  /// If no history exists yet (the user has never opened the comic), a new
+  /// history record is created from [model] so the marks can still be stored.
+  ///
+  /// Returns the updated [History] so callers can refresh their local state.
+  History updateReadEpisodes(
+    HistoryMixin model,
+    Set<String> readEpisode,
+  ) {
+    var type = model.historyType;
+    var existing = find(model.id, type);
+    History newItem;
+    if (existing != null) {
+      existing.readEpisode = readEpisode;
+      // Keep the existing reading position/time untouched; only the read
+      // marks change. Refresh time so the comic surfaces in recent history.
+      existing.time = DateTime.now();
+      newItem = existing;
+    } else {
+      newItem = History.fromModel(
+        model: model,
+        ep: 0,
+        page: 0,
+        readChapters: readEpisode,
+      );
+    }
+    if (!isInitialized) return newItem;
+    _writeLocalHistory(newItem);
+    _mirrorToDomain(newItem);
+    _cacheAddedHistory(newItem);
+    notifyListeners();
+    return newItem;
+  }
+
   void clearHistory() {
     if (!isInitialized) return;
     _db.execute("delete from history;");
