@@ -2,6 +2,26 @@ import 'dart:convert';
 import 'package:venera/utils/cbz.dart';
 import 'package:venera/utils/io.dart';
 
+/// 读取文本文件内容。
+///
+/// 必须用 [File.readAsBytesSync] + UTF-8 解码，而非 [File.readAsStringSync]：
+/// 在 Android SAF（android:// 路径）下，flutter_saf 的 AndroidFile 仅实现了
+/// readAsBytes 系列，readAsString/readAsStringSync 会抛 UnimplementedError，
+/// 导致目录导入时元数据解析整体静默失败（封面/简介/标签丢失）。
+String? _readFileAsString(File f) {
+  try {
+    if (!f.existsSync()) return null;
+    var s = utf8.decode(f.readAsBytesSync(), allowMalformed: true);
+    // 去除 UTF-8 BOM：部分工具写出的 JSON/XML 带 BOM，jsonDecode 会因此抛错。
+    if (s.isNotEmpty && s.codeUnitAt(0) == 0xFEFF) {
+      s = s.substring(1);
+    }
+    return s;
+  } catch (_) {
+    return null;
+  }
+}
+
 const _statusText = <String, String>{
   '1': 'Ongoing',
   '2': 'Completed',
@@ -39,9 +59,10 @@ void _addStatusTag(List<String> tags, String status) {
 
 ComicMetaData? _tryDetailsJson(Directory dir) {
   final f = File(FilePath.join(dir.path, 'details.json'));
-  if (!f.existsSync()) return null;
+  final content = _readFileAsString(f);
+  if (content == null) return null;
   try {
-    final j = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
+    final j = jsonDecode(content) as Map<String, dynamic>;
     final tags = <String>[];
     final genre = j['genre'];
     if (genre is List) {
@@ -80,9 +101,9 @@ String _unescapeXml(String s) => s
 
 ComicMetaData? _tryComicInfoXml(Directory dir) {
   final f = File(FilePath.join(dir.path, 'ComicInfo.xml'));
-  if (!f.existsSync()) return null;
+  final xml = _readFileAsString(f);
+  if (xml == null) return null;
   try {
-    final xml = f.readAsStringSync();
     final title = _xmlTag(xml, 'Series') ?? _xmlTag(xml, 'Title') ?? '';
     final tags = <String>[];
     final genre = _xmlTag(xml, 'Genre');
@@ -106,10 +127,11 @@ ComicMetaData? _tryComicInfoXml(Directory dir) {
 
 ComicMetaData? _tryMetadataJson(Directory dir) {
   final f = File(FilePath.join(dir.path, 'metadata.json'));
-  if (!f.existsSync()) return null;
+  final content = _readFileAsString(f);
+  if (content == null) return null;
   try {
     return ComicMetaData.fromJson(
-        jsonDecode(f.readAsStringSync()) as Map<String, dynamic>);
+        jsonDecode(content) as Map<String, dynamic>);
   } catch (_) {
     return null;
   }

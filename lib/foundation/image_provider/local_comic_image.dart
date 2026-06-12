@@ -20,7 +20,7 @@ class LocalComicImageProvider
     File? file = comic.coverFile;
     if(! await file.exists()) {
       file = null;
-      var dir = Directory(comic.directory);
+      var dir = Directory(comic.baseDir);
       if (! await dir.exists()) {
         throw "Error: Comic not found.";
       }
