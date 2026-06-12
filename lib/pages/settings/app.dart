@@ -90,19 +90,34 @@ class _AppSettingsState extends State<AppSettings> {
                 result = await selectDirectory();
               }
               if (result == null) return;
-              var loadingDialog = showLoadingDialog(
-                App.rootContext,
-                barrierDismissible: false,
-                allowCancel: false,
-              );
-              var res = await LocalManager().setNewPath(result);
-              loadingDialog.close();
-              if (res != null) {
-                context.showMessage(message: res);
-              } else {
-                context.showMessage(message: "Path set successfully".tl);
-                setState(() {});
+              Future<void> apply({bool allowNonEmpty = false}) async {
+                var loadingDialog = showLoadingDialog(
+                  App.rootContext,
+                  barrierDismissible: false,
+                  allowCancel: false,
+                );
+                var res = await LocalManager()
+                    .setNewPath(result!, allowNonEmpty: allowNonEmpty);
+                loadingDialog.close();
+                if (res == LocalManager.dirNotEmptySignal) {
+                  showConfirmDialog(
+                    context: App.rootContext,
+                    title: "Directory is not empty".tl,
+                    content:
+                        "The selected directory is not empty. Continue to merge local comics into it?"
+                            .tl,
+                    confirmText: "Continue".tl,
+                    onConfirm: () => apply(allowNonEmpty: true),
+                  );
+                } else if (res != null) {
+                  context.showMessage(message: res);
+                } else {
+                  context.showMessage(message: "Path set successfully".tl);
+                  setState(() {});
+                }
               }
+
+              await apply();
             },
           ).toSliver(),
           ListTile(

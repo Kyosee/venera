@@ -740,7 +740,9 @@
     "Unknown error": "未知错误",
     "Username cannot be empty": "用户名不能为空",
     "Web Helper browser is not available": "Web 辅助浏览器不可用",
-    "Webview is not available": "Webview 不可用"
+    "Webview is not available": "Webview 不可用",
+    "Directory is not empty": "目录不为空",
+    "The selected directory is not empty. Continue to merge local comics into it?": "所选目录不为空。是否继续，将本地漫画合并到该目录？"
   },
   "zh_TW": {
     "Read later": "稍後閱讀",
@@ -1483,6 +1485,8 @@
     "Unknown error": "未知錯誤",
     "Username cannot be empty": "使用者名稱不能為空",
     "Web Helper browser is not available": "Web 輔助瀏覽器不可用",
-    "Webview is not available": "Webview 不可用"
+    "Webview is not available": "Webview 不可用",
+    "Directory is not empty": "目錄不為空",
+    "The selected directory is not empty. Continue to merge local comics into it?": "所選目錄不為空。是否繼續，將本地漫畫合併到該目錄？"
   }
 }
