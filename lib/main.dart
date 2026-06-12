@@ -175,6 +175,14 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       ),
       fontFamily: font,
       fontFamilyFallback: fallback,
+      // ExpansionTile shows top/bottom divider lines when expanded by default.
+      // Override globally with borderless shapes so no expandable tile (task
+      // cards, reader settings groups, source dialogs, etc.) renders stray
+      // lines at its top and bottom.
+      expansionTileTheme: const ExpansionTileThemeData(
+        shape: Border(),
+        collapsedShape: Border(),
+      ),
     );
   }
 
