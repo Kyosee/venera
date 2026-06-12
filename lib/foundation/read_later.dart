@@ -136,9 +136,40 @@ class ReadLaterManager with ChangeNotifier {
         primary key (id, type)
       );
     """);
+    _migrateSchema();
     _loadIds();
     isInitialized = true;
     notifyListeners();
+  }
+
+  /// Expected columns, derived from the create-table schema above. Older
+  /// databases were created before some columns existed; `create table if not
+  /// exists` is a no-op for them, so we add any missing columns here. Adding a
+  /// new field later only needs an entry in this map (mirrors the
+  /// addColumnIfMissing pattern in domain_database/history/favorites), so a
+  /// schema gap can never throw "no column named ..." again.
+  static const Map<String, String> _expectedColumns = {
+    "id": "text",
+    "title": "text",
+    "subtitle": "text",
+    "cover": "text",
+    "type": "int",
+    "tags": "text",
+    "time": "int",
+  };
+
+  void _migrateSchema() {
+    final existing = _db
+        .select("PRAGMA table_info(read_later);")
+        .map((c) => c["name"] as String)
+        .toSet();
+    for (final entry in _expectedColumns.entries) {
+      if (!existing.contains(entry.key)) {
+        _db.execute(
+          "alter table read_later add column ${entry.key} ${entry.value};",
+        );
+      }
+    }
   }
 
   void _loadIds() {
