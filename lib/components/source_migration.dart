@@ -15,7 +15,20 @@ void showSourceMigrationDialog(BuildContext context, FavoriteItem comic) {
     context.showMessage(message: 'No searchable sources'.tl);
     return;
   }
+
+  // 获取已关联的源
+  const repository = ComicStateRepository();
+  final relatedLinks = repository.isDomainReady
+      ? repository.relatedSourcesFor(comic)
+      : <DomainComicSourceLink>[];
+  final relatedSourceKeys = relatedLinks
+      .where((link) => link.status == 'accepted')
+      .map((link) => _sourceKeyFromPlatformId(link.platformId))
+      .where((key) => searchableSources.any((s) => s.key == key))
+      .toSet();
+
   final searchController = TextEditingController(text: comic.title);
+  // 默认选中所有源，但优先显示已关联的源
   final selectedSourceKeys = searchableSources
       .map((source) => source.key)
       .toSet();
@@ -137,9 +150,40 @@ void showSourceMigrationDialog(BuildContext context, FavoriteItem comic) {
                           style: ts.s16,
                         ),
                         const SizedBox(height: 12),
+                        // 显示已关联的源提示
+                        if (relatedSourceKeys.isNotEmpty)
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: context.colorScheme.secondaryContainer,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.link,
+                                  size: 20,
+                                  color: context.colorScheme.onSecondaryContainer,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Found @count linked sources'.tlParams({
+                                      'count': relatedSourceKeys.length,
+                                    }),
+                                    style: TextStyle(
+                                      color: context.colorScheme.onSecondaryContainer,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        if (relatedSourceKeys.isNotEmpty) const SizedBox(height: 12),
                         _SourceSelector(
                           sources: searchableSources,
                           selectedSourceKeys: selectedSourceKeys,
+                          relatedSourceKeys: relatedSourceKeys,
                           onChanged: (next) {
                             setState(() {
                               selectedSourceKeys
@@ -447,14 +491,24 @@ class _SourceSelector extends StatelessWidget {
     required this.sources,
     required this.selectedSourceKeys,
     required this.onChanged,
+    this.relatedSourceKeys = const <String>{},
   });
 
   final List<ComicSource> sources;
   final Set<String> selectedSourceKeys;
+  final Set<String> relatedSourceKeys;
   final ValueChanged<Set<String>> onChanged;
 
   @override
   Widget build(BuildContext context) {
+    // 将源分为已关联和未关联两组
+    final relatedSources = sources
+        .where((source) => relatedSourceKeys.contains(source.key))
+        .toList();
+    final otherSources = sources
+        .where((source) => !relatedSourceKeys.contains(source.key))
+        .toList();
+
     return ExpansionTile(
       tilePadding: EdgeInsets.zero,
       childrenPadding: const EdgeInsets.only(bottom: 8),
@@ -485,26 +539,70 @@ class _SourceSelector extends StatelessWidget {
           ],
         ).toAlign(Alignment.centerLeft),
         const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final source in sources)
-              _StableMigrationSourceFilterChip(
-                selected: selectedSourceKeys.contains(source.key),
-                label: source.name,
-                onSelected: (selected) {
-                  final next = selectedSourceKeys.toSet();
-                  if (selected) {
-                    next.add(source.key);
-                  } else {
-                    next.remove(source.key);
-                  }
-                  onChanged(next);
-                },
+        // 优先显示已关联的源
+        if (relatedSources.isNotEmpty) ...[
+          Text(
+            'Linked Sources'.tl,
+            style: ts.s12.copyWith(
+              color: context.colorScheme.primary,
+              fontWeight: FontWeight.bold,
+            ),
+          ).toAlign(Alignment.centerLeft),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final source in relatedSources)
+                _StableMigrationSourceFilterChip(
+                  selected: selectedSourceKeys.contains(source.key),
+                  label: source.name,
+                  isLinked: true,
+                  onSelected: (selected) {
+                    final next = selectedSourceKeys.toSet();
+                    if (selected) {
+                      next.add(source.key);
+                    } else {
+                      next.remove(source.key);
+                    }
+                    onChanged(next);
+                  },
+                ),
+            ],
+          ).toAlign(Alignment.centerLeft),
+          const SizedBox(height: 12),
+        ],
+        if (otherSources.isNotEmpty) ...[
+          if (relatedSources.isNotEmpty)
+            Text(
+              'Other Sources'.tl,
+              style: ts.s12.copyWith(
+                color: context.colorScheme.onSurfaceVariant,
               ),
-          ],
-        ).toAlign(Alignment.centerLeft),
+            ).toAlign(Alignment.centerLeft),
+          if (relatedSources.isNotEmpty) const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final source in otherSources)
+                _StableMigrationSourceFilterChip(
+                  selected: selectedSourceKeys.contains(source.key),
+                  label: source.name,
+                  isLinked: false,
+                  onSelected: (selected) {
+                    final next = selectedSourceKeys.toSet();
+                    if (selected) {
+                      next.add(source.key);
+                    } else {
+                      next.remove(source.key);
+                    }
+                    onChanged(next);
+                  },
+                ),
+            ],
+          ).toAlign(Alignment.centerLeft),
+        ],
       ],
     );
   }
@@ -515,10 +613,12 @@ class _StableMigrationSourceFilterChip extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onSelected,
+    this.isLinked = false,
   });
 
   final String label;
   final bool selected;
+  final bool isLinked;
   final ValueChanged<bool> onSelected;
 
   @override
@@ -533,6 +633,14 @@ class _StableMigrationSourceFilterChip extends StatelessWidget {
             width: 18,
             child: selected ? const Icon(Icons.check, size: 16) : null,
           ),
+          if (isLinked) ...[
+            Icon(
+              Icons.link,
+              size: 14,
+              color: context.colorScheme.primary,
+            ),
+            const SizedBox(width: 4),
+          ],
           Text(label),
         ],
       ),

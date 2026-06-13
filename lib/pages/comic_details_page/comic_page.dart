@@ -15,6 +15,7 @@ import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/comic_state_repository.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/consts.dart';
+import 'package:venera/foundation/domain_database.dart';
 import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/favorites_meta.dart';
 import 'package:venera/foundation/history.dart';
@@ -116,9 +117,13 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
       widget.id,
       ComicType.fromKey(widget.sourceKey),
     );
-    Widget? action;
+
+    // 构建基本的操作按钮
+    final actions = <Widget>[];
+
+    // 如果已下载，显示阅读按钮
     if (isDownloaded) {
-      action = FilledButton.tonal(
+      actions.add(FilledButton.tonal(
         child: Text("Read".tl),
         onPressed: () {
           final localComic = _comicStateRepository
@@ -130,9 +135,59 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
           }
           localComic.read();
         },
-      );
+      ));
     }
-    return NetworkError(message: error!, retry: retry, action: action);
+
+    // 查询已关联的源
+    List<DomainComicSourceLink> relatedLinks = [];
+    if (_comicStateRepository.isDomainReady) {
+      try {
+        // 构建一个临时的 Comic 对象用于查询
+        final tempComic = Comic(
+          widget.title ?? '',
+          widget.cover ?? '',
+          widget.id,
+          null,
+          null,
+          '',
+          widget.sourceKey,
+          null,
+          null,
+        );
+        relatedLinks = _comicStateRepository
+            .relatedSourcesFor(tempComic)
+            .where((link) => link.status == 'accepted')
+            .toList();
+      } catch (e) {
+        // 忽略错误，继续显示基本错误页面
+      }
+    }
+
+    return NetworkError(
+      message: error!,
+      retry: retry,
+      action: actions.isEmpty ? null : Row(
+        mainAxisSize: MainAxisSize.min,
+        children: actions.map((action) => Padding(
+          padding: const EdgeInsets.only(left: 8),
+          child: action,
+        )).toList(),
+      ),
+      relatedLinks: relatedLinks,
+      comic: widget.title != null || widget.cover != null
+          ? Comic(
+              widget.title ?? widget.id,
+              widget.cover ?? '',
+              widget.id,
+              null,
+              null,
+              '',
+              widget.sourceKey,
+              null,
+              null,
+            )
+          : null,
+    );
   }
 
   @override

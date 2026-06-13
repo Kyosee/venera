@@ -742,7 +742,13 @@
     "Web Helper browser is not available": "Web 辅助浏览器不可用",
     "Webview is not available": "Webview 不可用",
     "Directory is not empty": "目录不为空",
-    "The selected directory is not empty. Continue to merge local comics into it?": "所选目录不为空。是否继续，将本地漫画合并到该目录？"
+    "The selected directory is not empty. Continue to merge local comics into it?": "所选目录不为空。是否继续，将本地漫画合并到该目录？",
+    "This comic has linked sources available": "这部漫画有可用的关联源",
+    "And @count more linked sources...": "还有 @count 个关联源...",
+    "Migrate to another source": "迁移到其他源",
+    "Linked Sources": "关联源",
+    "Other Sources": "其他源",
+    "Found @count linked sources": "找到 @count 个关联源"
   },
   "zh_TW": {
     "Read later": "稍後閱讀",
@@ -1487,6 +1493,12 @@
     "Web Helper browser is not available": "Web 輔助瀏覽器不可用",
     "Webview is not available": "Webview 不可用",
     "Directory is not empty": "目錄不為空",
-    "The selected directory is not empty. Continue to merge local comics into it?": "所選目錄不為空。是否繼續，將本地漫畫合併到該目錄？"
+    "The selected directory is not empty. Continue to merge local comics into it?": "所選目錄不為空。是否繼續，將本地漫畫合併到該目錄？",
+    "This comic has linked sources available": "這部漫畫有可用的關聯源",
+    "And @count more linked sources...": "還有 @count 個關聯源...",
+    "Migrate to another source": "遷移到其他源",
+    "Linked Sources": "關聯源",
+    "Other Sources": "其他源",
+    "Found @count linked sources": "找到 @count 個關聯源"
   }
 }

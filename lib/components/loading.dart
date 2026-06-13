@@ -8,6 +8,8 @@ class NetworkError extends StatelessWidget {
     this.withAppbar = true,
     this.buttonText,
     this.action,
+    this.relatedLinks = const <DomainComicSourceLink>[],
+    this.comic,
   });
 
   final String message;
@@ -20,67 +22,186 @@ class NetworkError extends StatelessWidget {
 
   final Widget? action;
 
+  final List<DomainComicSourceLink> relatedLinks;
+
+  final Comic? comic;
+
   @override
   Widget build(BuildContext context) {
     var cfe = CloudflareException.fromString(message);
     Widget body = Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Center(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.error_outline,
-                  size: 28,
-                  color: context.colorScheme.error,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  "Error".tl,
-                  style: ts.withColor(context.colorScheme.error).s16,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            cfe == null ? message : "Cloudflare verification required".tl,
-            textAlign: TextAlign.center,
-            maxLines: 3,
-          ),
-          TextButton(
-            onPressed: () {
-              saveFile(
-                data: utf8.encode(Log().toString()),
-                filename: 'log.txt',
-              );
-            },
-            child: Text("Export logs".tl),
-          ),
-          const SizedBox(height: 8),
-          if (retry != null)
-            if (cfe != null)
-              FilledButton(
-                onPressed: () => passCloudflare(
-                  CloudflareException.fromString(message)!,
-                  retry!,
-                ),
-                child: Text('Verify'.tl),
-              )
-            else
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (action != null) action!.paddingRight(8),
-                  FilledButton(
-                    onPressed: retry,
-                    child: Text(buttonText ?? 'Retry'.tl),
+                  Icon(
+                    Icons.error_outline,
+                    size: 28,
+                    color: context.colorScheme.error,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    "Error".tl,
+                    style: ts.withColor(context.colorScheme.error).s16,
                   ),
                 ],
               ),
-        ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              cfe == null ? message : "Cloudflare verification required".tl,
+              textAlign: TextAlign.center,
+              maxLines: 3,
+            ),
+            // 显示已关联的源
+            if (relatedLinks.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: context.colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          size: 20,
+                          color: context.colorScheme.onPrimaryContainer,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'This comic has linked sources available'.tl,
+                            style: TextStyle(
+                              color: context.colorScheme.onPrimaryContainer,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    for (final link in relatedLinks.take(3))
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: context.colorScheme.onPrimaryContainer,
+                            side: BorderSide(
+                              color: context.colorScheme.onPrimaryContainer.withOpacity(0.5),
+                            ),
+                          ),
+                          onPressed: () {
+                            final sourceKey = _sourceKeyFromPlatformId(link.platformId);
+                            App.mainNavigatorKey?.currentContext?.to(
+                              () => ComicPage(
+                                id: link.sourceComicId,
+                                sourceKey: sourceKey,
+                                cover: link.comicCoverUri,
+                                title: link.comicTitle,
+                              ),
+                            );
+                          },
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      link.sourceName,
+                                      style: const TextStyle(fontWeight: FontWeight.bold),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    if (link.comicAuthor != null)
+                                      Text(
+                                        link.comicAuthor!,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: context.colorScheme.onPrimaryContainer.withOpacity(0.7),
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              Icon(
+                                Icons.arrow_forward,
+                                size: 18,
+                                color: context.colorScheme.onPrimaryContainer,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    if (relatedLinks.length > 3)
+                      Text(
+                        'And @count more linked sources...'.tlParams({
+                          'count': relatedLinks.length - 3,
+                        }),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: context.colorScheme.onPrimaryContainer.withOpacity(0.7),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              // 迁移按钮
+              if (comic != null)
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.swap_horiz),
+                  label: Text('Migrate to another source'.tl),
+                  onPressed: () {
+                    final favoriteItem = favoriteItemFromComic(comic!);
+                    showSourceMigrationDialog(context, favoriteItem);
+                  },
+                ),
+            ],
+            TextButton(
+              onPressed: () {
+                saveFile(
+                  data: utf8.encode(Log().toString()),
+                  filename: 'log.txt',
+                );
+              },
+              child: Text("Export logs".tl),
+            ),
+            const SizedBox(height: 8),
+            if (retry != null)
+              if (cfe != null)
+                FilledButton(
+                  onPressed: () => passCloudflare(
+                    CloudflareException.fromString(message)!,
+                    retry!,
+                  ),
+                  child: Text('Verify'.tl),
+                )
+              else
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (action != null) action!.paddingRight(8),
+                    FilledButton(
+                      onPressed: retry,
+                      child: Text(buttonText ?? 'Retry'.tl),
+                    ),
+                  ],
+                ),
+          ],
+        ),
       ),
     );
     if (withAppbar) {
@@ -93,6 +214,14 @@ class NetworkError extends StatelessWidget {
     }
     return Material(child: body);
   }
+}
+
+String _sourceKeyFromPlatformId(String platformId) {
+  const remotePrefix = 'remote:';
+  if (platformId.startsWith(remotePrefix)) {
+    return platformId.substring(remotePrefix.length);
+  }
+  return platformId;
 }
 
 class ListLoadingIndicator extends StatelessWidget {
