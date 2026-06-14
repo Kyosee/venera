@@ -162,36 +162,49 @@ class ReadLaterManager with ChangeNotifier {
     "time": "int",
   };
 
-  void _migrateSchema() {
-    final columns = _db.select("PRAGMA table_info(read_later);");
+  void _migrateSchema() => migrateSchema(_db);
+
+  /// Normalize the on-disk `read_later` table to our canonical schema.
+  ///
+  /// A WebDAV/import sync can replace read_later.db wholesale with a file
+  /// created by a foreign app that happens to use a table also named
+  /// `read_later` but with a different layout (extra columns, NOT NULL
+  /// constraints, different types, CHECK constraints, etc.). We can't predict
+  /// what those columns look like, and our fixed-column INSERT would break on
+  /// any unexpected NOT NULL column. So instead of enumerating every possible
+  /// mismatch, we normalize: if the on-disk columns aren't exactly our
+  /// canonical set, rebuild the table to the canonical schema and migrate the
+  /// data we recognize (intersection of columns). Foreign columns are dropped
+  /// (we don't use them); columns we expect but the foreign table lacks are
+  /// left empty.
+  ///
+  /// Exposed as a static method (taking the db) so it can be unit-tested
+  /// without an [App] data path, and so [init] has a single source of truth.
+  @visibleForTesting
+  static void migrateSchema(CommonDatabase db) {
+    final columns = db.select("PRAGMA table_info(read_later);");
     final existing = columns.map((c) => c["name"] as String).toSet();
 
-    // A WebDAV/import sync can replace read_later.db wholesale with a file
-    // created by an older or foreign schema (e.g. one carrying a
-    // `source_key text not null` column we no longer write). Such an extra
-    // NOT NULL column with no default can't be satisfied by our canonical
-    // insert, and SQLite can't drop a constraint in place — so rebuild the
-    // table to the canonical schema, preserving the data we recognize.
-    final hasUnexpectedNotNull = columns.any((c) {
-      final name = c["name"] as String;
-      final notNull = (c["notnull"] as int? ?? 0) != 0;
-      final hasDefault = c["dflt_value"] != null;
-      final isPk = (c["pk"] as int? ?? 0) != 0;
-      return !_expectedColumns.containsKey(name) &&
-          notNull &&
-          !hasDefault &&
-          !isPk;
-    });
-    if (hasUnexpectedNotNull) {
-      _rebuildTable(existing);
+    final hasExtraColumn = existing.any((c) => !_expectedColumns.containsKey(c));
+    final missingColumn =
+        _expectedColumns.keys.any((c) => !existing.contains(c));
+
+    if (hasExtraColumn) {
+      // Structure diverges from ours — rebuild to the canonical schema.
+      _rebuildTable(db, existing);
       return;
     }
 
-    for (final entry in _expectedColumns.entries) {
-      if (!existing.contains(entry.key)) {
-        _db.execute(
-          "alter table read_later add column ${entry.key} ${entry.value};",
-        );
+    // No foreign columns: only our own columns are present (possibly a subset
+    // from an older version of *our* schema). Additively backfill the missing
+    // ones so older databases keep working without losing data.
+    if (missingColumn) {
+      for (final entry in _expectedColumns.entries) {
+        if (!existing.contains(entry.key)) {
+          db.execute(
+            "alter table read_later add column ${entry.key} ${entry.value};",
+          );
+        }
       }
     }
   }
@@ -199,24 +212,24 @@ class ReadLaterManager with ChangeNotifier {
   /// Rebuild `read_later` to the canonical schema, copying over the columns we
   /// still recognize. Runs in a transaction so a failure can't leave a
   /// half-migrated table.
-  void _rebuildTable(Set<String> existing) {
+  static void _rebuildTable(CommonDatabase db, Set<String> existing) {
     final carried =
         _expectedColumns.keys.where(existing.contains).toList();
     final columnList = carried.join(", ");
-    _db.execute("BEGIN TRANSACTION;");
+    db.execute("BEGIN TRANSACTION;");
     try {
-      _db.execute("alter table read_later rename to read_later_legacy;");
-      _db.execute(_createTableSql);
+      db.execute("alter table read_later rename to read_later_legacy;");
+      db.execute(_createTableSql);
       if (carried.isNotEmpty) {
-        _db.execute(
+        db.execute(
           "insert or ignore into read_later ($columnList) "
           "select $columnList from read_later_legacy;",
         );
       }
-      _db.execute("drop table read_later_legacy;");
-      _db.execute("COMMIT;");
+      db.execute("drop table read_later_legacy;");
+      db.execute("COMMIT;");
     } catch (e, s) {
-      _db.execute("ROLLBACK;");
+      db.execute("ROLLBACK;");
       Log.error("ReadLater", "rebuild failed: $e", s);
     }
   }
