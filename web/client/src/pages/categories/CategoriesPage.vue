@@ -253,7 +253,18 @@ onMounted(async () => {
     const list = await getComicSources()
     sources.value = list
     if (list.length > 0) {
-      await loadCategories(list[0].key)
+      // Honor a deep-link ?source=<key> (e.g. from Explore's "查看更多"); the
+      // immediate watch above runs before sources load, so currentSourceKey was
+      // empty and the category list loaded from the wrong/first source.
+      const wantSource = typeof route.query.source === 'string' ? route.query.source : ''
+      const idx = wantSource ? list.findIndex(s => s.key === wantSource) : -1
+      if (idx >= 0) activeTab.value = idx
+      await loadCategories(list[activeTab.value]?.key ?? list[0].key)
+      // If a category was deep-linked, load its comics now that sources exist.
+      const cat = route.query.cat
+      if (typeof cat === 'string' && cat) {
+        loadCategoryComics(currentSourceKey.value, cat, true)
+      }
     }
   } catch (e) {
     console.error('Failed to load sources:', e)

@@ -125,8 +125,11 @@ async function loadMore() {
   loading.value = true
   const nextPage = page.value + 1
   try {
+    // Apply the same auto language filter as page 1, otherwise page 2+ queries
+    // a different term and yields mismatched/duplicated pagination results.
+    const term = applyAutoLangFilter(sourceKey.value, searchText.value.trim(), settingsStore.settings.autoLangFilter)
     const opts = currentSearchOptions.value.length > 0 ? searchOptions.value : undefined
-    const res = await searchComics(sourceKey.value, searchText.value.trim(), nextPage, opts)
+    const res = await searchComics(sourceKey.value, term, nextPage, opts)
     const newComics = (res.comics ?? []).map((c: any) => ({
       ...c,
       sourceKey: c.sourceKey || sourceKey.value,

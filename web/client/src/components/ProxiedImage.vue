@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { imageProxyUrl } from '@/services/api'
 
 const props = withDefaults(defineProps<{
@@ -36,6 +36,14 @@ onMounted(() => {
 })
 
 onUnmounted(() => observer?.disconnect())
+
+// When a retained instance's src changes (e.g. a virtualized/keyed-by-index
+// list reuses the component), reset load/error state so a prior error doesn't
+// permanently hide the new image.
+watch(() => props.src, () => {
+  isLoaded.value = false
+  hasError.value = false
+})
 
 function onLoad() { isLoaded.value = true }
 function onError() { hasError.value = true }
