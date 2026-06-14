@@ -750,7 +750,12 @@
     "Other Sources": "其他源",
     "Found @count linked sources": "找到 @count 个关联源",
     "Select linked only": "仅选关联源",
-    "View links": "查看关联"
+    "View links": "查看关联",
+    "Quick migrate to linked source": "快速迁移到关联源",
+    "Select one to migrate directly": "选择一个直接迁移",
+    "OR": "或",
+    "Search from other sources": "从其他源搜索",
+    "Search and migrate": "搜索并迁移"
   },
   "zh_TW": {
     "Read later": "稍後閱讀",
@@ -1503,6 +1508,11 @@
     "Other Sources": "其他源",
     "Found @count linked sources": "找到 @count 個關聯源",
     "Select linked only": "僅選關聯源",
-    "View links": "查看關聯"
+    "View links": "查看關聯",
+    "Quick migrate to linked source": "快速遷移到關聯源",
+    "Select one to migrate directly": "選擇一個直接遷移",
+    "OR": "或",
+    "Search from other sources": "從其他源搜尋",
+    "Search and migrate": "搜尋並遷移"
   }
 }
