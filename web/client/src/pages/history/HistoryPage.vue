@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { listHistory, getComicSources, deleteHistory, clearHistory } from '@/services/server-db'
+import { listHistory, getComicSources, deleteHistory, clearHistory, upsertHistory } from '@/services/server-db'
 import { showToast, showConfirmDialog } from 'vant'
 import type { History, ComicSource } from '@/types'
 import { resolveSourceKey } from '@/utils/source'
@@ -289,7 +289,26 @@ function showUndoNotification(msg: string) {
 async function undoDelete() {
   showUndoToast.value = false
   if (undoTimer.value) { clearTimeout(undoTimer.value); undoTimer.value = null }
-  items.value = [...undoItems.value, ...items.value]
+  // The delete was already committed server-side, so re-insert each record
+  // before reloading — otherwise loadData() would wipe the optimistic restore.
+  for (const item of undoItems.value) {
+    try {
+      await upsertHistory({
+        id: item.id,
+        type: item.type,
+        sourceKey: item.sourceKey,
+        title: item.title,
+        subtitle: item.subtitle,
+        cover: item.cover,
+        time: item.time,
+        ep: item.ep,
+        page: item.page,
+        readEpisode: item.readEpisode,
+        max_page: item.maxPage ?? item.max_page ?? null,
+        chapter_group: item.group ?? item.chapter_group ?? null,
+      })
+    } catch (e) { console.error(e) }
+  }
   undoItems.value = []
   await loadData()
 }
@@ -381,6 +400,7 @@ function setStatusFilter(status: 'all' | 'uncompleted' | 'completed') {
                 :source-key="itemSourceKey(item)"
                 :source-name="getSourceName(item)"
                 :read-progress="{ page: item.page, maxPage: item.maxPage ?? undefined }"
+                :disable-navigation="multiSelectMode"
               />
             </div>
           </div>
@@ -412,6 +432,7 @@ function setStatusFilter(status: 'all' | 'uncompleted' | 'completed') {
                 :source-key="itemSourceKey(item)"
                 :source-name="getSourceName(item)"
                 :read-progress="{ page: item.page, maxPage: item.maxPage ?? undefined }"
+                :disable-navigation="multiSelectMode"
               />
             </div>
           </div>
@@ -443,6 +464,7 @@ function setStatusFilter(status: 'all' | 'uncompleted' | 'completed') {
                 :source-key="itemSourceKey(item)"
                 :source-name="getSourceName(item)"
                 :read-progress="{ page: item.page, maxPage: item.maxPage ?? undefined }"
+                :disable-navigation="multiSelectMode"
               />
             </div>
           </div>
@@ -474,6 +496,7 @@ function setStatusFilter(status: 'all' | 'uncompleted' | 'completed') {
                 :source-key="itemSourceKey(item)"
                 :source-name="getSourceName(item)"
                 :read-progress="{ page: item.page, maxPage: item.maxPage ?? undefined }"
+                :disable-navigation="multiSelectMode"
               />
             </div>
           </div>

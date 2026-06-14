@@ -18,6 +18,7 @@ const settingsStore = useSettingsStore()
 const folders = ref<FavoriteFolder[]>([])
 const sources = ref<ComicSource[]>([])
 const favorites = ref<FavoriteItem[]>([])
+const totalFavoritesCount = ref(0)
 const histories = ref<History[]>([])
 const loading = ref(false)
 const selectedFolderId = ref<string | null>(null)
@@ -75,7 +76,14 @@ function readProgressFor(item: FavoriteItem) {
 
 async function loadFavorites() {
   loading.value = true
-  try { favorites.value = sortFavorites(await listFavorites(selectedFolderId.value ?? undefined)) }
+  try {
+    favorites.value = sortFavorites(await listFavorites(selectedFolderId.value ?? undefined))
+    // Keep the "全部" badge showing the real total: only refresh it when the
+    // all-favorites view is loaded (a sub-folder load returns fewer items).
+    if (selectedFolderId.value == null) {
+      totalFavoritesCount.value = favorites.value.length
+    }
+  }
   finally { loading.value = false }
 }
 
@@ -92,7 +100,7 @@ function navigateToComic(item: FavoriteItem) {
   router.push(`/comic/${encodeURIComponent(sourceKey)}/${encodeURIComponent(item.id)}`)
 }
 
-const allCount = computed(() => favorites.value.length)
+const allCount = computed(() => totalFavoritesCount.value)
 
 const filteredFavorites = computed(() => {
   if (!searchQuery.value.trim()) return favorites.value
@@ -486,6 +494,7 @@ async function handleBatchMove(targetFolderId: string) {
               :source-name="sourceNameFor(item)"
               :is-favorite="true"
               :read-progress="readProgressFor(item)"
+              :disable-navigation="multiSelectMode"
             />
             <div v-if="multiSelectMode" class="checkbox-overlay">
               <van-checkbox

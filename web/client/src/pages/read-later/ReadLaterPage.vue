@@ -271,6 +271,7 @@ async function undoDelete() {
             :comic="item"
             :source-key="itemSourceKey(item)"
             :source-name="getSourceName(item)"
+            :disable-navigation="multiSelectMode"
           />
         </div>
       </div>

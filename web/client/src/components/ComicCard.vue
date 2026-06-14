@@ -13,6 +13,7 @@ const props = withDefaults(defineProps<{
   readProgress?: { page?: number; maxPage?: number }
   currentChapter?: string
   latestChapter?: string
+  disableNavigation?: boolean
 }>(), {
   displayMode: undefined,
   sourceName: undefined,
@@ -21,6 +22,7 @@ const props = withDefaults(defineProps<{
   readProgress: undefined,
   currentChapter: undefined,
   latestChapter: undefined,
+  disableNavigation: false,
 })
 
 const emit = defineEmits<{
@@ -51,6 +53,9 @@ function handleClick() {
     id: comicId.value,
     sourceKey: effectiveSourceKey.value,
   })
+  // In multi-select mode the parent handles the tap (toggle selection); skip
+  // navigation here so tapping the card body doesn't leave the page.
+  if (props.disableNavigation) return
   if (effectiveSourceKey.value && comicId.value) {
     router.push(
       `/comic/${encodeURIComponent(effectiveSourceKey.value)}/${encodeURIComponent(comicId.value)}`
