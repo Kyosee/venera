@@ -448,6 +448,11 @@ void showSourceMigrationDialog(BuildContext context, FavoriteItem comic) {
                                   group.showAll = !group.showAll;
                                 });
                               },
+                              onExpansionChanged: (expanded) {
+                                setState(() {
+                                  group.isExpanded = expanded;
+                                });
+                              },
                             ),
                       ],
                     ),
@@ -701,6 +706,7 @@ class _MigrationSearchGroup {
   final List<Comic> results;
   final String? error;
   bool showAll = false;
+  bool isExpanded = false; // 添加展开状态
 
   bool get hasError => error != null && error!.isNotEmpty;
 }
@@ -832,12 +838,14 @@ class _MigrationSearchGroupTile extends StatelessWidget {
     required this.selectedComic,
     required this.onSelected,
     required this.onToggleShowAll,
+    required this.onExpansionChanged,
   });
 
   final _MigrationSearchGroup group;
   final Comic? selectedComic;
   final ValueChanged<Comic> onSelected;
   final VoidCallback onToggleShowAll;
+  final ValueChanged<bool> onExpansionChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -854,8 +862,9 @@ class _MigrationSearchGroupTile extends StatelessWidget {
           });
     return ExpansionTile(
       tilePadding: EdgeInsets.zero,
-      initiallyExpanded: false,
+      initiallyExpanded: group.isExpanded,
       maintainState: true,
+      onExpansionChanged: onExpansionChanged,
       title: Text(group.source.name),
       subtitle: Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
       children: [
