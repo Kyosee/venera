@@ -227,9 +227,44 @@ async function fetchPages() {
       comicTitle.value = res.comicTitle || comicTitle.value || route.query.title?.toString() || ''
       const page = Math.max(1, Number.parseInt(route.query.page?.toString() || '1', 10) || 1)
       currentPage.value = Math.min(page - 1, Math.max(0, images.value.length - 1))
+      // Restore the view to the resumed page. Setting currentPage alone is not
+      // enough for continuous mode (a scroll container) — it must be scrolled
+      // into view. Gallery mode derives the visible group from currentPage, so
+      // only the swipe offset needs resetting.
+      restoreInitialPage(currentPage.value)
     } else { throw new Error('Failed to load pages') }
   } catch (e: any) { error.value = e.message || 'Load failed' }
   finally { loading.value = false }
+}
+
+// Position the view at [targetPage] after the initial load / chapter switch.
+// Only needed when resuming beyond the first page.
+function restoreInitialPage(targetPage: number) {
+  if (isGallery.value) {
+    // Gallery: currentGroup is derived from currentPage; just clear any swipe
+    // offset so the resumed group is centered correctly.
+    translateX.value = 0
+    return
+  }
+  if (targetPage <= 0) return
+  // Continuous mode: scroll the target image into view. Guard onScroll so it
+  // does not snap currentPage back to the top while we are positioning.
+  isRestoringPage = true
+  nextTick(() => {
+    const scrollToTarget = () => {
+      const els = continuousEl.value?.querySelectorAll('.img-placeholder')
+      if (els && els[targetPage]) {
+        els[targetPage].scrollIntoView({ block: 'start', inline: 'start' })
+      }
+    }
+    scrollToTarget()
+    // Re-assert position on the next frame in case image placeholders resized
+    // between the first scroll and layout settling, then release the guard.
+    requestAnimationFrame(() => {
+      scrollToTarget()
+      requestAnimationFrame(() => { isRestoringPage = false })
+    })
+  })
 }
 
 async function fetchChapters() {
@@ -607,6 +642,9 @@ const loadingNextChapter = ref(false)
 const loadingPrevChapter = ref(false)
 let lastScrollPos = -1
 let userHasScrolledUp = false
+// While restoring the initial page (continue-reading), suppress onScroll from
+// overwriting currentPage based on the transient scroll position.
+let isRestoringPage = false
 
 let scrollTicking = false
 function onScroll() {
@@ -619,6 +657,7 @@ function onScroll() {
   })
 }
 function doScrollUpdate() {
+  if (isRestoringPage) return
   const el = continuousEl.value!
   const imgs = el.querySelectorAll('.img-placeholder')
   const scrollPos = isContinuousHorizontal.value ? el.scrollLeft : el.scrollTop
