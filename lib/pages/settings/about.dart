@@ -67,6 +67,11 @@ class _AboutSettingsState extends State<AboutSettings> {
             launchUrlString("https://github.com/$_repoOwner/$_repoName");
           },
         ).toSliver(),
+        ListTile(
+          title: Text("Disclaimer".tl),
+          trailing: const Icon(Icons.info_outline),
+          onTap: () => showDisclaimerDialog(context),
+        ).toSliver(),
       ],
     );
   }

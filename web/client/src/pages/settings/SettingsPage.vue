@@ -6,10 +6,12 @@ import { useSettingsStore } from '../../stores/settings'
 import { useSyncStore } from '../../stores/sync'
 import { apiPost } from '../../services/api'
 import { listBackups, downloadSpecificBackup, type RemoteBackupInfo } from '../../services/sync'
+import DisclaimerDialog from '../../components/DisclaimerDialog.vue'
 
 const router = useRouter()
 const settingsStore = useSettingsStore()
 const syncStore = useSyncStore()
+const showDisclaimer = ref(false)
 
 const categories = [
   { key: 'explore', label: '发现', icon: 'search' },
@@ -469,6 +471,7 @@ async function handleImportFile(event: Event) {
         <div v-if="false" class="setting-row"><span>检查更新</span><van-button size="small" type="primary">检查</van-button></div>
         <div v-if="false" class="setting-row"><span>启动时检查更新</span><van-switch model-value size="20" /></div>
         <div class="setting-row clickable" @click="openGithub"><span>Github</span><van-icon name="share-o" size="16" /></div>
+        <div class="setting-row clickable" @click="showDisclaimer = true"><span>免责声明</span><van-icon name="info-o" size="16" /></div>
       </div>
       <div v-else-if="selectedKey === 'debug'" class="content">
         <h3>Debug</h3>
@@ -594,6 +597,8 @@ async function handleImportFile(event: Event) {
         </div>
       </div>
     </van-popup>
+
+    <DisclaimerDialog v-model:show="showDisclaimer" />
   </div>
 </template>
 

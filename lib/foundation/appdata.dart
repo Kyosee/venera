@@ -295,6 +295,8 @@ class Settings with ChangeNotifier {
     'quickCollectImage': 'No', // No, DoubleTap, Swipe
     'autoFavoriteCover': false, // 收藏图片时是否自动连带收藏该章节封面
     'authorizationRequired': false,
+    'requireDisclaimerConsent': false,
+    'disclaimerConsented': false,
     'onClickFavorite': 'viewDetail', // viewDetail, read
     'enableDnsOverrides': false,
     'dnsOverrides': {},

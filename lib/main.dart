@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/pages/auth_page.dart';
+import 'package:venera/pages/disclaimer.dart';
 import 'package:venera/pages/main_page.dart';
 import 'package:venera/utils/io.dart';
 import 'package:window_manager/window_manager.dart';
@@ -193,6 +194,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       home = const Scaffold(
         body: Center(child: CircularProgressIndicator()),
       );
+    } else if (appdata.settings['requireDisclaimerConsent'] == true &&
+        appdata.settings['disclaimerConsented'] != true) {
+      home = const DisclaimerConsentPage();
     } else if (appdata.settings['authorizationRequired']) {
       home = AuthPage(
         onSuccessfulAuth: () {

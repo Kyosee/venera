@@ -9,6 +9,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     ComicCard: typeof import('./src/components/ComicCard.vue')['default']
     ComicTile: typeof import('./src/components/ComicTile.vue')['default']
+    DisclaimerDialog: typeof import('./src/components/DisclaimerDialog.vue')['default']
     ProxiedImage: typeof import('./src/components/ProxiedImage.vue')['default']
     RelatedSourcesDialog: typeof import('./src/components/RelatedSourcesDialog.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
