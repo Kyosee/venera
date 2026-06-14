@@ -95,12 +95,33 @@ function extractScriptMeta(script: string): Partial<NormalizedComicSource> {
   } as Partial<NormalizedComicSource>
 }
 
+// Mirror Dart's String.hashCode (Jenkins one-at-a-time + 0x3fffffff mask),
+// which the native app uses as a source's numeric `type`. MUST stay byte-for-byte
+// identical to the backend's comicSourceTypeFromKey (web/server/server.js) and to
+// Dart's hashCode, otherwise the same source resolves to two different types and
+// produces duplicate history rows / "Unknown:<hash>" source labels.
 function stableSourceTypeHash(sourceKey: string): number {
-  let hash = 0
+  let h = 0
   for (let i = 0; i < sourceKey.length; i++) {
-    hash = ((hash * 31) + sourceKey.charCodeAt(i)) | 0
+    h = (h + sourceKey.charCodeAt(i)) >>> 0
+    h = (h + ((h << 10) >>> 0)) >>> 0
+    h = (h ^ (h >>> 6)) >>> 0
   }
-  return Math.abs(hash)
+  h = (h + ((h << 3) >>> 0)) >>> 0
+  h = (h ^ (h >>> 11)) >>> 0
+  h = (h + ((h << 15) >>> 0)) >>> 0
+  h = h & 0x3fffffff
+  return h === 0 ? 1 : h
+}
+
+// Canonicalize a source key the same way the backend does (canonicalComicSourceKey):
+// strip a trailing ".js" and a " (N)" disambiguation suffix so "copy_manga(0)" and
+// "copy_manga" hash to the same type.
+function canonicalSourceKey(sourceKey: string): string {
+  return String(sourceKey || '')
+    .trim()
+    .replace(/\.js$/i, '')
+    .replace(/\s*\(\d+\)$/u, '')
 }
 
 export function normalizeComicSource(item: unknown): NormalizedComicSource | null {
@@ -172,7 +193,25 @@ export function sourceTypeFromKey(sourceKey: string | number | null | undefined)
   if (!key || key === 'local') return 0
   if (/^-?\d+$/.test(key)) return Number(key)
   if (key.startsWith('Unknown:')) return Number(key.slice('Unknown:'.length)) || 0
-  return stableSourceTypeHash(key)
+  // Canonicalize before hashing so "copy_manga(0)" and "copy_manga" share a type,
+  // matching the native ComicType.fromKey(canonicalKey.hashCode) behavior.
+  return stableSourceTypeHash(canonicalSourceKey(key))
+}
+
+// Find the installed source whose key/canonicalKey resolves to [type], trying
+// the legacy numeric field first, then the Dart-compatible hash of key and
+// canonicalKey (both raw and (N)-stripped forms).
+function findSourceByType(type: number, sources: SourceKeySource[]): SourceKeySource | undefined {
+  return sources.find(source => {
+    const k = stringValue(source.key)
+    if (!k) return false
+    const ck = stringValue(source.canonicalKey) || stringValue(source.canonical_key) || k
+    if (sourceLegacyType(source) === type) return true
+    return stableSourceTypeHash(k) === type
+      || stableSourceTypeHash(canonicalSourceKey(k)) === type
+      || stableSourceTypeHash(ck) === type
+      || stableSourceTypeHash(canonicalSourceKey(ck)) === type
+  })
 }
 
 export function resolveSourceKey(
@@ -187,18 +226,26 @@ export function resolveSourceKey(
       const canonicalKey = stringValue(source.canonicalKey) || stringValue(source.canonical_key) || key
       return key === explicit || canonicalKey === explicit
     })
-    return stringValue(matched?.key) || explicit
+    if (matched) return stringValue(matched.key)
+    // An "Unknown:<hash>" explicit key carries a numeric type we can still
+    // resolve against installed sources (e.g. native-synced rows whose real
+    // sourceKey was lost). Fall through to type resolution instead of showing
+    // the raw "Unknown:..." string.
+    if (explicit.startsWith('Unknown:')) {
+      const t = Number(explicit.slice('Unknown:'.length))
+      if (Number.isFinite(t)) {
+        const byType = findSourceByType(t, sources)
+        if (byType) return stringValue(byType.key)
+      }
+    } else {
+      return explicit
+    }
   }
 
   const type = numberValue(item.type)
-  if (type === null) return fallback
+  if (type === null) return explicit || fallback
   if (type === 0) return 'local'
 
-  const canonicalKey = sourceKeyFromType(type)
-  const matched = sources.find(source => {
-    if (!source.key) return false
-    const sourceCanonicalKey = stringValue(source.canonicalKey) || stringValue(source.canonical_key) || stringValue(source.key)
-    return sourceLegacyType(source) === type || sourceCanonicalKey === canonicalKey
-  })
+  const matched = findSourceByType(type, sources)
   return stringValue(matched?.key) || sourceKeyFromType(type)
 }
