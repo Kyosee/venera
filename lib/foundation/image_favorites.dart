@@ -256,6 +256,46 @@ class ImageFavoriteManager with ChangeNotifier {
       "PRIMARY KEY (id,source_key)"
       ");",
     );
+    _checkAndFixCacheKeyBug();
+  }
+
+  /// 检测并修复旧版本缓存 key 缺少 page 字段导致的图片错乱问题。
+  ///
+  /// 问题：v2.0.11 及更早版本的缓存 key 格式为：
+  /// `ImageFavorites imageKey@sourceKey@id@eid`（缺少 @page）
+  /// 导致同一章节的不同页共享缓存，后下载的图片覆盖先下载的。
+  ///
+  /// 修复策略：
+  /// 1. 检查 implicitData 中的版本标记
+  /// 2. 如果是旧版本或未标记，清空图片收藏缓存目录
+  /// 3. 标记已修复，避免重复清理
+  void _checkAndFixCacheKeyBug() {
+    const cacheKeyFixVersion = 'image_favorites_cache_key_fix_v1';
+
+    // 已经修复过，跳过
+    if (appdata.implicitData[cacheKeyFixVersion] == true) {
+      return;
+    }
+
+    try {
+      // 清空图片收藏缓存目录
+      final cachePath = FilePath.join(App.cachePath, 'image_favorites');
+      final cacheDir = Directory(cachePath);
+      if (cacheDir.existsSync()) {
+        final fileCount = cacheDir.listSync().length;
+        cacheDir.deleteSync(recursive: true);
+        Log.info(
+          'ImageFavoriteManager',
+          'Cleared $fileCount corrupted cache files due to cache key bug fix',
+        );
+      }
+
+      // 标记已修复
+      appdata.implicitData[cacheKeyFixVersion] = true;
+      appdata.writeImplicitData();
+    } catch (e, stackTrace) {
+      Log.error('ImageFavoriteManager', 'Failed to fix cache key bug: $e', stackTrace);
+    }
   }
 
   // 做排序和去重的操作
