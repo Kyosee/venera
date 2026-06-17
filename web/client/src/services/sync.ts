@@ -192,15 +192,34 @@ export async function listBackups(): Promise<RemoteBackupInfo[]> {
     .sort((a, b) => b.version - a.version)
 }
 
+const MS_PER_DAY = 86400000
+// Upper bound of the range a JS Date (and toISOString) accepts.
+const MAX_VALID_MS = 8640000000000000
+
+// Resolve the date encoded in a backup file name's leading segment. It is
+// normally days-since-epoch (~5 digits), but legacy/foreign backups store a
+// full millisecondsSinceEpoch (~13 digits). Multiplying that by MS_PER_DAY
+// produces a value beyond the Date range, so `new Date(...).toISOString()`
+// throws "RangeError: Invalid time value" and aborts the whole backup list
+// (same class of bug as Flutter issue #51). So multiply only when the value is
+// small enough to be a real day count, otherwise treat it as milliseconds, and
+// clamp so toISOString can never throw.
+function dateFromLeadingSegment(value: number): string {
+  if (!Number.isFinite(value)) value = 0
+  let ms = Math.abs(value) <= MAX_VALID_MS / MS_PER_DAY ? value * MS_PER_DAY : value
+  ms = Math.max(-MAX_VALID_MS, Math.min(MAX_VALID_MS, ms))
+  return new Date(ms).toISOString().slice(0, 10)
+}
+
 function parseBackupFileName(name: string): RemoteBackupInfo {
   const base = name.replace('.venera', '')
   const parts = base.split('-')
-  const daysSinceEpoch = parseInt(parts[0] || '0', 10)
+  const leadingSegment = parseInt(parts[0] || '0', 10)
   const versionPart = parts[1] || '0'
   const dotParts = versionPart.split('.')
   const version = parseInt(dotParts[0] || '0', 10)
   const platform = dotParts[1] || 'unknown'
-  const date = new Date(daysSinceEpoch * 86400000).toISOString().slice(0, 10)
+  const date = dateFromLeadingSegment(leadingSegment)
   return { fileName: name, version, platform, date }
 }
 
