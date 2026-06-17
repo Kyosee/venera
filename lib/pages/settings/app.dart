@@ -8,6 +8,18 @@ class AppSettings extends StatefulWidget {
 }
 
 class _AppSettingsState extends State<AppSettings> {
+  String _importTaskMessage(ImportTask task) {
+    if (task.phase == ImportPhase.extracting) {
+      if (task.extractedBytes <= 0) return "Extracting".tl;
+      return "${"Extracting".tl} · "
+          "${"Extracted @size".tlParams({'size': bytesToReadableString(task.extractedBytes)})}";
+    }
+    var key = task.phase == ImportPhase.applying && task.message != null
+        ? task.message!
+        : importPhaseLabelKey(task.phase);
+    return key.tl;
+  }
+
   void _showSyncLogsDialog(BuildContext context) {
     final logs = DataSync().syncLogs;
     showDialog(
@@ -172,36 +184,52 @@ class _AppSettingsState extends State<AppSettings> {
         _CallbackSetting(
           title: "Import App Data".tl,
           callback: () async {
-            var controller = showLoadingDialog(context);
-            var file = await selectFile(
-              ext: ['venera', 'picadata'],
+            var file = await selectFile(ext: ['venera', 'picadata']);
+            if (file == null) return;
+            var manager = ImportTaskManager.instance;
+            var task = manager.startImport(
+              filePath: file.path,
+              fileName: file.name,
+              isPica: file.name.endsWith('picadata'),
             );
-            if (file != null) {
-              var cacheFile = File(
-                FilePath.join(App.cachePath, "import_data_temp"),
+            if (task == null) {
+              context.showMessage(
+                message: "An import task is already running".tl,
               );
-              await file.saveTo(cacheFile.path);
-              try {
-                if (file.name.endsWith('picadata')) {
-                  await importPicaData(cacheFile);
-                } else {
-                  await importAppData(cacheFile);
-                  // Manual import is an explicit "make this the source of
-                  // truth" action, so push it back up. appdata.syncData no
-                  // longer auto-uploads (that would echo downloads back), and
-                  // the version is kept at max(local, backup), so this upload
-                  // lands as localVersion+1 and wins over any stale remote.
-                  unawaited(DataSync().uploadData());
+              return;
+            }
+            var controller = showLoadingDialog(
+              context,
+              withProgress: true,
+              barrierDismissible: false,
+              message: _importTaskMessage(task),
+              secondaryButtonText: "Background",
+              onSecondary: () {},
+              cancelButtonText: "Cancel",
+              onCancel: () => manager.cancel(task.id),
+            );
+            void listener() {
+              if (controller.closed) {
+                manager.removeListener(listener);
+                return;
+              }
+              controller.setProgress(task.indicatorValue);
+              controller.setMessage(_importTaskMessage(task));
+              if (!task.isRunning) {
+                manager.removeListener(listener);
+                controller.close();
+                if (task.status == ImportTaskStatus.completed) {
+                  App.rootContext.showMessage(message: "Import completed".tl);
+                } else if (task.status == ImportTaskStatus.failed) {
+                  App.rootContext.showMessage(
+                    message: (task.error ?? "Import failed").tl,
+                  );
                 }
-              } catch (e, s) {
-                Log.error("Import data", e.toString(), s);
-                context.showMessage(message: "Failed to import data".tl);
-              } finally {
-                cacheFile.deleteIgnoreError();
-                App.forceRebuild();
               }
             }
-            controller.close();
+
+            manager.addListener(listener);
+            listener();
           },
           actionTitle: 'Import'.tl,
         ).toSliver(),

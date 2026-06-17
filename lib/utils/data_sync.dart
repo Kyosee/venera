@@ -388,7 +388,7 @@ class DataSync with ChangeNotifier {
         var localFile = File(FilePath.join(App.cachePath, file.name!));
         try {
           await client.read2File(file.name!, localFile.path);
-          await importAppData(localFile, true);
+          await importAppData(localFile, checkVersion: true);
         } finally {
           localFile.deleteIgnoreError();
         }
@@ -495,7 +495,7 @@ class DataSync with ChangeNotifier {
         var localFile = File(FilePath.join(App.cachePath, fileName));
         try {
           await client.read2File(fileName, localFile.path);
-          await importAppData(localFile, false);
+          await importAppData(localFile, checkVersion: false);
         } finally {
           localFile.deleteIgnoreError();
         }

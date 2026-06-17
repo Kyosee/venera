@@ -4,10 +4,12 @@ import 'package:venera/components/components.dart';
 import 'package:venera/foundation/comic_source_update_tasks.dart';
 import 'package:venera/foundation/context.dart';
 import 'package:venera/foundation/follow_update_tasks.dart';
+import 'package:venera/foundation/import_tasks.dart';
 import 'package:venera/foundation/history_tasks.dart';
 import 'package:venera/foundation/related_source_tasks.dart';
 import 'package:venera/foundation/source_migration_tasks.dart';
 import 'package:venera/foundation/widget_utils.dart';
+import 'package:venera/utils/io.dart';
 import 'package:venera/utils/translations.dart';
 
 class TasksPage extends StatefulWidget {
@@ -23,6 +25,7 @@ class _TasksPageState extends State<TasksPage> {
   final relatedSourceManager = RelatedSourceTaskManager.instance;
   final sourceMigrationManager = SourceMigrationTaskManager.instance;
   final comicSourceUpdateManager = ComicSourceUpdateTaskManager.instance;
+  final importManager = ImportTaskManager.instance;
 
   @override
   void initState() {
@@ -32,6 +35,7 @@ class _TasksPageState extends State<TasksPage> {
     relatedSourceManager.addListener(update);
     sourceMigrationManager.addListener(update);
     comicSourceUpdateManager.addListener(update);
+    importManager.addListener(update);
   }
 
   @override
@@ -41,6 +45,7 @@ class _TasksPageState extends State<TasksPage> {
     relatedSourceManager.removeListener(update);
     sourceMigrationManager.removeListener(update);
     comicSourceUpdateManager.removeListener(update);
+    importManager.removeListener(update);
     super.dispose();
   }
 
@@ -94,6 +99,9 @@ class _TasksPageState extends State<TasksPage> {
       ...comicSourceUpdateManager.currentTasks.map(
         (task) => buildComicSourceUpdateTaskCard(task, expanded: false),
       ),
+      ...importManager.currentTasks.map(
+        (task) => buildImportTaskCard(task, expanded: false),
+      ),
     ];
     return buildTaskWidgets(widgets, "No current tasks".tl);
   }
@@ -128,6 +136,12 @@ class _TasksPageState extends State<TasksPage> {
         (task) => MapEntry(
           task.finishedAt ?? task.createdAt,
           buildComicSourceUpdateTaskCard(task, expanded: false),
+        ),
+      ),
+      ...importManager.historyTasks.map(
+        (task) => MapEntry(
+          task.finishedAt ?? task.createdAt,
+          buildImportTaskCard(task, expanded: false),
         ),
       ),
     ];
@@ -726,6 +740,103 @@ class _TasksPageState extends State<TasksPage> {
             ),
           ],
           const SizedBox(height: 8),
+        ],
+      ],
+    );
+  }
+
+  Widget buildImportTaskCard(ImportTask task, {required bool expanded}) {
+    return Card(
+      elevation: 0,
+      color: context.colorScheme.surface,
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ExpansionTile(
+        initiallyExpanded: expanded,
+        leading: Icon(task.isRunning ? Icons.cloud_download : Icons.history),
+        title: Text(
+          task.fileName.isEmpty
+              ? "Importing data".tl
+              : "Importing: @file".tlParams({'file': task.fileName}),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: buildTaskSubtitle(
+          [importStatusText(task), importPhaseText(task)],
+          task.createdAt,
+          task.finishedAt,
+        ),
+        trailing: importManager.isCancelable(task)
+            ? TextButton(
+                onPressed: () => importManager.cancel(task.id),
+                child: Text("Cancel".tl),
+              )
+            : null,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: LinearProgressIndicator(
+              value: task.isRunning ? task.indicatorValue : 1.0,
+            ),
+          ),
+          const SizedBox(height: 8),
+          buildImportDetails(task),
+        ],
+      ),
+    );
+  }
+
+  String importStatusText(ImportTask task) {
+    return switch (task.status) {
+      ImportTaskStatus.running => "Running".tl,
+      ImportTaskStatus.completed => "Completed".tl,
+      ImportTaskStatus.canceled => "Canceled".tl,
+      ImportTaskStatus.failed => "Failed".tl,
+    };
+  }
+
+  String importPhaseText(ImportTask task) {
+    if (task.phase == ImportPhase.extracting) {
+      if (task.extractedBytes <= 0) return "Extracting".tl;
+      return "Extracted @size".tlParams({
+        'size': bytesToReadableString(task.extractedBytes),
+      });
+    }
+    var key = task.phase == ImportPhase.applying && task.message != null
+        ? task.message!
+        : importPhaseLabelKey(task.phase);
+    return key.tl;
+  }
+
+  Widget buildImportDetails(ImportTask task) {
+    return buildSourceBox(
+      title: "Details".tl,
+      children: [
+        Text(
+          "File: @file".tlParams({
+            'file': task.fileName.isEmpty ? '-' : task.fileName,
+          }),
+          style: ts.s14,
+        ),
+        if (task.fileSize > 0) ...[
+          const SizedBox(height: 2),
+          Text(
+            "Size: @size".tlParams({
+              'size': bytesToReadableString(task.fileSize),
+            }),
+            style: ts.s14,
+          ),
+        ],
+        const SizedBox(height: 2),
+        Text(
+          "Status: @status".tlParams({'status': importPhaseText(task)}),
+          style: ts.s14,
+        ),
+        if (task.status == ImportTaskStatus.failed && task.error != null) ...[
+          const SizedBox(height: 2),
+          Text(
+            (task.error ?? '').tl,
+            style: ts.s14.withColor(context.colorScheme.error),
+          ),
         ],
       ],
     );

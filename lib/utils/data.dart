@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
 
@@ -17,6 +18,136 @@ import 'package:venera/utils/ext.dart';
 import 'package:zip_flutter/zip_flutter.dart';
 
 import 'io.dart';
+
+/// Coarse phases of a data import, reported to the UI for progress display.
+/// `zip_flutter` has no per-entry extraction API, so the extracting phase can
+/// only report bytes-written-so-far (indeterminate), not a precise percentage.
+enum ImportPhase { preparing, extracting, applying, reloading }
+
+/// Progress callback for [importAppData] / [importPicaData].
+/// [message] is an untranslated English key (the UI localizes it); [extractedBytes]
+/// is only set during [ImportPhase.extracting].
+typedef ImportProgressCallback =
+    void Function(ImportPhase phase, String? message, int? extractedBytes);
+
+/// Thrown when an import is canceled before the (uninterruptible) apply phase.
+class ImportCanceledException implements Exception {
+  const ImportCanceledException();
+  @override
+  String toString() => 'ImportCanceledException';
+}
+
+/// An import failure carrying a translation key for a user-facing message.
+class ImportException implements Exception {
+  final String messageKey;
+  const ImportException(this.messageKey);
+  @override
+  String toString() => messageKey;
+}
+
+/// Maps a low-level extraction/IO error to a user-facing translation key, or
+/// null when it doesn't match a known category. Kept pure for unit testing.
+String? importErrorMessageKey(Object error) {
+  final s = error.toString().toLowerCase();
+  if (s.contains('no space') ||
+      s.contains('enospc') ||
+      s.contains('errno = 28') ||
+      s.contains('errno=28') ||
+      s.contains('os error 28')) {
+    return 'Not enough storage space';
+  }
+  if (s.contains('zip') ||
+      s.contains('unzip') ||
+      s.contains('corrupt') ||
+      s.contains('not a valid') ||
+      s.contains('central directory') ||
+      s.contains('bad archive') ||
+      s.contains('failed to open') ||
+      s.contains('invalid archive')) {
+    return 'Backup file is corrupted or unsupported';
+  }
+  return null;
+}
+
+/// Isolate entry point: extracts a zip to a directory and reports the outcome
+/// back over [SendPort] (null on success, the error string on failure).
+void _extractIsolateEntry(List<dynamic> args) {
+  final SendPort sendPort = args[0] as SendPort;
+  final String src = args[1] as String;
+  final String dest = args[2] as String;
+  try {
+    ZipFile.openAndExtract(src, dest);
+    sendPort.send(null);
+  } catch (e) {
+    sendPort.send(e.toString());
+  }
+}
+
+int _directorySizeSync(String path) {
+  var total = 0;
+  final dir = Directory(path);
+  if (!dir.existsSync()) return 0;
+  try {
+    for (final entity in dir.listSync(recursive: true, followLinks: false)) {
+      if (entity is File) {
+        try {
+          total += entity.lengthSync();
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
+  return total;
+}
+
+/// Extracts [src] into [dest] on a background isolate, polling the output
+/// directory size to report progress via [onBytes] and supporting cooperative
+/// cancellation via [shouldCancel] (kills the isolate). Throws
+/// [ImportCanceledException] on cancel and [ImportException] for classified
+/// extraction failures.
+Future<void> _extractArchiveWithProgress(
+  String src,
+  String dest, {
+  required void Function(int bytes) onBytes,
+  required bool Function() shouldCancel,
+}) async {
+  final resultPort = ReceivePort();
+  final isolate = await Isolate.spawn(
+    _extractIsolateEntry,
+    [resultPort.sendPort, src, dest],
+  );
+  final completer = Completer<Object?>();
+  late final StreamSubscription sub;
+  sub = resultPort.listen((message) {
+    if (!completer.isCompleted) completer.complete(message);
+  });
+  var canceled = false;
+  final timer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+    if (shouldCancel()) {
+      canceled = true;
+      isolate.kill(priority: Isolate.immediate);
+      if (!completer.isCompleted) completer.complete(null);
+      return;
+    }
+    onBytes(_directorySizeSync(dest));
+  });
+  Object? result;
+  try {
+    result = await completer.future;
+  } finally {
+    timer.cancel();
+    sub.cancel();
+    resultPort.close();
+  }
+  if (canceled) {
+    throw const ImportCanceledException();
+  }
+  if (result is String) {
+    final key = importErrorMessageKey(result);
+    if (key != null) throw ImportException(key);
+    throw Exception(result);
+  }
+  onBytes(_directorySizeSync(dest));
+}
 
 int _legacyComicTypeValue(int legacyType) {
   return SourcePlatformResolver.sourceKeyFromLegacyInt(legacyType)?.hashCode ??
@@ -283,7 +414,17 @@ Future<void> _restoreWebdavConfigIfAbsent(Map<String, dynamic> data) async {
   await appdata.saveData(false);
 }
 
-Future<void> importAppData(File file, [bool checkVersion = false]) async {
+Future<void> importAppData(
+  File file, {
+  bool checkVersion = false,
+  ImportProgressCallback? onProgress,
+  bool Function()? shouldCancel,
+}) async {
+  void report(ImportPhase phase, [String? message, int? bytes]) {
+    onProgress?.call(phase, message, bytes);
+  }
+
+  report(ImportPhase.preparing);
   var cacheDirPath = FilePath.join(App.cachePath, 'temp_data');
   var cacheDir = Directory(cacheDirPath);
   if (cacheDir.existsSync()) {
@@ -291,9 +432,13 @@ Future<void> importAppData(File file, [bool checkVersion = false]) async {
   }
   cacheDir.createSync();
   try {
-    await Isolate.run(() {
-      ZipFile.openAndExtract(file.path, cacheDirPath);
-    });
+    report(ImportPhase.extracting, null, 0);
+    await _extractArchiveWithProgress(
+      file.path,
+      cacheDirPath,
+      onBytes: (b) => report(ImportPhase.extracting, null, b),
+      shouldCancel: () => shouldCancel?.call() ?? false,
+    );
     var legacySourceTypeMap = _loadLegacySourceTypeMap(
       cacheDir,
       "source_type_map.json",
@@ -313,6 +458,7 @@ Future<void> importAppData(File file, [bool checkVersion = false]) async {
       }
     }
     if (await historyFile.exists()) {
+      report(ImportPhase.applying, 'Importing history');
       HistoryManager().close();
       await _replaceDatabaseFile(
         historyFile,
@@ -321,6 +467,7 @@ Future<void> importAppData(File file, [bool checkVersion = false]) async {
       HistoryManager().init();
     }
     if (await localFavoriteFile.exists()) {
+      report(ImportPhase.applying, 'Importing favorites');
       LocalFavoritesManager().close();
       await _replaceDatabaseFile(
         localFavoriteFile,
@@ -329,6 +476,7 @@ Future<void> importAppData(File file, [bool checkVersion = false]) async {
       LocalFavoritesManager().init();
     }
     if (await domainFile.exists()) {
+      report(ImportPhase.applying, 'Importing library');
       App.domain.close();
       final domainDir = Directory(
         FilePath.join(App.dataPath, DomainDatabase.dataDirectoryName),
@@ -339,6 +487,7 @@ Future<void> importAppData(File file, [bool checkVersion = false]) async {
       await App.domain.init(App.dataPath);
     }
     if (await appdataFile.exists()) {
+      report(ImportPhase.applying, 'Importing settings');
       var content = await appdataFile.readAsString();
       var data = jsonDecode(content);
       appdata.syncData(data);
@@ -362,6 +511,7 @@ Future<void> importAppData(File file, [bool checkVersion = false]) async {
       }
     }
     if (await cookieFile.exists()) {
+      report(ImportPhase.applying, 'Importing settings');
       SingleInstanceCookieJar.instance?.dispose();
       await _replaceDatabaseFile(
         cookieFile,
@@ -373,6 +523,7 @@ Future<void> importAppData(File file, [bool checkVersion = false]) async {
     }
     var readLaterFile = cacheDir.joinFile("read_later.db");
     if (await readLaterFile.exists()) {
+      report(ImportPhase.applying, 'Importing read later');
       App.readLater.close();
       await _replaceDatabaseFile(
         readLaterFile,
@@ -382,6 +533,7 @@ Future<void> importAppData(File file, [bool checkVersion = false]) async {
     }
     var localDbFile = cacheDir.joinFile("local.db");
     if (await localDbFile.exists()) {
+      report(ImportPhase.applying, 'Importing local library');
       LocalManager().close();
       await _replaceDatabaseFile(
         localDbFile,
@@ -391,6 +543,7 @@ Future<void> importAppData(File file, [bool checkVersion = false]) async {
     }
     var comicSourceDir = FilePath.join(cacheDirPath, "comic_source");
     if (Directory(comicSourceDir).existsSync()) {
+      report(ImportPhase.reloading);
       Directory(
         FilePath.join(App.dataPath, "comic_source"),
       ).deleteIfExistsSync(recursive: true);
@@ -414,7 +567,16 @@ Future<void> importAppData(File file, [bool checkVersion = false]) async {
   }
 }
 
-Future<void> importPicaData(File file) async {
+Future<void> importPicaData(
+  File file, {
+  ImportProgressCallback? onProgress,
+  bool Function()? shouldCancel,
+}) async {
+  void report(ImportPhase phase, [String? message, int? bytes]) {
+    onProgress?.call(phase, message, bytes);
+  }
+
+  report(ImportPhase.preparing);
   var cacheDirPath = FilePath.join(App.cachePath, 'temp_data');
   var cacheDir = Directory(cacheDirPath);
   if (cacheDir.existsSync()) {
@@ -422,9 +584,14 @@ Future<void> importPicaData(File file) async {
   }
   cacheDir.createSync();
   try {
-    await Isolate.run(() {
-      ZipFile.openAndExtract(file.path, cacheDirPath);
-    });
+    report(ImportPhase.extracting, null, 0);
+    await _extractArchiveWithProgress(
+      file.path,
+      cacheDirPath,
+      onBytes: (b) => report(ImportPhase.extracting, null, b),
+      shouldCancel: () => shouldCancel?.call() ?? false,
+    );
+    report(ImportPhase.applying, 'Importing favorites');
     _loadLegacySourceTypeMap(cacheDir, "source_type_map.json");
     var localFavoriteFile = cacheDir.joinFile("local_favorite.db");
     if (localFavoriteFile.existsSync()) {
