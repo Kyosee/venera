@@ -1,0 +1,35 @@
+{
+  "name": "Venera",
+  "identifier": "io.github.kyosee.venera",
+  "subtitle": "A cross-platform manga/comic reader",
+  "iconURL": "https://raw.githubusercontent.com/Kyosee/venera/master/assets/app_icon.png",
+  "apps": [
+    {
+      "name": "Venera",
+      "bundleIdentifier": "io.github.kyosee.venera",
+      "developerName": "Kyosee",
+      "subtitle": "A cross-platform manga/comic reader",
+      "localizedDescription": "Venera is a cross-platform manga/comic reader with self-hosted Web frontend support.",
+      "iconURL": "https://raw.githubusercontent.com/Kyosee/venera/master/assets/app_icon.png",
+      "category": "entertainment",
+      "screenshots": [],
+      "versions": [
+        {
+          "version": "2.0.11",
+          "buildVersion": "212",
+          "date": "2026-06-14",
+          "localizedDescription": "## What's Changed\n\n### Added\n- Source migration dialog now shows linked sources at the top for quick migration without search\n- Comic detail page shows linked sources and migration suggestions when loading fails\n- Image favorites now supports \"by comic grid\" view with single-comic image grid management\n\n### Changed\n- Source migration dialog redesigned with two paths: quick migration (linked sources) and search migration (other sources)\n- Linked sources displayed as collapsible cards with cover, title, author, and source name\n- Migration dialog now uses radio selection for linked sources (select one to migrate directly)\n- Enhanced reader performance: increased cacheExtent for continuous scroll mode and expanded prefetch window for slide mode\n\n### Fixed\n- Fixed source migration dialog: selecting search result now properly clears linked source selection\n- Fixed search results expansion state lost when scrolling in migration dialog\n- Fixed ExpansionTile divider lines appearing globally when expanded\n- Fixed task card extra borders at top and bottom when expanded\n- Fixed Android custom storage path stuck when selecting non-empty directory, added copy integrity protection\n- Fixed follow updates check flooding warnings when source fails, now degrades to warning level\n- Fixed read-later write failure due to missing columns in old database\n- Fixed local comic directory import metadata and cover parsing failure under Android SAF\n\n### Build / CI\n- Updated disclaimer in README to explicitly cover software modification scenarios\n- Fixed Windows build compatibility with MSVC 14.51+ by silencing experimental coroutine deprecation warnings\n\n**Full Changelog**: https://github.com/Kyosee/venera/compare/v2.0.10...v2.0.11",
+          "downloadURL": "https://github.com/Kyosee/venera/releases/download/v2.0.11/venera-ios-2.0.11%2B212.ipa",
+          "size": 15884946,
+          "minOSVersion": "14.0"
+        }
+      ],
+      "version": "2.0.11",
+      "versionDate": "2026-06-14",
+      "versionDescription": "## What's Changed\n\n### Added\n- Source migration dialog now shows linked sources at the top for quick migration without search\n- Comic detail page shows linked sources and migration suggestions when loading fails\n- Image favorites now supports \"by comic grid\" view with single-comic image grid management\n\n### Changed\n- Source migration dialog redesigned with two paths: quick migration (linked sources) and search migration (other sources)\n- Linked sources displayed as collapsible cards with cover, title, author, and source name\n- Migration dialog now uses radio selection for linked sources (select one to migrate directly)\n- Enhanced reader performance: increased cacheExtent for continuous scroll mode and expanded prefetch window for slide mode\n\n### Fixed\n- Fixed source migration dialog: selecting search result now properly clears linked source selection\n- Fixed search results expansion state lost when scrolling in migration dialog\n- Fixed ExpansionTile divider lines appearing globally when expanded\n- Fixed task card extra borders at top and bottom when expanded\n- Fixed Android custom storage path stuck when selecting non-empty directory, added copy integrity protection\n- Fixed follow updates check flooding warnings when source fails, now degrades to warning level\n- Fixed read-later write failure due to missing columns in old database\n- Fixed local comic directory import metadata and cover parsing failure under Android SAF\n\n### Build / CI\n- Updated disclaimer in README to explicitly cover software modification scenarios\n- Fixed Windows build compatibility with MSVC 14.51+ by silencing experimental coroutine deprecation warnings\n\n**Full Changelog**: https://github.com/Kyosee/venera/compare/v2.0.10...v2.0.11",
+      "downloadURL": "https://github.com/Kyosee/venera/releases/download/v2.0.11/venera-ios-2.0.11%2B212.ipa",
+      "size": 15884946
+    }
+  ],
+  "news": []
+}
