@@ -86,31 +86,6 @@ cd web/client
 npm ci && npm run dev
 ```
 
-## 在 iOS 上安装（AltStore）
-
-iOS 版本以 **[AltStore](https://altstore.io/) 源** 形式分发，可直接在 AltStore 中
-安装并自动更新 Venera。
-
-**源地址：**
-
-```
-https://raw.githubusercontent.com/Kyosee/venera/master/altstore-source.json
-```
-
-**手动添加：** 打开 AltStore → **Sources（源）** → 点右上角 **+** → 粘贴上面的
-地址 → 找到 **Venera** 安装。
-
-**一键添加**（在 iOS 设备上用 Safari 打开）：
-
-```
-altstore://source?url=https%3A%2F%2Fraw.githubusercontent.com%2FKyosee%2Fvenera%2Fmaster%2Faltstore-source.json
-```
-
-> 说明：
-> - ipa 为**未签名**包，AltStore 会用你自己的 Apple ID 重新签名。
-> - 免费 Apple ID 的签名有效期为 **7 天**，需通过 AltServer 定期重签。
-> - 需要 **iOS 14.0+**。
-
 ## 从源码构建
 
 1. 克隆仓库

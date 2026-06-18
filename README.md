@@ -87,31 +87,6 @@ cd web/client
 npm ci && npm run dev
 ```
 
-## Install on iOS (AltStore)
-
-iOS builds are distributed as an **[AltStore](https://altstore.io/) source**, so
-you can install and auto-update Venera directly from AltStore.
-
-**Source URL:**
-
-```
-https://raw.githubusercontent.com/Kyosee/venera/master/altstore-source.json
-```
-
-**Add manually:** open AltStore → **Sources** → tap **+** → paste the URL above →
-find **Venera** and install.
-
-**One-tap add** (open on your iOS device in Safari):
-
-```
-altstore://source?url=https%3A%2F%2Fraw.githubusercontent.com%2FKyosee%2Fvenera%2Fmaster%2Faltstore-source.json
-```
-
-> Notes:
-> - The IPA is **unsigned**; AltStore re-signs it with your own Apple ID.
-> - A free Apple ID signature lasts **7 days** and must be refreshed by AltServer.
-> - Requires **iOS 14.0+**.
-
 ## Build from Source
 
 1. Clone the repository
