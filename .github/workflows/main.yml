@@ -258,3 +258,65 @@ jobs:
             outputs/*.AppImage
         env:
           GITHUB_TOKEN: ${{ github.token }}
+
+  Update_AltStore_Source:
+    runs-on: ubuntu-22.04
+    needs: [Release]
+    if: github.event_name == 'release'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Gather release metadata
+        id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          DL=$(gh release view "$TAG" --json assets --jq '.assets[] | select(.name|endswith(".ipa")) | .url' | head -1)
+          SZ=$(gh release view "$TAG" --json assets --jq '.assets[] | select(.name|endswith(".ipa")) | .size' | head -1)
+          PUB=$(gh release view "$TAG" --json publishedAt --jq '.publishedAt' | cut -dT -f1)
+          VER=$(grep '^version:' pubspec.yaml | cut -d':' -f2 | tr -d ' ')
+          test -n "$DL" || { echo "No .ipa asset found in release $TAG"; exit 1; }
+          {
+            echo "download_url=$DL"
+            echo "size=$SZ"
+            echo "pub_date=$PUB"
+            echo "version=${VER%%+*}"
+            echo "build=${VER##*+}"
+          } >> "$GITHUB_OUTPUT"
+      - name: Regenerate AltStore manifest
+        env:
+          SOURCE_FILE: altstore-source.json
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          BUILD: ${{ steps.meta.outputs.build }}
+          DOWNLOAD_URL: ${{ steps.meta.outputs.download_url }}
+          SIZE: ${{ steps.meta.outputs.size }}
+          PUB_DATE: ${{ steps.meta.outputs.pub_date }}
+          MIN_OS: '14.0'
+        run: |
+          set -euo pipefail
+          if [ -f "release-notes/${TAG}.en.md" ]; then
+            export NOTES_FILE="release-notes/${TAG}.en.md"
+          fi
+          node .github/scripts/gen-altstore-source.mjs
+      - name: Commit if changed
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- altstore-source.json; then
+            echo "altstore-source.json unchanged; nothing to commit"
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add altstore-source.json
+          git commit -m "chore: 更新 AltStore 安装清单至 ${{ github.ref_name }}"
+          git push origin HEAD:master
