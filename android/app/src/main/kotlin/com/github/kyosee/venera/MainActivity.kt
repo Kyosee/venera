@@ -235,6 +235,52 @@ class MainActivity : FlutterFragmentActivity() {
                 }
             }
 
+        // 通用后台任务保活：追更检查/导入/导出经此通道按类别上报状态/移除，复用下载那套的通知权限协商。
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "venera/background_keepalive")
+            .setMethodCallHandler { call, res ->
+                when (call.method) {
+                    "update" -> {
+                        val tag = call.argument<String>("tag")
+                        if (tag.isNullOrEmpty()) {
+                            res.success(false)
+                            return@setMethodCallHandler
+                        }
+                        val status = call.argument<String>("status").orEmpty()
+                        try {
+                            BackgroundKeepAliveService.update(this, tag, status)
+                            res.success(true)
+                        } catch (e: Exception) {
+                            // 通知权限缺失或系统限制后台启动时落到这里，交由 Dart 端降级。
+                            Log.w("Venera", "background keepalive update rejected: ${e.message}")
+                            res.success(false)
+                        }
+                    }
+                    "remove" -> {
+                        val tag = call.argument<String>("tag")
+                        if (!tag.isNullOrEmpty()) {
+                            runCatching { BackgroundKeepAliveService.remove(this, tag) }
+                                .onFailure { Log.w("Venera", "background keepalive remove failed: ${it.message}") }
+                        }
+                        res.success(null)
+                    }
+                    "notificationGranted" -> res.success(isNotificationGranted())
+                    "requestNotification" -> when {
+                        isNotificationGranted() -> res.success(true)
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> {
+                            notificationPermissionRequest?.invoke(false)
+                            notificationPermissionRequest = { granted -> res.success(granted) }
+                            ActivityCompat.requestPermissions(
+                                this,
+                                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                                notificationRequestCode,
+                            )
+                        }
+                        else -> res.success(true)
+                    }
+                    else -> res.notImplemented()
+                }
+            }
+
         val shareTextChannel = EventChannel(flutterEngine.dartExecutor.binaryMessenger, "venera/text_share")
         shareTextChannel.setStreamHandler(
             object : EventChannel.StreamHandler {

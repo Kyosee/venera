@@ -558,13 +558,25 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
   }
 
   void disable() {
+    var oldFolder = appdata.settings["followUpdatesFolder"];
     appdata.settings["followUpdatesFolder"] = null;
     appdata.saveData();
+    // Disabling follow-updates is an explicit cancellation: drop any pending
+    // resumable check for that folder so it isn't resumed on the next launch.
+    if (oldFolder is String) {
+      FollowUpdateTaskManager.instance.cancelForFolder(oldFolder);
+    }
     updateFollowUpdatesUI();
   }
 
   void setFolder(String folder) async {
     FollowUpdatesService._cancelChecking?.call();
+    // Switching to a different folder cancels any pending resumable check for
+    // the previously-followed folder (treated as user-initiated cancellation).
+    var oldFolder = appdata.settings["followUpdatesFolder"];
+    if (oldFolder is String && oldFolder != folder) {
+      FollowUpdateTaskManager.instance.cancelForFolder(oldFolder);
+    }
     // Do NOT clear has_new_update here. Selecting a follow-updates folder is a
     // local configuration action; wiping the flags would discard update marks
     // that were just synced from another device (and, since this is followed
@@ -759,6 +771,9 @@ abstract class FollowUpdatesService {
     FollowUpdateTaskManager.instance.onTaskFinished = (_) {
       updateFollowUpdatesUI();
     };
+    // Resume any check that was interrupted by the app being killed before
+    // starting a fresh periodic check, so it continues from its breakpoint.
+    FollowUpdateTaskManager.instance.resumePendingTasks();
     _check();
     DataSync().addListener(updateFollowUpdatesUI);
     // A short interval will not affect the performance since every comic has a check time.

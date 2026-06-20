@@ -5,4 +5,10 @@
     <string name="download_channel_name">Downloads</string>
     <string name="download_channel_desc">Shows progress while comics are downloading.</string>
     <string name="download_notification_default">Downloading…</string>
+    <string name="background_channel_name">Background tasks</string>
+    <string name="background_channel_desc">Keeps tasks like update checks, import and export running in the background.</string>
+    <string name="background_notification_default">Running in the background…</string>
+    <string name="background_title_follow_update">Checking updates</string>
+    <string name="background_title_import">Importing data</string>
+    <string name="background_title_export">Exporting comics</string>
 </resources>

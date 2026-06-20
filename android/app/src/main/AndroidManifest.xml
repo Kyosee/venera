@@ -47,6 +47,11 @@
             android:name=".DownloadKeepAliveService"
             android:exported="false"
             android:foregroundServiceType="dataSync"/>
+        <!-- 通用后台任务保活服务（追更检查/导入/导出），仅在相应任务运行时由 Dart 侧按需拉起/停止 -->
+        <service
+            android:name=".BackgroundKeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"/>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

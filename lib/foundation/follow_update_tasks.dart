@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:venera/foundation/appdata.dart';
+import 'package:venera/foundation/background_keepalive.dart';
 import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/follow_updates.dart';
 
@@ -118,6 +119,7 @@ class FollowUpdateTask {
 
 class FollowUpdateTaskManager with ChangeNotifier {
   FollowUpdateTaskManager._() {
+    _loadActiveTasks();
     _loadHistory();
   }
 
@@ -126,6 +128,10 @@ class FollowUpdateTaskManager with ChangeNotifier {
   final currentTasks = <FollowUpdateTask>[];
   final historyTasks = <FollowUpdateTask>[];
   final _canceledIds = <String>{};
+
+  /// Ids whose [_run] loop is currently executing, so resume/cancel can tell a
+  /// restored-but-not-yet-running task apart from an actively running one.
+  final _runningIds = <String>{};
   void Function(FollowUpdateTask task)? onTaskFinished;
 
   FollowUpdateTask? startCheck(String folder, {required bool manual}) {
@@ -148,6 +154,7 @@ class FollowUpdateTaskManager with ChangeNotifier {
       (sum, source) => sum + source.total,
     );
     currentTasks.insert(0, task);
+    _saveActiveTasks();
     notifyListeners();
     unawaited(_run(task, ignoreCheckTime: manual));
     return task;
@@ -155,30 +162,63 @@ class FollowUpdateTaskManager with ChangeNotifier {
 
   void cancel(String id) {
     _canceledIds.add(id);
+    // A task that was restored as pending may not be running its [_run] loop
+    // yet (resume hasn't kicked in). Finalize it directly so cancellation
+    // sticks and it won't be resumed on the next launch.
+    var task = currentTasks.where((t) => t.id == id).firstOrNull;
+    if (task != null && !_runningIds.contains(id)) {
+      task.status = FollowUpdateTaskStatus.canceled;
+      _finalize(task);
+    }
     notifyListeners();
+  }
+
+  /// Cancels any pending/running task for [folder] (used when the user changes
+  /// or disables the follow-updates folder — that is treated as an explicit
+  /// cancellation, so the old folder's task must not be resumed later).
+  void cancelForFolder(String folder) {
+    for (var task in currentTasks.where((t) => t.folder == folder).toList()) {
+      cancel(task.id);
+    }
   }
 
   Future<void> _run(
     FollowUpdateTask task, {
     required bool ignoreCheckTime,
+    bool resume = false,
   }) async {
+    if (_runningIds.contains(task.id)) {
+      return;
+    }
+    // The task may have been cancelled/finalized between being scheduled and
+    // this loop starting (e.g. user cancelled a just-restored pending task).
+    if (_canceledIds.contains(task.id) || !currentTasks.contains(task)) {
+      return;
+    }
+    _runningIds.add(task.id);
     var lastUpdated = 0;
+    var lastErrors = 0;
     try {
       await for (var progress in updateFolder(
         task.folder,
         ignoreCheckTime,
         shouldCancel: () => _canceledIds.contains(task.id),
+        // Only on resume: skip comics whose last check is at or after this
+        // task's creation time (i.e. already processed before the app was
+        // killed), so it continues from the breakpoint. On a fresh run nothing
+        // has been checked yet, so leaving this null keeps `total` (computed by
+        // _buildInitialSources) in step with the comics actually processed.
+        checkedSince: resume ? task.createdAt : null,
       )) {
         if (_canceledIds.contains(task.id)) {
           task.status = FollowUpdateTaskStatus.canceled;
           break;
         }
-        task.total = progress.total;
-        task.checked = progress.current;
-        task.updated = progress.updated;
-        task.failed = progress.errors;
         var comic = progress.comic;
         if (comic != null) {
+          // Count incrementally so a resumed task keeps accumulating onto the
+          // persisted counters instead of being reset by the stream's totals.
+          task.checked++;
           var source = task.sources.putIfAbsent(
             comic.sourceKey,
             () => FollowUpdateSourceProgress(
@@ -189,13 +229,18 @@ class FollowUpdateTaskManager with ChangeNotifier {
           );
           source.checked++;
           if (progress.updated > lastUpdated) {
+            task.updated++;
             source.updated++;
           }
-          if (progress.errorMessage != null) {
+          if (progress.errors > lastErrors) {
+            task.failed++;
             source.failed++;
           }
+          _saveActiveTasks();
+          _refreshKeepAlive(task);
         }
         lastUpdated = progress.updated;
+        lastErrors = progress.errors;
         notifyListeners();
       }
       if (task.status == FollowUpdateTaskStatus.running) {
@@ -204,17 +249,56 @@ class FollowUpdateTaskManager with ChangeNotifier {
     } catch (_) {
       task.status = FollowUpdateTaskStatus.failed;
     } finally {
-      task.finishedAt = DateTime.now();
-      _canceledIds.remove(task.id);
-      currentTasks.remove(task);
-      historyTasks.insert(0, task);
-      if (historyTasks.length > 50) {
-        historyTasks.removeRange(50, historyTasks.length);
-      }
-      _saveHistory();
+      _finalize(task);
       onTaskFinished?.call(task);
       notifyListeners();
     }
+  }
+
+  /// Moves a terminal task out of [currentTasks] into history and clears its
+  /// persisted active entry + keep-alive notification. Idempotent: a task that
+  /// was already finalized (e.g. cancelled while pending) is ignored.
+  void _finalize(FollowUpdateTask task) {
+    _canceledIds.remove(task.id);
+    _runningIds.remove(task.id);
+    if (!currentTasks.remove(task)) {
+      return;
+    }
+    task.finishedAt ??= DateTime.now();
+    historyTasks.insert(0, task);
+    if (historyTasks.length > 50) {
+      historyTasks.removeRange(50, historyTasks.length);
+    }
+    _saveActiveTasks();
+    _saveHistory();
+    if (currentTasks.where((t) => t.isRunning).isEmpty) {
+      BackgroundKeepAlive.instance.remove(BackgroundKeepAlive.tagFollowUpdate);
+    }
+  }
+
+  /// Resumes follow-update tasks that were running when the app was last killed.
+  /// Called once at startup, before the periodic checker, so an interrupted
+  /// check continues from its breakpoint instead of starting over.
+  void resumePendingTasks() {
+    for (var task in currentTasks.toList()) {
+      if (task.isRunning && !_runningIds.contains(task.id)) {
+        // Resume with the task's original manual/auto semantics. Combined with
+        // `checkedSince` (its creation time), comics already processed before
+        // the interruption are skipped, so it continues from the breakpoint
+        // rather than starting over.
+        unawaited(_run(task, ignoreCheckTime: task.manual, resume: true));
+      }
+    }
+  }
+
+  void _refreshKeepAlive(FollowUpdateTask task) {
+    var detail = task.total == 0
+        ? '${task.checked}'
+        : '${task.checked}/${task.total}';
+    BackgroundKeepAlive.instance.update(
+      BackgroundKeepAlive.tagFollowUpdate,
+      formatTaskStatus(title: task.folder, detail: detail),
+    );
   }
 
   Map<String, FollowUpdateSourceProgress> _buildInitialSources(
@@ -272,6 +356,37 @@ class FollowUpdateTaskManager with ChangeNotifier {
 
   void _saveHistory() {
     appdata.implicitData['follow_update_task_history'] = historyTasks
+        .map((task) => task.toJson())
+        .toList();
+    appdata.writeImplicitData();
+  }
+
+  /// Restore tasks that were still running at last shutdown. They are marked
+  /// running on disk; [resumePendingTasks] picks them up after init.
+  void _loadActiveTasks() {
+    var data = appdata.implicitData['follow_update_active_tasks'];
+    if (data is! List) {
+      return;
+    }
+    currentTasks
+      ..clear()
+      ..addAll(
+        data.whereType<Map>().map((e) {
+          var task = FollowUpdateTask.fromJson(Map<String, dynamic>.from(e));
+          // Anything persisted as active but not in a clean running state is
+          // coerced back to running so it can be resumed.
+          if (!task.isRunning) {
+            task.status = FollowUpdateTaskStatus.running;
+            task.finishedAt = null;
+          }
+          return task;
+        }),
+      );
+  }
+
+  void _saveActiveTasks() {
+    appdata.implicitData['follow_update_active_tasks'] = currentTasks
+        .where((task) => task.isRunning)
         .map((task) => task.toJson())
         .toList();
     appdata.writeImplicitData();

@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
+import 'package:venera/foundation/background_keepalive.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/utils/data.dart';
 import 'package:venera/utils/data_sync.dart';
 import 'package:venera/utils/io.dart';
+import 'package:venera/utils/translations.dart';
 
 export 'package:venera/utils/data.dart' show ImportPhase;
 
@@ -162,9 +164,24 @@ class ImportTaskManager with ChangeNotifier {
       if (message != null) task.message = message;
       if (bytes != null) task.extractedBytes = bytes;
       notifyListeners();
+      BackgroundKeepAlive.instance.update(
+        BackgroundKeepAlive.tagImport,
+        formatTaskStatus(
+          title: task.fileName.isEmpty ? 'Import'.tl : task.fileName,
+          detail: importPhaseLabelKey(phase).tl,
+        ),
+      );
     }
 
     bool shouldCancel() => _canceledIds.contains(task.id);
+
+    BackgroundKeepAlive.instance.update(
+      BackgroundKeepAlive.tagImport,
+      formatTaskStatus(
+        title: task.fileName.isEmpty ? 'Import'.tl : task.fileName,
+        detail: importPhaseLabelKey(task.phase).tl,
+      ),
+    );
 
     try {
       if (task.isPica) {
@@ -201,6 +218,7 @@ class ImportTaskManager with ChangeNotifier {
         historyTasks.removeRange(50, historyTasks.length);
       }
       _saveHistory();
+      BackgroundKeepAlive.instance.remove(BackgroundKeepAlive.tagImport);
       // Notify first so a bound loading dialog closes before we rebuild the app.
       notifyListeners();
       if (task.status != ImportTaskStatus.canceled) {

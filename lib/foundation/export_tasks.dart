@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
+import 'package:venera/foundation/background_keepalive.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/log.dart';
@@ -254,6 +255,7 @@ class ExportTaskManager with ChangeNotifier {
 
   Future<void> _run(ExportTask task) async {
     final cacheDir = Directory(FilePath.join(App.cachePath, 'export_task', task.id));
+    _refreshKeepAlive(task);
     try {
       if (!cacheDir.existsSync()) {
         cacheDir.createSync(recursive: true);
@@ -309,6 +311,7 @@ class ExportTaskManager with ChangeNotifier {
 
           task.currentTitle = ref.title;
           notifyListeners();
+          _refreshKeepAlive(task);
 
           final comic = LocalManager().find(ref.id, ref.comicType);
           if (comic == null) {
@@ -355,9 +358,24 @@ class ExportTaskManager with ChangeNotifier {
           historyTasks.removeRange(50, historyTasks.length);
         }
       }
+      // Drop the keep-alive notification once no export is actively running
+      // (a paused/restored task is not running, so it shouldn't keep it up).
+      if (currentTasks.where((t) => t.isRunning).isEmpty) {
+        BackgroundKeepAlive.instance.remove(BackgroundKeepAlive.tagExport);
+      }
       _persist();
       notifyListeners();
     }
+  }
+
+  void _refreshKeepAlive(ExportTask task) {
+    BackgroundKeepAlive.instance.update(
+      BackgroundKeepAlive.tagExport,
+      formatTaskStatus(
+        title: task.currentTitle ?? task.format.label,
+        detail: task.total == 0 ? null : '${task.done}/${task.total}',
+      ),
+    );
   }
 
   /// Builds a single combined .venera_comics containing all comics (merge
@@ -401,6 +419,7 @@ class ExportTaskManager with ChangeNotifier {
         task.currentTitle =
             (current > 0 && current <= comics.length) ? comics[current - 1].title : null;
         notifyListeners();
+        _refreshKeepAlive(task);
       },
     );
     await target.writeAsBytes(await produced.readAsBytes());

@@ -4,4 +4,10 @@
     <string name="download_channel_name">下载</string>
     <string name="download_channel_desc">显示漫画下载进度</string>
     <string name="download_notification_default">下载中…</string>
+    <string name="background_channel_name">后台任务</string>
+    <string name="background_channel_desc">在后台保持追更检查、导入、导出等任务运行</string>
+    <string name="background_notification_default">正在后台运行…</string>
+    <string name="background_title_follow_update">正在检查更新</string>
+    <string name="background_title_import">正在导入数据</string>
+    <string name="background_title_export">正在导出漫画</string>
 </resources>

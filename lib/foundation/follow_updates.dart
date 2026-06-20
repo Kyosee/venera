@@ -103,8 +103,9 @@ void updateFolderBase(
   String folder,
   StreamController<UpdateProgress> stream,
   bool ignoreCheckTime,
-  bool Function()? shouldCancel,
-) async {
+  bool Function()? shouldCancel, {
+  DateTime? checkedSince,
+}) async {
   var comics = LocalFavoritesManager().getComicsWithUpdatesInfo(folder);
   int total = comics.length;
   int current = 0;
@@ -116,6 +117,18 @@ void updateFolderBase(
   var comicsToUpdate = <FavoriteItemWithUpdateInfo>[];
 
   for (var comic in comics) {
+    // Resume support: skip comics already checked during this task's lifetime.
+    // `checkedSince` is the task's creation time; a comic whose last check is
+    // at or after it was handled before the app was killed, so resuming the
+    // task continues from the breakpoint instead of re-checking everything.
+    if (checkedSince != null) {
+      var lastCheckTime = comic.lastCheckDateTime;
+      if (lastCheckTime != null && !lastCheckTime.isBefore(checkedSince)) {
+        current++;
+        stream.add(UpdateProgress(total, current, errors, updated));
+        continue;
+      }
+    }
     if (!ignoreCheckTime) {
       var lastCheckTime = comic.lastCheckDateTime;
       if (lastCheckTime != null &&
@@ -203,9 +216,16 @@ Stream<UpdateProgress> updateFolder(
   String folder,
   bool ignoreCheckTime, {
   bool Function()? shouldCancel,
+  DateTime? checkedSince,
 }) {
   var stream = StreamController<UpdateProgress>();
-  updateFolderBase(folder, stream, ignoreCheckTime, shouldCancel);
+  updateFolderBase(
+    folder,
+    stream,
+    ignoreCheckTime,
+    shouldCancel,
+    checkedSince: checkedSince,
+  );
   return stream.stream;
 }
 
