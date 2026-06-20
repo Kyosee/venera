@@ -23,6 +23,21 @@ class ComicSourcePage extends StatelessWidget {
     ComicSource source, [
     bool showLoading = true,
   ]) async {
+    // If the user updates a single source without first running a full update
+    // check, the source-list-derived download URL hasn't been cached yet, so
+    // the update would fall back to the (possibly migrated/dead) URL in the
+    // installed script. Resolve it lazily here. Failures are non-fatal: the
+    // update still proceeds with the script's own URL.
+    if (ComicSourceManager().updateUrlFor(source.key) == null) {
+      var listUrl = appdata.settings['comicSourceListUrl']?.toString() ?? '';
+      if (listUrl.isNotEmpty) {
+        try {
+          await checkComicSourceUpdate();
+        } catch (e) {
+          Log.error("Comic source update", e.toString());
+        }
+      }
+    }
     if (showLoading) {
       final task = ComicSourceUpdateTaskManager.instance.start([
         source,
@@ -116,11 +131,35 @@ class ComicSourcePage extends StatelessWidget {
     }
     var list = jsonDecode(res.data!) as List;
     var versions = <String, String>{};
+    var urls = <String, String>{};
     for (var source in list) {
-      versions[source['key']] = source['version'];
+      try {
+        var key = source['key']?.toString();
+        var version = source['version']?.toString();
+        if (key == null || version == null) {
+          continue;
+        }
+        versions[key] = version;
+        var downloadUrl = _resolveSourceDownloadUrl(
+          url: source['url']?.toString(),
+          fileName: source['fileName']?.toString(),
+          listUrl: listUrl,
+        );
+        if (downloadUrl != null) {
+          urls[key] = downloadUrl;
+        }
+      } catch (e) {
+        Log.error("Check comic source update", e.toString());
+      }
     }
     var shouldUpdate = <String>[];
     for (var source in ComicSource.all()) {
+      // Cache the resolved download URL for every known source, not just the
+      // ones with a pending update, so a manual single-source update also
+      // targets the migrated address.
+      if (urls.containsKey(source.key)) {
+        ComicSourceManager().setUpdateUrl(source.key, urls[source.key]!);
+      }
       if (versions.containsKey(source.key) &&
           compareSemVer(versions[source.key]!, source.version)) {
         shouldUpdate.add(source.key);
@@ -554,21 +593,18 @@ class _ComicSourceListState extends State<_ComicSourceList> {
                 onPressed: () async {
                   var fileName = json![index]["fileName"];
                   var url = json![index]["url"];
-                  if (url == null || !(url.toString()).isURL) {
-                    var listUrl =
-                        appdata.settings['comicSourceListUrl'] as String;
-                    if (listUrl
-                        .replaceFirst("https://", "")
-                        .replaceFirst("http://", "")
-                        .contains("/")) {
-                      url =
-                          listUrl.substring(0, listUrl.lastIndexOf("/") + 1) +
-                          fileName;
-                    } else {
-                      url = '$listUrl/$fileName';
-                    }
+                  var listUrl =
+                      appdata.settings['comicSourceListUrl'] as String;
+                  var resolved = _resolveSourceDownloadUrl(
+                    url: url?.toString(),
+                    fileName: fileName?.toString(),
+                    listUrl: listUrl,
+                  );
+                  if (resolved == null) {
+                    context.showMessage(message: "Invalid url config".tl);
+                    return;
                   }
-                  await widget.onAdd(url);
+                  await widget.onAdd(resolved);
                   setState(() {});
                 },
               ).fixHeight(32);
@@ -586,6 +622,34 @@ class _ComicSourceListState extends State<_ComicSourceList> {
       },
     );
   }
+}
+
+/// Resolves the download URL for a source-list entry.
+///
+/// Prefers an explicit absolute [url]. Otherwise derives it from [listUrl]
+/// (the `index.json` location) and [fileName], mirroring how the list itself
+/// is hosted: if [listUrl] has a path, the last segment is swapped for
+/// [fileName]; otherwise [fileName] is appended. Returns null when no valid
+/// URL can be produced.
+String? _resolveSourceDownloadUrl({
+  String? url,
+  String? fileName,
+  required String listUrl,
+}) {
+  if (url != null && url.isURL) {
+    return url;
+  }
+  if (fileName == null || fileName.isEmpty) {
+    return null;
+  }
+  String resolved;
+  var bare = listUrl.replaceFirst("https://", "").replaceFirst("http://", "");
+  if (bare.contains("/")) {
+    resolved = listUrl.substring(0, listUrl.lastIndexOf("/") + 1) + fileName;
+  } else {
+    resolved = '$listUrl/$fileName';
+  }
+  return resolved.isURL ? resolved : null;
 }
 
 void _validatePages() {

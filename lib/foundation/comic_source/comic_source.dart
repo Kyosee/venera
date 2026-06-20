@@ -136,6 +136,10 @@ class ComicSourceManager with ChangeNotifier, Init {
 
   void remove(String key) {
     _sources.removeWhere((element) => element.key == key);
+    // Drop cached update state so a reinstalled source with the same key does
+    // not inherit a stale version badge or download URL.
+    _availableUpdates.remove(key);
+    _updateUrls.remove(key);
     notifyListeners();
   }
 
@@ -144,6 +148,12 @@ class ComicSourceManager with ChangeNotifier, Init {
   /// Key is the source key, value is the version.
   final _availableUpdates = <String, String>{};
 
+  /// Key is the source key, value is the download URL resolved from the source
+  /// list during the last update check. Single-source updates prefer this over
+  /// the URL baked into the installed script, so a migrated source list points
+  /// downloads at the new address instead of the dead old one.
+  final _updateUrls = <String, String>{};
+
   void updateAvailableUpdates(Map<String, String> updates) {
     _availableUpdates.addAll(updates);
     notifyListeners();
@@ -151,8 +161,18 @@ class ComicSourceManager with ChangeNotifier, Init {
 
   Map<String, String> get availableUpdates => Map.from(_availableUpdates);
 
+  /// Records the download URL for [key] resolved from the source list.
+  void setUpdateUrl(String key, String url) {
+    _updateUrls[key] = url;
+  }
+
+  /// Returns the source-list-derived download URL for [key], if known.
+  String? updateUrlFor(String key) => _updateUrls[key];
+
   void clearAvailableUpdate(String key) {
-    if (_availableUpdates.remove(key) != null) {
+    final hadUpdate = _availableUpdates.remove(key) != null;
+    _updateUrls.remove(key);
+    if (hadUpdate) {
       notifyListeners();
     }
   }

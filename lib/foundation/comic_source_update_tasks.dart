@@ -213,13 +213,19 @@ class ComicSourceUpdateTaskManager with ChangeNotifier {
   }
 
   static Future<String> updateSourceFile(ComicSource source) async {
-    if (!source.url.isURL) {
+    // Prefer the download URL resolved from the source list during the last
+    // update check; fall back to the URL baked into the installed script.
+    // This keeps single-source updates pointed at the current address after a
+    // source list migration, instead of the dead old one in the old script.
+    final downloadUrl =
+        ComicSourceManager().updateUrlFor(source.key) ?? source.url;
+    if (!downloadUrl.isURL) {
       throw Exception('Invalid url config');
     }
     var removed = false;
     try {
       final res = await AppDio().get<String>(
-        source.url,
+        downloadUrl,
         options: Options(
           responseType: ResponseType.plain,
           headers: {'cache-time': 'no'},
