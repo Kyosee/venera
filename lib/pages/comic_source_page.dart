@@ -7,6 +7,7 @@ import 'package:venera/components/components.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
+import 'package:venera/foundation/comic_source/source_library.dart';
 import 'package:venera/foundation/comic_source_update_tasks.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/network/app_dio.dart';
@@ -116,66 +117,134 @@ class ComicSourcePage extends StatelessWidget {
     }
   }
 
+  /// Checks every enabled library for source updates and merges the results.
+  ///
+  /// Libraries are visited in priority order (ascending). For a given source
+  /// key the FIRST (lowest-priority) library that lists it wins the version and
+  /// download URL; later libraries only register as additional providers. A
+  /// failed or slow library is skipped without aborting the others, so one dead
+  /// catalog can no longer block discovery for the rest.
+  ///
+  /// Returns the number of sources with a pending update, or -1 if every
+  /// enabled library failed to fetch.
   static Future<int> checkComicSourceUpdate() async {
     if (ComicSource.all().isEmpty) {
       return 0;
     }
-    var listUrl = appdata.settings['comicSourceListUrl']?.toString() ?? '';
-    if (listUrl.isEmpty) {
+    final libraries = ComicSourceLibraryManager.enabled();
+    if (libraries.isEmpty) {
       return 0;
     }
-    var dio = AppDio();
-    var res = await dio.get<String>(
-      listUrl,
-      options: Options(headers: {'cache-time': 'no'}),
-    );
-    if (res.statusCode != 200) {
-      return -1;
-    }
-    var list = jsonDecode(res.data!) as List;
+
+    // key -> winning version / download url, in priority order (first wins).
     var versions = <String, String>{};
     var urls = <String, String>{};
-    for (var source in list) {
+    // key -> every library id offering it (priority order preserved).
+    var offeredBy = <String, List<String>>{};
+    // key -> winning library id (the one that set versions[key]).
+    var winnerLibrary = <String, String>{};
+    // key -> a lower-priority library that offers a strictly newer version.
+    var newerElsewhere = <String, ({String libraryId, String version})>{};
+
+    var anySucceeded = false;
+    for (final library in libraries) {
+      if (library.url.isEmpty) {
+        continue;
+      }
+      List? list;
       try {
-        var key = source['key']?.toString();
-        var version = source['version']?.toString();
-        if (key == null || version == null) {
+        var res = await AppDio()
+            .get<String>(
+              library.url,
+              options: Options(headers: {'cache-time': 'no'}),
+            )
+            .timeout(const Duration(seconds: 20));
+        if (res.statusCode != 200) {
           continue;
         }
-        versions[key] = version;
-        var downloadUrl = _resolveSourceDownloadUrl(
-          url: source['url']?.toString(),
-          fileName: source['fileName']?.toString(),
-          listUrl: listUrl,
-        );
-        if (downloadUrl != null) {
-          urls[key] = downloadUrl;
-        }
+        list = jsonDecode(res.data!) as List;
       } catch (e) {
-        Log.error("Check comic source update", e.toString());
+        Log.error("Check comic source update", "${library.name}: $e");
+        continue;
+      }
+      anySucceeded = true;
+      ComicSourceLibraryManager.markChecked(library.id);
+      for (var source in list) {
+        try {
+          var key = source['key']?.toString();
+          var version = source['version']?.toString();
+          if (key == null || version == null) {
+            continue;
+          }
+          var downloadUrl = _resolveSourceDownloadUrl(
+            url: source['url']?.toString(),
+            fileName: source['fileName']?.toString(),
+            listUrl: library.url,
+          );
+          (offeredBy[key] ??= []).add(library.id);
+          if (!versions.containsKey(key)) {
+            // First (highest-priority) library to list this key wins.
+            versions[key] = version;
+            winnerLibrary[key] = library.id;
+            if (downloadUrl != null) {
+              urls[key] = downloadUrl;
+            }
+          } else {
+            // A lower-priority library: note if it offers something newer so
+            // the UI can surface it rather than silently honoring priority.
+            if (_isNewer(version, versions[key]!)) {
+              newerElsewhere[key] = (libraryId: library.id, version: version);
+            }
+          }
+        } catch (e) {
+          Log.error("Check comic source update", e.toString());
+        }
       }
     }
-    var shouldUpdate = <String>[];
+
+    if (!anySucceeded) {
+      return -1;
+    }
+
+    final manager = ComicSourceManager();
+    var pending = <String, String>{};
+    var provenanceUpdates = <String, SourceProvenance>{};
     for (var source in ComicSource.all()) {
-      // Cache the resolved download URL for every known source, not just the
-      // ones with a pending update, so a manual single-source update also
-      // targets the migrated address.
+      final ids = offeredBy[source.key];
+      if (ids != null) {
+        // Refresh discovery provenance, preserving the sticky origin id.
+        final prov = manager.provenanceFor(source.key) ?? SourceProvenance();
+        prov.libraryIds = ids;
+        prov.updateLibraryId = winnerLibrary[source.key];
+        provenanceUpdates[source.key] = prov;
+      }
+      // Cache the resolved download URL for every known source so a manual
+      // single-source update also targets the winning library's address.
       if (urls.containsKey(source.key)) {
-        ComicSourceManager().setUpdateUrl(source.key, urls[source.key]!);
+        manager.setUpdateUrl(source.key, urls[source.key]!);
       }
       if (versions.containsKey(source.key) &&
-          compareSemVer(versions[source.key]!, source.version)) {
-        shouldUpdate.add(source.key);
+          _isNewer(versions[source.key]!, source.version)) {
+        pending[source.key] = versions[source.key]!;
       }
     }
-    if (shouldUpdate.isNotEmpty) {
-      var updates = <String, String>{};
-      for (var key in shouldUpdate) {
-        updates[key] = versions[key]!;
-      }
-      ComicSourceManager().updateAvailableUpdates(updates);
+
+    ComicSourceLibraryManager.setProvenanceBatch(provenanceUpdates);
+    manager.setNewerElsewhere(newerElsewhere);
+    // Full replace, not merge: a winner that is no longer offered (library
+    // removed/disabled) must drop out of the badge set.
+    manager.replaceAvailableUpdates(pending);
+    return pending.length;
+  }
+
+  /// [compareSemVer] guarded against malformed version strings. A bad version
+  /// in any catalog must not abort the whole merged check.
+  static bool _isNewer(String candidate, String current) {
+    try {
+      return compareSemVer(candidate, current);
+    } catch (_) {
+      return false;
     }
-    return shouldUpdate.length;
   }
 
   @override
@@ -238,6 +307,7 @@ class _BodyState extends State<_Body> {
       onConfirm: () {
         _purgeComicSourceData(source);
         ComicSourceManager().remove(source.key);
+        ComicSourceLibraryManager.clearProvenance(source.key);
         _validatePages();
         App.forceRebuild();
       },
@@ -357,12 +427,9 @@ class _BodyState extends State<_Body> {
               children: [
                 FilledButton.tonalIcon(
                   icon: Icon(Icons.article_outlined),
-                  label: Text("Comic Source list".tl),
+                  label: Text("Source Libraries".tl),
                   onPressed: () {
-                    showPopUpWidget(
-                      App.rootContext,
-                      _ComicSourceList(handleAddSource),
-                    );
+                    App.rootContext.to(() => const SourceLibrariesPage());
                   },
                 ),
                 FilledButton.tonalIcon(
@@ -405,7 +472,7 @@ class _BodyState extends State<_Body> {
     );
   }
 
-  Future<void> handleAddSource(String url) async {
+  Future<void> handleAddSource(String url, [String? originLibraryId]) async {
     if (url.isEmpty) {
       return;
     }
@@ -428,7 +495,7 @@ class _BodyState extends State<_Body> {
       );
       if (cancel) return;
       controller.close();
-      await addSource(res.data!, fileName);
+      await addSource(res.data!, fileName, originLibraryId);
     } catch (e, s) {
       if (cancel) return;
       context.showMessage(message: e.toString());
@@ -436,9 +503,16 @@ class _BodyState extends State<_Body> {
     }
   }
 
-  Future<void> addSource(String js, String fileName) async {
+  Future<void> addSource(
+    String js,
+    String fileName, [
+    String? originLibraryId,
+  ]) async {
     var comicSource = await ComicSourceParser().createAndParse(js, fileName);
     ComicSourceManager().add(comicSource);
+    if (originLibraryId != null) {
+      ComicSourceLibraryManager.recordOrigin(comicSource.key, originLibraryId);
+    }
     _addAllPagesWithComicSource(comicSource);
     appdata.saveData();
     App.forceRebuild();
@@ -446,9 +520,13 @@ class _BodyState extends State<_Body> {
 }
 
 class _ComicSourceList extends StatefulWidget {
-  const _ComicSourceList(this.onAdd);
+  const _ComicSourceList(this.library, this.onAdd);
 
-  final Future<void> Function(String) onAdd;
+  /// The library whose catalog (`index.json`) this view browses.
+  final ComicSourceLibrary library;
+
+  /// Installs a source from [url], stamping it with the library's id as origin.
+  final Future<void> Function(String url, String originLibraryId) onAdd;
 
   @override
   State<_ComicSourceList> createState() => _ComicSourceListState();
@@ -456,8 +534,8 @@ class _ComicSourceList extends StatefulWidget {
 
 class _ComicSourceListState extends State<_ComicSourceList> {
   List? json;
-  bool changed = false;
-  var controller = TextEditingController();
+
+  ComicSourceLibrary get library => widget.library;
 
   void load() async {
     if (json != null) {
@@ -465,7 +543,7 @@ class _ComicSourceListState extends State<_ComicSourceList> {
         json = null;
       });
     }
-    if (controller.text.isEmpty) {
+    if (library.url.isEmpty) {
       setState(() {
         json = [];
       });
@@ -473,7 +551,10 @@ class _ComicSourceListState extends State<_ComicSourceList> {
     }
     var dio = AppDio();
     try {
-      var res = await dio.get<String>(controller.text);
+      var res = await dio.get<String>(
+        library.url,
+        options: Options(headers: {'cache-time': 'no'}),
+      );
       if (res.statusCode != 200) {
         throw "error";
       }
@@ -495,99 +576,35 @@ class _ComicSourceListState extends State<_ComicSourceList> {
   @override
   void initState() {
     super.initState();
-    controller.text = appdata.settings['comicSourceListUrl'];
     load();
   }
 
   @override
-  void dispose() {
-    super.dispose();
-    if (changed) {
-      appdata.settings['comicSourceListUrl'] = controller.text;
-      appdata.saveData();
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return PopUpWidgetScaffold(title: "Comic Source".tl, body: buildBody());
+    return PopUpWidgetScaffold(
+      title: library.name,
+      body: buildBody(),
+    );
   }
 
   Widget buildBody() {
     var currentKey = ComicSource.all().map((e) => e.key).toList();
 
+    if (json == null) {
+      return Center(
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+        ).fixWidth(24).fixHeight(24),
+      );
+    }
+
+    if (json!.isEmpty) {
+      return Center(child: Text("Network error".tl));
+    }
+
     return ListView.builder(
-      itemCount: (json?.length ?? 1) + 1,
+      itemCount: json!.length,
       itemBuilder: (context, index) {
-        if (index == 0) {
-          return Container(
-            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: Theme.of(context).colorScheme.outlineVariant,
-                width: 0.6,
-              ),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ListTile(
-                  leading: Icon(Icons.source_outlined),
-                  title: Text("Repo URL".tl),
-                ),
-                TextField(
-                  controller: controller,
-                  decoration: InputDecoration(
-                    hintText: "URL",
-                    border: const UnderlineInputBorder(),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                  ),
-                  onChanged: (value) {
-                    changed = true;
-                  },
-                ).paddingHorizontal(16).paddingBottom(8),
-                Text(
-                  "The URL should point to a 'index.json' file".tl,
-                ).paddingLeft(16),
-                Text(
-                  "Do not report any issues related to sources to App repo.".tl,
-                ).paddingLeft(16),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () {
-                        launchUrlString(
-                          "https://github.com/Kyosee/venera/blob/master/doc/comic_source.md",
-                        );
-                      },
-                      child: Text("Help".tl),
-                    ),
-                    FilledButton.tonal(
-                      onPressed: load,
-                      child: Text("Refresh".tl),
-                    ),
-                    const SizedBox(width: 16),
-                  ],
-                ),
-                const SizedBox(height: 16),
-              ],
-            ),
-          );
-        }
-
-        if (index == 1 && json == null) {
-          return Center(
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-            ).fixWidth(24).fixHeight(24),
-          );
-        }
-
-        index--;
-
         var key = json![index]["key"];
         var action = currentKey.contains(key)
             ? const Icon(Icons.check, size: 20).paddingRight(8)
@@ -596,12 +613,10 @@ class _ComicSourceListState extends State<_ComicSourceList> {
                 onPressed: () async {
                   var fileName = json![index]["fileName"];
                   var url = json![index]["url"];
-                  var listUrl =
-                      appdata.settings['comicSourceListUrl'] as String;
                   var resolved = _resolveSourceDownloadUrl(
                     url: url?.toString(),
                     fileName: fileName?.toString(),
-                    listUrl: listUrl,
+                    listUrl: library.url,
                   );
                   if (resolved == null) {
                     context.showMessage(
@@ -611,7 +626,7 @@ class _ComicSourceListState extends State<_ComicSourceList> {
                     );
                     return;
                   }
-                  await widget.onAdd(resolved);
+                  await widget.onAdd(resolved, library.id);
                   setState(() {});
                 },
               ).fixHeight(32);
@@ -622,8 +637,8 @@ class _ComicSourceListState extends State<_ComicSourceList> {
         }
 
         return ListTile(
-          title: Text(json![index]["name"]),
-          subtitle: Text(description),
+          title: Text(json![index]["name"] ?? key ?? ''),
+          subtitle: Text(description ?? ''),
           trailing: action,
         );
       },
@@ -657,6 +672,300 @@ String? _resolveSourceDownloadUrl({
     resolved = '$listUrl/$fileName';
   }
   return resolved.isURL ? resolved : null;
+}
+
+/// Downloads a source script from [url], installs it, and stamps its origin
+/// library. Shared by the library catalog browser and the libraries page so the
+/// install + provenance flow lives in one place. Shows its own loading dialog.
+/// Returns true on success.
+Future<bool> _installSourceFromUrl(String url, String originLibraryId) async {
+  if (url.isEmpty) {
+    return false;
+  }
+  var splits = url.split("/");
+  splits.removeWhere((element) => element == "");
+  var fileName = splits.isEmpty ? "source.js" : splits.last;
+  bool cancel = false;
+  var controller = showLoadingDialog(
+    App.rootContext,
+    onCancel: () => cancel = true,
+    barrierDismissible: false,
+  );
+  try {
+    var res = await AppDio().get<String>(
+      url,
+      options: Options(
+        responseType: ResponseType.plain,
+        headers: {"cache-time": "no"},
+      ),
+    );
+    if (cancel) return false;
+    controller.close();
+    var comicSource = await ComicSourceParser().createAndParse(
+      res.data!,
+      fileName,
+    );
+    ComicSourceManager().add(comicSource);
+    ComicSourceLibraryManager.recordOrigin(comicSource.key, originLibraryId);
+    _addAllPagesWithComicSource(comicSource);
+    appdata.saveData();
+    App.forceRebuild();
+    return true;
+  } catch (e, s) {
+    if (cancel) return false;
+    controller.close();
+    App.rootContext.showMessage(message: e.toString());
+    Log.error("Add comic source", "$e\n$s");
+    return false;
+  }
+}
+
+/// Manages the ordered list of comic-source libraries. Each library is a remote
+/// catalog the app can browse and update from. Order is priority: the topmost
+/// library wins when several offer the same source key.
+class SourceLibrariesPage extends StatefulWidget {
+  const SourceLibrariesPage({super.key});
+
+  @override
+  State<SourceLibrariesPage> createState() => _SourceLibrariesPageState();
+}
+
+class _SourceLibrariesPageState extends State<SourceLibrariesPage> {
+  List<ComicSourceLibrary> libraries = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  void _reload() {
+    setState(() {
+      libraries = ComicSourceLibraryManager.all();
+    });
+  }
+
+  void _addLibrary() {
+    String name = "";
+    String url = "";
+    showDialog(
+      context: context,
+      builder: (context) {
+        return ContentDialog(
+          title: "Add library".tl,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                decoration: InputDecoration(
+                  labelText: "Library name".tl,
+                  border: const OutlineInputBorder(),
+                ),
+                onChanged: (v) => name = v,
+              ).paddingBottom(12),
+              TextField(
+                decoration: InputDecoration(
+                  labelText: "URL",
+                  hintText: "index.json",
+                  border: const OutlineInputBorder(),
+                ),
+                onChanged: (v) => url = v,
+              ),
+              Text(
+                "The URL should point to a 'index.json' file".tl,
+                style: ts.s12,
+              ).paddingTop(8),
+            ],
+          ).paddingHorizontal(16),
+          actions: [
+            FilledButton(
+              onPressed: () {
+                url = url.trim();
+                if (!url.isURL) {
+                  context.showMessage(message: "Invalid URL".tl);
+                  return;
+                }
+                ComicSourceLibraryManager.add(name.trim(), url);
+                context.pop();
+                _reload();
+              },
+              child: Text("Add".tl),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _editLibrary(ComicSourceLibrary library) {
+    showInputDialog(
+      context: context,
+      title: "Edit library".tl,
+      initialValue: library.name,
+      onConfirm: (value) {
+        ComicSourceLibraryManager.rename(library.id, value.trim());
+        _reload();
+        return null;
+      },
+    );
+  }
+
+  void _deleteLibrary(ComicSourceLibrary library) {
+    showConfirmDialog(
+      context: context,
+      title: "Delete library".tl,
+      content: "Delete library '@n'? Installed sources are kept.".tlParams({
+        "n": library.name,
+      }),
+      btnColor: context.colorScheme.error,
+      onConfirm: () {
+        ComicSourceLibraryManager.remove(library.id);
+        _reload();
+      },
+    );
+  }
+
+  void _browseLibrary(ComicSourceLibrary library) {
+    showPopUpWidget(
+      App.rootContext,
+      _ComicSourceList(library, (url, originLibraryId) async {
+        await _installSourceFromUrl(url, originLibraryId);
+      }),
+    );
+  }
+
+  Future<void> _refreshLibrary() async {
+    var count = await ComicSourcePage.checkComicSourceUpdate();
+    if (!mounted) return;
+    _reload();
+    if (count == -1) {
+      context.showMessage(message: "Network error".tl);
+    } else if (count == 0) {
+      context.showMessage(message: "No updates".tl);
+    } else {
+      context.showMessage(
+        message: "@c updates".tlParams({"c": count}),
+      );
+    }
+  }
+
+  String _subtitleFor(ComicSourceLibrary library) {
+    var host = Uri.tryParse(library.url)?.host ?? library.url;
+    if (library.lastChecked == null) {
+      return "$host\n${"Never checked".tl}";
+    }
+    var t = DateTime.fromMillisecondsSinceEpoch(library.lastChecked!);
+    var stamp =
+        "${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')} "
+        "${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}";
+    return "$host\n${"Last checked: @t".tlParams({"t": stamp})}";
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: Appbar(
+        title: Text("Source Libraries".tl),
+        actions: [
+          Tooltip(
+            message: "Check updates".tl,
+            child: IconButton(
+              icon: const Icon(Icons.update),
+              onPressed: _refreshLibrary,
+            ),
+          ),
+          Tooltip(
+            message: "Add library".tl,
+            child: IconButton(
+              icon: const Icon(Icons.add),
+              onPressed: _addLibrary,
+            ),
+          ),
+        ],
+      ),
+      body: libraries.isEmpty
+          ? _buildEmptyState()
+          : ReorderableListView.builder(
+              padding: EdgeInsets.only(bottom: context.padding.bottom),
+              onReorder: (oldIndex, newIndex) {
+                ComicSourceLibraryManager.reorder(oldIndex, newIndex);
+                _reload();
+              },
+              itemCount: libraries.length,
+              itemBuilder: (context, index) {
+                final library = libraries[index];
+                return ListTile(
+                  key: ValueKey(library.id),
+                  title: Text(library.name),
+                  subtitle: Text(_subtitleFor(library)),
+                  isThreeLine: true,
+                  onTap: () => _browseLibrary(library),
+                  leading: Tooltip(
+                    message: library.enabled
+                        ? "Enabled".tl
+                        : "This library is disabled".tl,
+                    child: Switch(
+                      value: library.enabled,
+                      onChanged: (v) {
+                        ComicSourceLibraryManager.setEnabled(library.id, v);
+                        _reload();
+                      },
+                    ),
+                  ),
+                  trailing: MenuButton(
+                    entries: [
+                      MenuEntry(
+                        icon: Icons.travel_explore,
+                        text: "Browse".tl,
+                        onClick: () => _browseLibrary(library),
+                      ),
+                      MenuEntry(
+                        icon: Icons.edit,
+                        text: "Edit library".tl,
+                        onClick: () => _editLibrary(library),
+                      ),
+                      MenuEntry(
+                        icon: Icons.delete_outline,
+                        text: "Delete library".tl,
+                        color: context.colorScheme.error,
+                        onClick: () => _deleteLibrary(library),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.library_books_outlined,
+            size: 64,
+            color: context.colorScheme.outline,
+          ),
+          const SizedBox(height: 16),
+          Text("No source libraries yet".tl, style: ts.s16),
+          const SizedBox(height: 8),
+          Text(
+            "Add a library to browse and update sources".tl,
+            style: ts.s14,
+            textAlign: TextAlign.center,
+          ).paddingHorizontal(32),
+          const SizedBox(height: 24),
+          FilledButton.icon(
+            icon: const Icon(Icons.add),
+            label: Text("Add library".tl),
+            onPressed: _addLibrary,
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 void _validatePages() {
@@ -943,9 +1252,23 @@ class _SliverComicSourceState extends State<_SliverComicSource> {
 
   @override
   Widget build(BuildContext context) {
-    var newVersion = ComicSourceManager().availableUpdates[source.key];
+    var manager = ComicSourceManager();
+    var newVersion = manager.availableUpdates[source.key];
     bool hasUpdate =
-        newVersion != null && compareSemVer(newVersion, source.version);
+        newVersion != null &&
+        ComicSourcePage._isNewer(newVersion, source.version);
+    var provenanceText = _provenanceText();
+    var newerElsewhere = manager.newerElsewhereFor(source.key);
+    String? newerHint;
+    if (newerElsewhere != null) {
+      final lib = ComicSourceLibraryManager.find(newerElsewhere.libraryId);
+      if (lib != null) {
+        newerHint = "Newer version @v in @lib".tlParams({
+          "v": newerElsewhere.version,
+          "lib": lib.name,
+        });
+      }
+    }
 
     return SliverMainAxisGroup(
       slivers: [
@@ -1005,6 +1328,55 @@ class _SliverComicSourceState extends State<_SliverComicSource> {
                   ).paddingLeft(4),
               ],
             ),
+            subtitle: (provenanceText == null && newerHint == null)
+                ? null
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (provenanceText != null)
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.inventory_2_outlined,
+                              size: 13,
+                              color: context.colorScheme.outline,
+                            ),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                provenanceText,
+                                style: ts.s12.copyWith(
+                                  color: context.colorScheme.outline,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      if (newerHint != null)
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.info_outline,
+                              size: 13,
+                              color: context.colorScheme.tertiary,
+                            ),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                newerHint,
+                                style: ts.s12.copyWith(
+                                  color: context.colorScheme.tertiary,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -1022,6 +1394,14 @@ class _SliverComicSourceState extends State<_SliverComicSource> {
                     icon: const Icon(Icons.update),
                   ),
                 ),
+                if (_offeringLibraries().length > 1)
+                  Tooltip(
+                    message: "Update from another library".tl,
+                    child: IconButton(
+                      onPressed: _showLibraryPicker,
+                      icon: const Icon(Icons.account_tree_outlined),
+                    ),
+                  ),
                 Tooltip(
                   message: "Delete".tl,
                   child: IconButton(
@@ -1059,6 +1439,148 @@ class _SliverComicSourceState extends State<_SliverComicSource> {
         ],
       ],
     );
+  }
+
+  /// Libraries currently recorded as offering this source key (provenance).
+  List<ComicSourceLibrary> _offeringLibraries() {
+    final prov = ComicSourceManager().provenanceFor(source.key);
+    if (prov == null) {
+      return [];
+    }
+    return prov.libraryIds
+        .map((id) => ComicSourceLibraryManager.find(id))
+        .whereType<ComicSourceLibrary>()
+        .toList();
+  }
+
+  /// Lets the user pick which library to (re)install this source from when more
+  /// than one offers it. The chosen library's version/URL is written through to
+  /// the update state so the existing update flow installs that variant. Since
+  /// switching variants reinstalls the script and wipes the source's local data
+  /// (login/cookies), it is gated behind an explicit confirmation.
+  void _showLibraryPicker() async {
+    final libraries = _offeringLibraries();
+    if (libraries.isEmpty) return;
+    ComicSourceLibrary? chosen;
+    await showDialog(
+      context: App.rootContext,
+      builder: (context) {
+        return ContentDialog(
+          title: "Update from another library".tl,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final lib in libraries)
+                ListTile(
+                  title: Text(lib.name),
+                  subtitle: Text(Uri.tryParse(lib.url)?.host ?? lib.url),
+                  onTap: () {
+                    chosen = lib;
+                    context.pop();
+                  },
+                ),
+            ],
+          ),
+        );
+      },
+    );
+    if (chosen == null) return;
+    final library = chosen!;
+
+    // Re-fetch the chosen library's catalog to resolve this key's version+URL.
+    String? version;
+    String? downloadUrl;
+    try {
+      var res = await AppDio()
+          .get<String>(
+            library.url,
+            options: Options(headers: {'cache-time': 'no'}),
+          )
+          .timeout(const Duration(seconds: 20));
+      var list = jsonDecode(res.data!) as List;
+      for (var entry in list) {
+        if (entry['key']?.toString() == source.key) {
+          version = entry['version']?.toString();
+          downloadUrl = _resolveSourceDownloadUrl(
+            url: entry['url']?.toString(),
+            fileName: entry['fileName']?.toString(),
+            listUrl: library.url,
+          );
+          break;
+        }
+      }
+    } catch (e) {
+      App.rootContext.showMessage(message: "Network error".tl);
+      return;
+    }
+    if (version == null || downloadUrl == null) {
+      App.rootContext.showMessage(
+        message: "This library no longer offers this source".tl,
+      );
+      return;
+    }
+
+    showConfirmDialog(
+      context: App.rootContext,
+      title: "Switch source library".tl,
+      content:
+          "Reinstall '@n' from @lib? This replaces the installed script and "
+                  "clears its login and local data."
+              .tlParams({"n": source.name, "lib": library.name}),
+      onConfirm: () {
+        // Write through winner state so the standard update flow targets the
+        // chosen library's variant, and re-stamp the origin.
+        final manager = ComicSourceManager();
+        manager.setUpdateUrl(source.key, downloadUrl!);
+        manager.replaceAvailableUpdates({
+          ...manager.availableUpdates,
+          source.key: version!,
+        });
+        final prov = manager.provenanceFor(source.key) ?? SourceProvenance();
+        prov.originId = library.id;
+        prov.updateLibraryId = library.id;
+        if (!prov.libraryIds.contains(library.id)) {
+          prov.libraryIds.add(library.id);
+        }
+        manager.updateProvenance(source.key, prov);
+        widget.update(source);
+      },
+    );
+  }
+
+  /// Builds the origin/provenance line: "From [library]" plus "and N more"
+  /// when several libraries offer this source. Returns null when no provenance
+  /// is recorded (e.g. a sideloaded source).
+  String? _provenanceText() {
+    final prov = ComicSourceManager().provenanceFor(source.key);
+    if (prov == null) {
+      return null;
+    }
+    if (prov.originId != null) {
+      final origin = ComicSourceLibraryManager.find(prov.originId!);
+      if (origin == null) {
+        // Origin library was removed; the source still works via its own URL.
+        return "Source library removed".tl;
+      }
+      final others = prov.libraryIds.where((id) => id != prov.originId).length;
+      if (others > 0) {
+        return "From @lib and @n more".tlParams({
+          "lib": origin.name,
+          "n": others,
+        });
+      }
+      return "From @lib".tlParams({"lib": origin.name});
+    }
+    if (prov.libraryIds.isNotEmpty) {
+      final names = prov.libraryIds
+          .map((id) => ComicSourceLibraryManager.find(id)?.name)
+          .whereType<String>()
+          .toList();
+      if (names.isNotEmpty) {
+        return "Provided by @libs".tlParams({"libs": names.join("、")});
+      }
+    }
+    return null;
   }
 
   Iterable<Widget> buildSourceSettings() sync* {

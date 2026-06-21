@@ -7,6 +7,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
 import 'package:venera/foundation/app.dart';
+import 'package:venera/foundation/comic_source/source_library.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/history.dart';
 import 'package:venera/foundation/res.dart';
@@ -59,6 +60,7 @@ class ComicSourceManager with ChangeNotifier, Init {
   @protected
   Future<void> doInit() async {
     await JsEngine().ensureInit();
+    ComicSourceLibraryManager.migrateIfNeeded();
     final path = "${App.dataPath}/comic_source";
     if (!(await Directory(path).exists())) {
       await Directory(path).create(recursive: true);
@@ -159,6 +161,32 @@ class ComicSourceManager with ChangeNotifier, Init {
     notifyListeners();
   }
 
+  /// Replaces the entire pending-update set. Used by the multi-library check so
+  /// that a winner discovered last time but no longer offered (its library was
+  /// removed/disabled, or it was updated) does not linger as a stale badge.
+  void replaceAvailableUpdates(Map<String, String> updates) {
+    _availableUpdates
+      ..clear()
+      ..addAll(updates);
+    notifyListeners();
+  }
+
+  /// Transient (never synced) record of sources whose installed/winning version
+  /// is beaten by a LOWER-priority library. Lets the UI surface a "newer version
+  /// exists in another library" hint instead of silently honoring priority order.
+  final _newerElsewhere = <String, ({String libraryId, String version})>{};
+
+  ({String libraryId, String version})? newerElsewhereFor(String key) =>
+      _newerElsewhere[key];
+
+  void setNewerElsewhere(
+    Map<String, ({String libraryId, String version})> data,
+  ) {
+    _newerElsewhere
+      ..clear()
+      ..addAll(data);
+  }
+
   Map<String, String> get availableUpdates => Map.from(_availableUpdates);
 
   /// Records the download URL for [key] resolved from the source list.
@@ -175,6 +203,17 @@ class ComicSourceManager with ChangeNotifier, Init {
     if (hadUpdate) {
       notifyListeners();
     }
+  }
+
+  /// Origin/offering libraries for an installed source. Backed by the synced
+  /// settings store, so it survives an update-reload (which removes and re-adds
+  /// the same key) and only clears on a genuine uninstall.
+  SourceProvenance? provenanceFor(String key) =>
+      ComicSourceLibraryManager.provenanceFor(key);
+
+  void updateProvenance(String key, SourceProvenance provenance) {
+    ComicSourceLibraryManager.setProvenance(key, provenance);
+    notifyListeners();
   }
 
   void notifyStateChange() {
