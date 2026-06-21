@@ -220,11 +220,22 @@ class ComicSourceLibraryManager {
     return lib;
   }
 
-  static void rename(String id, String name) {
+  /// Updates a library's display name and/or catalog URL in place. The library
+  /// id is intentionally kept stable (provenance records reference it), even if
+  /// the URL — from which a fresh id would derive — changes.
+  static void edit(String id, {String? name, String? url}) {
     final libraries = all();
     final lib = _findIn(libraries, id);
     if (lib == null) return;
-    lib.name = name;
+    if (name != null && name.isNotEmpty) {
+      lib.name = name;
+    } else if (name != null && url != null) {
+      // Name cleared: fall back to a readable default from the (new) URL.
+      lib.name = defaultLibraryName(url);
+    }
+    if (url != null && url.isNotEmpty) {
+      lib.url = url;
+    }
     save(libraries);
   }
 

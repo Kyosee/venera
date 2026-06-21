@@ -117,16 +117,23 @@ class ComicSourcePage extends StatelessWidget {
     }
   }
 
-  /// Checks every enabled library for source updates and merges the results.
+  /// Checks enabled libraries for source updates.
   ///
-  /// Libraries are visited in priority order (ascending). For a given source
-  /// key the FIRST (lowest-priority) library that lists it wins the version and
-  /// download URL; later libraries only register as additional providers. A
-  /// failed or slow library is skipped without aborting the others, so one dead
-  /// catalog can no longer block discovery for the rest.
+  /// Update comparison is **bound to each source's origin library**: an
+  /// installed source is only offered an update by the library it was installed
+  /// from. Different maintainers version independently, so comparing a source
+  /// against an unrelated library's catalog (even one sharing the key) is
+  /// meaningless and could push the wrong script. Other libraries that also
+  /// offer the key are recorded only as switch candidates — the user chooses
+  /// explicitly via "Update from another library".
   ///
-  /// Returns the number of sources with a pending update, or -1 if every
-  /// enabled library failed to fetch.
+  /// Sources without a recorded origin (sideloaded, or installed before this
+  /// feature) fall back to the first enabled library that offers the key, so
+  /// single-library users keep auto-updates.
+  ///
+  /// A failed or slow library is skipped without aborting the others. Returns
+  /// the number of sources with a pending update, or -1 if every enabled
+  /// library failed to fetch.
   static Future<int> checkComicSourceUpdate() async {
     if (ComicSource.all().isEmpty) {
       return 0;
@@ -136,15 +143,10 @@ class ComicSourcePage extends StatelessWidget {
       return 0;
     }
 
-    // key -> winning version / download url, in priority order (first wins).
-    var versions = <String, String>{};
-    var urls = <String, String>{};
-    // key -> every library id offering it (priority order preserved).
+    // libraryId -> (key -> {version, url}) from that library's catalog.
+    var catalogByLibrary = <String, Map<String, ({String version, String? url})>>{};
+    // key -> ordered list of enabled library ids offering it.
     var offeredBy = <String, List<String>>{};
-    // key -> winning library id (the one that set versions[key]).
-    var winnerLibrary = <String, String>{};
-    // key -> a lower-priority library that offers a strictly newer version.
-    var newerElsewhere = <String, ({String libraryId, String version})>{};
 
     var anySucceeded = false;
     for (final library in libraries) {
@@ -169,6 +171,7 @@ class ComicSourcePage extends StatelessWidget {
       }
       anySucceeded = true;
       ComicSourceLibraryManager.markChecked(library.id);
+      final entries = <String, ({String version, String? url})>{};
       for (var source in list) {
         try {
           var key = source['key']?.toString();
@@ -181,25 +184,13 @@ class ComicSourcePage extends StatelessWidget {
             fileName: source['fileName']?.toString(),
             listUrl: library.url,
           );
+          entries[key] = (version: version, url: downloadUrl);
           (offeredBy[key] ??= []).add(library.id);
-          if (!versions.containsKey(key)) {
-            // First (highest-priority) library to list this key wins.
-            versions[key] = version;
-            winnerLibrary[key] = library.id;
-            if (downloadUrl != null) {
-              urls[key] = downloadUrl;
-            }
-          } else {
-            // A lower-priority library: note if it offers something newer so
-            // the UI can surface it rather than silently honoring priority.
-            if (_isNewer(version, versions[key]!)) {
-              newerElsewhere[key] = (libraryId: library.id, version: version);
-            }
-          }
         } catch (e) {
           Log.error("Check comic source update", e.toString());
         }
       }
+      catalogByLibrary[library.id] = entries;
     }
 
     if (!anySucceeded) {
@@ -209,30 +200,61 @@ class ComicSourcePage extends StatelessWidget {
     final manager = ComicSourceManager();
     var pending = <String, String>{};
     var provenanceUpdates = <String, SourceProvenance>{};
+    // key -> a DIFFERENT library offering a newer version than installed; only
+    // a hint for the explicit switch flow, never an automatic update.
+    var newerElsewhere = <String, ({String libraryId, String version})>{};
+
     for (var source in ComicSource.all()) {
       final ids = offeredBy[source.key];
+      final prov = manager.provenanceFor(source.key) ?? SourceProvenance();
+
+      // Resolve which library governs this source's auto-update: its recorded
+      // origin if that origin still offers the key, else the first offering
+      // library (covers sideloaded/legacy installs and single-library users).
+      String? updateLibraryId;
+      if (prov.originId != null &&
+          (catalogByLibrary[prov.originId]?.containsKey(source.key) ?? false)) {
+        updateLibraryId = prov.originId;
+      } else if (ids != null && ids.isNotEmpty) {
+        updateLibraryId = ids.first;
+      }
+
       if (ids != null) {
-        // Refresh discovery provenance, preserving the sticky origin id.
-        final prov = manager.provenanceFor(source.key) ?? SourceProvenance();
         prov.libraryIds = ids;
-        prov.updateLibraryId = winnerLibrary[source.key];
+        prov.updateLibraryId = updateLibraryId;
         provenanceUpdates[source.key] = prov;
       }
-      // Cache the resolved download URL for every known source so a manual
-      // single-source update also targets the winning library's address.
-      if (urls.containsKey(source.key)) {
-        manager.setUpdateUrl(source.key, urls[source.key]!);
+
+      if (updateLibraryId != null) {
+        final entry = catalogByLibrary[updateLibraryId]![source.key]!;
+        if (entry.url != null) {
+          manager.setUpdateUrl(source.key, entry.url!);
+        }
+        if (_isNewer(entry.version, source.version)) {
+          pending[source.key] = entry.version;
+        }
       }
-      if (versions.containsKey(source.key) &&
-          _isNewer(versions[source.key]!, source.version)) {
-        pending[source.key] = versions[source.key]!;
+
+      // Surface a newer version in any OTHER library only as a switch hint.
+      if (ids != null) {
+        for (final libId in ids) {
+          if (libId == updateLibraryId) continue;
+          final entry = catalogByLibrary[libId]?[source.key];
+          if (entry != null && _isNewer(entry.version, source.version)) {
+            newerElsewhere[source.key] = (
+              libraryId: libId,
+              version: entry.version,
+            );
+            break;
+          }
+        }
       }
     }
 
     ComicSourceLibraryManager.setProvenanceBatch(provenanceUpdates);
     manager.setNewerElsewhere(newerElsewhere);
-    // Full replace, not merge: a winner that is no longer offered (library
-    // removed/disabled) must drop out of the badge set.
+    // Full replace, not merge: a source whose origin library was removed or
+    // disabled must drop out of the badge set.
     manager.replaceAvailableUpdates(pending);
     return pending.length;
   }
@@ -907,14 +929,57 @@ class _SourceLibrariesPageState extends State<SourceLibrariesPage> {
   }
 
   void _editLibrary(ComicSourceLibrary library) {
-    showInputDialog(
-      context: context,
-      title: "Edit library".tl,
-      initialValue: library.name,
-      onConfirm: (value) {
-        ComicSourceLibraryManager.rename(library.id, value.trim());
-        _reload();
-        return null;
+    var name = library.name;
+    var url = library.url;
+    final nameController = TextEditingController(text: name);
+    final urlController = TextEditingController(text: url);
+    showDialog(
+      context: App.rootContext,
+      builder: (context) {
+        return ContentDialog(
+          title: "Edit library".tl,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: InputDecoration(
+                  labelText: "Library name".tl,
+                  border: const OutlineInputBorder(),
+                ),
+                onChanged: (v) => name = v,
+              ).paddingBottom(12),
+              TextField(
+                controller: urlController,
+                decoration: InputDecoration(
+                  labelText: "URL",
+                  hintText: "index.json",
+                  border: const OutlineInputBorder(),
+                ),
+                onChanged: (v) => url = v,
+              ),
+            ],
+          ).paddingHorizontal(16),
+          actions: [
+            FilledButton(
+              onPressed: () {
+                url = url.trim();
+                if (!url.isURL) {
+                  context.showMessage(message: "Invalid URL".tl);
+                  return;
+                }
+                ComicSourceLibraryManager.edit(
+                  library.id,
+                  name: name.trim(),
+                  url: url,
+                );
+                context.pop();
+                _reload();
+              },
+              child: Text("Confirm".tl),
+            ),
+          ],
+        );
       },
     );
   }
