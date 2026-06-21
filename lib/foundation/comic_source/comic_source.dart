@@ -7,6 +7,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
 import 'package:venera/foundation/app.dart';
+import 'package:venera/foundation/comic_source/source_library.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/history.dart';
 import 'package:venera/foundation/res.dart';
@@ -59,6 +60,7 @@ class ComicSourceManager with ChangeNotifier, Init {
   @protected
   Future<void> doInit() async {
     await JsEngine().ensureInit();
+    ComicSourceLibraryManager.migrateIfNeeded();
     final path = "${App.dataPath}/comic_source";
     if (!(await Directory(path).exists())) {
       await Directory(path).create(recursive: true);
@@ -91,10 +93,16 @@ class ComicSourceManager with ChangeNotifier, Init {
     notifyListeners();
   }
 
-  void add(ComicSource source) {
-    if (_addParsedSource(source, source.filePath)) {
+  /// Adds a parsed source. Returns false if a source with the same key is
+  /// already installed (the duplicate is rejected), so callers can clean up the
+  /// just-downloaded script and surface a message instead of silently
+  /// half-installing it.
+  bool add(ComicSource source) {
+    final added = _addParsedSource(source, source.filePath);
+    if (added) {
       notifyListeners();
     }
+    return added;
   }
 
   bool _addParsedSource(ComicSource source, String sourceName) {
@@ -137,9 +145,10 @@ class ComicSourceManager with ChangeNotifier, Init {
   void remove(String key) {
     _sources.removeWhere((element) => element.key == key);
     // Drop cached update state so a reinstalled source with the same key does
-    // not inherit a stale version badge or download URL.
+    // not inherit a stale version badge, download URL, or switch hint.
     _availableUpdates.remove(key);
     _updateUrls.remove(key);
+    _newerElsewhere.remove(key);
     notifyListeners();
   }
 
@@ -154,9 +163,31 @@ class ComicSourceManager with ChangeNotifier, Init {
   /// downloads at the new address instead of the dead old one.
   final _updateUrls = <String, String>{};
 
-  void updateAvailableUpdates(Map<String, String> updates) {
-    _availableUpdates.addAll(updates);
+  /// Replaces the entire pending-update set. Used by the multi-library check so
+  /// that a source whose update is no longer offered (origin library removed or
+  /// disabled, or it was just updated) does not linger as a stale badge.
+  void replaceAvailableUpdates(Map<String, String> updates) {
+    _availableUpdates
+      ..clear()
+      ..addAll(updates);
     notifyListeners();
+  }
+
+  /// Transient (never persisted) record of sources whose update-governing
+  /// library version is beaten by a DIFFERENT library offering the same key.
+  /// Drives a "newer version exists in another library" hint and the explicit
+  /// switch action; it never triggers an automatic update.
+  final _newerElsewhere = <String, ({String libraryId, String version})>{};
+
+  ({String libraryId, String version})? newerElsewhereFor(String key) =>
+      _newerElsewhere[key];
+
+  void setNewerElsewhere(
+    Map<String, ({String libraryId, String version})> data,
+  ) {
+    _newerElsewhere
+      ..clear()
+      ..addAll(data);
   }
 
   Map<String, String> get availableUpdates => Map.from(_availableUpdates);
@@ -175,6 +206,18 @@ class ComicSourceManager with ChangeNotifier, Init {
     if (hadUpdate) {
       notifyListeners();
     }
+  }
+
+  /// Origin/offering libraries for an installed source. Backed by the
+  /// device-local settings store (not synced), so it survives an update-reload
+  /// (which removes and re-adds the same key) and only clears on a genuine
+  /// uninstall.
+  SourceProvenance? provenanceFor(String key) =>
+      ComicSourceLibraryManager.provenanceFor(key);
+
+  void updateProvenance(String key, SourceProvenance provenance) {
+    ComicSourceLibraryManager.setProvenance(key, provenance);
+    notifyListeners();
   }
 
   void notifyStateChange() {
