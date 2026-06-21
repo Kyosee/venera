@@ -15,6 +15,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "2.1.0",
+          "buildVersion": "214",
+          "date": "2026-06-21",
+          "localizedDescription": "## What's Changed\n\n### Added\n- Multiple source libraries: subscribe to several catalogs at once and manage them on a dedicated page\n- Source library manager: add, edit, delete, reorder (priority), enable/disable, browse and install per library\n- Each installed source now shows which library it came from\n- Switch a source to another library's variant, with the offered version shown for each library before you confirm\n- Night mode can follow the system dark mode and toggle automatically\n- History and Read Later support swipe-to-delete\n\n### Changed\n- Reworked the comic source page and the home source card into a cleaner card / single-line layout\n- Source updates are now bound to the library a source was installed from, so a different maintainer's catalog can no longer push the wrong update\n- Comic import keeps running in the background\n- Follow-update checks keep running in the background and resume across restarts\n\n### Fixed\n- Fixed single-source update still downloading the old address after a source list migration\n- Improved the message when a source download address cannot be resolved, and avoided cached update checks\n- Fixed night mode color and intensity not being adjustable while following the system\n- Fixed an illegal setState during startup when syncing night mode\n\n**Full Changelog**: https://github.com/Kyosee/venera/compare/v2.0.12...v2.1.0",
+          "downloadURL": "https://github.com/Kyosee/venera/releases/download/v2.1.0/venera-ios-2.1.0%2B214.ipa",
+          "size": 16010103,
+          "minOSVersion": "14.0"
+        },
+        {
           "version": "2.0.12",
           "buildVersion": "213",
           "date": "2026-06-20",
@@ -33,11 +42,11 @@
           "minOSVersion": "14.0"
         }
       ],
-      "version": "2.0.12",
-      "versionDate": "2026-06-20",
-      "versionDescription": "## What's Changed\n\n### Added\n- iOS install via AltStore: the app is published as an AltStore source that auto-updates on every release\n- First-run disclaimer with a consent gate before the app can be used\n- Local comic export is now a resumable background task (pick a target folder, one file per comic)\n- Export option to merge a comic into a single package\n- Folder import now also accepts `.venera_comics`\n- Backup import now shows progress, runs in the background, and is hardened for large files\n- Web PWA: read-later support, aligned with the app\n\n### Changed\n- Android keeps downloads running in the background; Windows can minimize to the system tray\n\n### Fixed\n- Fixed a crash on the explore page when a multi-section page failed to load\n- Deleting an installed source now clears its saved login and data, so reinstalling starts clean without auto-login\n- Fixed wrong covers when batch-downloading comics\n- Fixed image favorites showing the wrong image (the cache key was missing the page)\n- Fixed read-later write/import crashes caused by legacy database tables\n- Fixed a backup list/download crash for backups named with a millisecond timestamp\n- Hardened the background download keep-alive notification refresh\n- Fixed the Windows tray switch needing a restart to take effect\n- Web PWA: fixed continuous-reader chapter reload, title sync and arrow-key scrolling, history/read-later detail resolution, card labels, and resume-to-last-page\n\n### Build / CI\n- Added the AltStore source manifest with a generator script and tests; releases now refresh it automatically\n- Fixed the Linux release build failing to package after the new tray feature, by installing the ayatana appindicator dependency in CI\n- Updated the disclaimer wording in README\n\n**Full Changelog**: https://github.com/Kyosee/venera/compare/v2.0.11...v2.0.12",
-      "downloadURL": "https://github.com/Kyosee/venera/releases/download/v2.0.12/venera-ios-2.0.12%2B213.ipa",
-      "size": 15947379
+      "version": "2.1.0",
+      "versionDate": "2026-06-21",
+      "versionDescription": "## What's Changed\n\n### Added\n- Multiple source libraries: subscribe to several catalogs at once and manage them on a dedicated page\n- Source library manager: add, edit, delete, reorder (priority), enable/disable, browse and install per library\n- Each installed source now shows which library it came from\n- Switch a source to another library's variant, with the offered version shown for each library before you confirm\n- Night mode can follow the system dark mode and toggle automatically\n- History and Read Later support swipe-to-delete\n\n### Changed\n- Reworked the comic source page and the home source card into a cleaner card / single-line layout\n- Source updates are now bound to the library a source was installed from, so a different maintainer's catalog can no longer push the wrong update\n- Comic import keeps running in the background\n- Follow-update checks keep running in the background and resume across restarts\n\n### Fixed\n- Fixed single-source update still downloading the old address after a source list migration\n- Improved the message when a source download address cannot be resolved, and avoided cached update checks\n- Fixed night mode color and intensity not being adjustable while following the system\n- Fixed an illegal setState during startup when syncing night mode\n\n**Full Changelog**: https://github.com/Kyosee/venera/compare/v2.0.12...v2.1.0",
+      "downloadURL": "https://github.com/Kyosee/venera/releases/download/v2.1.0/venera-ios-2.1.0%2B214.ipa",
+      "size": 16010103
     }
   ],
   "news": []
