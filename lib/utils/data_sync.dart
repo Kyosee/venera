@@ -446,7 +446,7 @@ class DataSync with ChangeNotifier {
 
           taskManager.updateTask(task.id, currentPhase: 'Applying', progress: 0.6);
 
-          await importAppData(localFile);
+          await importAppData(localFile, checkVersion: true);
           if (!_hasCompletedInitialSync()) {
             _markInitialSyncCompleted();
           }

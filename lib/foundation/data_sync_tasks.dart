@@ -137,42 +137,58 @@ class DataSyncTaskManager with ChangeNotifier {
     String? fileName,
     int? fileSize,
   }) {
-    final task = _tasks.firstWhere((t) => t.id == id, orElse: () => _tasks.first);
-    if (progress != null) task.progress = progress;
-    if (currentPhase != null) task.currentPhase = currentPhase;
-    if (fileName != null) task.fileName = fileName;
-    if (fileSize != null) task.fileSize = fileSize;
-    notifyListeners();
+    try {
+      final task = _tasks.firstWhere((t) => t.id == id);
+      if (progress != null) task.progress = progress;
+      if (currentPhase != null) task.currentPhase = currentPhase;
+      if (fileName != null) task.fileName = fileName;
+      if (fileSize != null) task.fileSize = fileSize;
+      notifyListeners();
+    } catch (e) {
+      // Task not found, ignore
+    }
   }
 
   /// Mark a task as completed.
   void completeTask(String id, {String? fileName}) {
-    final task = _tasks.firstWhere((t) => t.id == id, orElse: () => _tasks.first);
-    task.status = DataSyncTaskStatus.completed;
-    task.finishedAt = DateTime.now();
-    task.progress = 1.0;
-    if (fileName != null) task.fileName = fileName;
-    _persist();
-    notifyListeners();
+    try {
+      final task = _tasks.firstWhere((t) => t.id == id);
+      task.status = DataSyncTaskStatus.completed;
+      task.finishedAt = DateTime.now();
+      task.progress = 1.0;
+      if (fileName != null) task.fileName = fileName;
+      _persist();
+      notifyListeners();
+    } catch (e) {
+      // Task not found, ignore
+    }
   }
 
   /// Mark a task as failed.
   void failTask(String id, String error) {
-    final task = _tasks.firstWhere((t) => t.id == id, orElse: () => _tasks.first);
-    task.status = DataSyncTaskStatus.failed;
-    task.finishedAt = DateTime.now();
-    task.error = error;
-    _persist();
-    notifyListeners();
+    try {
+      final task = _tasks.firstWhere((t) => t.id == id);
+      task.status = DataSyncTaskStatus.failed;
+      task.finishedAt = DateTime.now();
+      task.error = error;
+      _persist();
+      notifyListeners();
+    } catch (e) {
+      // Task not found, ignore
+    }
   }
 
   /// Mark a task as canceled.
   void cancelTask(String id) {
-    final task = _tasks.firstWhere((t) => t.id == id, orElse: () => _tasks.first);
-    task.status = DataSyncTaskStatus.canceled;
-    task.finishedAt = DateTime.now();
-    _persist();
-    notifyListeners();
+    try {
+      final task = _tasks.firstWhere((t) => t.id == id);
+      task.status = DataSyncTaskStatus.canceled;
+      task.finishedAt = DateTime.now();
+      _persist();
+      notifyListeners();
+    } catch (e) {
+      // Task not found, ignore
+    }
   }
 
   /// Remove a task from history.
