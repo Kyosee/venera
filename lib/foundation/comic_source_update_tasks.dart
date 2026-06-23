@@ -290,4 +290,11 @@ class ComicSourceUpdateTaskManager with ChangeNotifier {
     _saveHistory();
     notifyListeners();
   }
+
+  /// Remove a single history task
+  void removeTask(String id) {
+    historyTasks.removeWhere((t) => t.id == id);
+    _saveHistory();
+    notifyListeners();
+  }
 }

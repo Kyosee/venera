@@ -500,4 +500,11 @@ class ExportTaskManager with ChangeNotifier {
     _persist();
     notifyListeners();
   }
+
+  /// Remove a single history task
+  void removeTask(String id) {
+    historyTasks.removeWhere((t) => t.id == id);
+    _persist();
+    notifyListeners();
+  }
 }

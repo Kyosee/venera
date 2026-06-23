@@ -368,6 +368,13 @@ class FollowUpdateTaskManager with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Remove a single history task
+  void removeTask(String id) {
+    historyTasks.removeWhere((t) => t.id == id);
+    _saveHistory();
+    notifyListeners();
+  }
+
   /// Restore tasks that were still running at last shutdown. They are marked
   /// running on disk; [resumePendingTasks] picks them up after init.
   void _loadActiveTasks() {

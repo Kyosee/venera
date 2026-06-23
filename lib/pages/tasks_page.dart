@@ -21,7 +21,7 @@ class TasksPage extends StatefulWidget {
   State<TasksPage> createState() => _TasksPageState();
 }
 
-class _TasksPageState extends State<TasksPage> {
+class _TasksPageState extends State<TasksPage> with SingleTickerProviderStateMixin {
   final followUpdateManager = FollowUpdateTaskManager.instance;
   final historyRefreshManager = HistoryRefreshTaskManager.instance;
   final relatedSourceManager = RelatedSourceTaskManager.instance;
@@ -31,9 +31,15 @@ class _TasksPageState extends State<TasksPage> {
   final exportManager = ExportTaskManager.instance;
   final dataSyncManager = DataSyncTaskManager.instance;
 
+  late TabController _tabController;
+
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      if (mounted) setState(() {});
+    });
     followUpdateManager.addListener(update);
     historyRefreshManager.addListener(update);
     relatedSourceManager.addListener(update);
@@ -46,6 +52,7 @@ class _TasksPageState extends State<TasksPage> {
 
   @override
   void dispose() {
+    _tabController.dispose();
     followUpdateManager.removeListener(update);
     historyRefreshManager.removeListener(update);
     relatedSourceManager.removeListener(update);
@@ -104,8 +111,45 @@ class _TasksPageState extends State<TasksPage> {
     );
   }
 
-  void _removeDataSyncTask(DataSyncTask task) {
-    dataSyncManager.removeTask(task.id);
+  /// Remove task by type and id
+  void _removeTask(String taskType, String id) {
+    switch (taskType) {
+      case 'data_sync_upload':
+      case 'data_sync_download':
+        dataSyncManager.removeTask(id);
+      case 'follow_update':
+        followUpdateManager.removeTask(id);
+      case 'history_refresh':
+        historyRefreshManager.removeTask(id);
+      case 'related_source':
+        relatedSourceManager.removeTask(id);
+      case 'source_migration':
+        sourceMigrationManager.removeTask(id);
+      case 'comic_source_update':
+        comicSourceUpdateManager.removeTask(id);
+      case 'import':
+        importManager.removeTask(id);
+      case 'export':
+        exportManager.removeTask(id);
+    }
+  }
+
+  /// Wrap history task card with Dismissible for swipe-to-delete
+  Widget _wrapHistoryCard(Widget card, String taskType, String taskId, bool isRunning) {
+    if (isRunning) return card;
+
+    return Dismissible(
+      key: Key('${taskType}_$taskId'),
+      direction: DismissDirection.endToStart,
+      onDismissed: (_) => _removeTask(taskType, taskId),
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 16),
+        color: context.colorScheme.errorContainer,
+        child: Icon(Icons.delete_outline, color: context.colorScheme.onErrorContainer),
+      ),
+      child: card,
+    );
   }
 
   /// Wrap icon with rotation animation for running tasks
@@ -120,20 +164,21 @@ class _TasksPageState extends State<TasksPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: Appbar(title: Text("Tasks".tl)),
-      body: DefaultTabController(
-        length: 2,
-        child: Column(
-          children: [
-            Material(
-              child: Stack(
-                alignment: Alignment.centerRight,
-                children: [
-                  AppTabBar(
-                    tabs: [
-                      Tab(text: "Current".tl),
-                      Tab(text: "History".tl),
-                    ],
-                  ),
+      body: Column(
+        children: [
+          Material(
+            child: Stack(
+              alignment: Alignment.centerRight,
+              children: [
+                AppTabBar(
+                  controller: _tabController,
+                  tabs: [
+                    Tab(text: "Current".tl),
+                    Tab(text: "History".tl),
+                  ],
+                ),
+                // 只在历史标签显示清空按钮
+                if (_tabController.index == 1)
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: IconButton(
@@ -142,16 +187,16 @@ class _TasksPageState extends State<TasksPage> {
                       onPressed: _hasHistoryTasks() ? _clearAllHistory : null,
                     ),
                   ),
-                ],
-              ),
+              ],
             ),
-            Expanded(
-              child: TabBarView(
-                children: [buildCurrentTasks(), buildHistoryTasks()],
-              ),
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [buildCurrentTasks(), buildHistoryTasks()],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -378,7 +423,7 @@ class _TasksPageState extends State<TasksPage> {
     var progressText = task.total == 0
         ? "0%"
         : "${(task.progress * 100).clamp(0, 100).toStringAsFixed(0)}%";
-    return Card(
+    final card = Card(
       elevation: 0,
       color: context.colorScheme.surface,
       margin: const EdgeInsets.only(bottom: 8),
@@ -422,6 +467,8 @@ class _TasksPageState extends State<TasksPage> {
         ],
       ),
     );
+
+    return _wrapHistoryCard(card, 'follow_update', task.id, task.isRunning);
   }
 
   Widget buildHistoryRefreshTaskCard(
@@ -431,7 +478,7 @@ class _TasksPageState extends State<TasksPage> {
     var progressText = task.total == 0
         ? "0%"
         : "${(task.progress * 100).clamp(0, 100).toStringAsFixed(0)}%";
-    return Card(
+    final card = Card(
       elevation: 0,
       color: context.colorScheme.surface,
       margin: const EdgeInsets.only(bottom: 8),
@@ -467,6 +514,8 @@ class _TasksPageState extends State<TasksPage> {
         ],
       ),
     );
+
+    return _wrapHistoryCard(card, 'history_refresh', task.id, task.isRunning);
   }
 
   Widget buildRelatedSourceTaskCard(
@@ -476,7 +525,7 @@ class _TasksPageState extends State<TasksPage> {
     var progressText = task.total == 0
         ? "0%"
         : "${(task.progress * 100).clamp(0, 100).toStringAsFixed(0)}%";
-    return Card(
+    final card = Card(
       elevation: 0,
       color: context.colorScheme.surface,
       margin: const EdgeInsets.only(bottom: 8),
@@ -527,6 +576,8 @@ class _TasksPageState extends State<TasksPage> {
         ],
       ),
     );
+
+    return _wrapHistoryCard(card, 'related_source', task.id, task.isRunning);
   }
 
   Widget buildSourceMigrationTaskCard(
@@ -536,7 +587,7 @@ class _TasksPageState extends State<TasksPage> {
     var progressText = task.total == 0
         ? "0%"
         : "${(task.progress * 100).clamp(0, 100).toStringAsFixed(0)}%";
-    return Card(
+    final card = Card(
       elevation: 0,
       color: context.colorScheme.surface,
       margin: const EdgeInsets.only(bottom: 8),
@@ -588,6 +639,8 @@ class _TasksPageState extends State<TasksPage> {
         ],
       ),
     );
+
+    return _wrapHistoryCard(card, 'source_migration', task.id, task.isRunning);
   }
 
   Widget buildComicSourceUpdateTaskCard(
@@ -597,7 +650,7 @@ class _TasksPageState extends State<TasksPage> {
     var progressText = task.total == 0
         ? "0%"
         : "${(task.progress * 100).clamp(0, 100).toStringAsFixed(0)}%";
-    return Card(
+    final card = Card(
       elevation: 0,
       color: context.colorScheme.surface,
       margin: const EdgeInsets.only(bottom: 8),
@@ -637,6 +690,8 @@ class _TasksPageState extends State<TasksPage> {
         ],
       ),
     );
+
+    return _wrapHistoryCard(card, 'comic_source_update', task.id, task.isRunning);
   }
 
   Widget buildFollowUpdateSummary(FollowUpdateTask task) {
@@ -945,7 +1000,7 @@ class _TasksPageState extends State<TasksPage> {
   }
 
   Widget buildImportTaskCard(ImportTask task, {required bool expanded}) {
-    return Card(
+    final card = Card(
       elevation: 0,
       color: context.colorScheme.surface,
       margin: const EdgeInsets.only(bottom: 8),
@@ -984,6 +1039,8 @@ class _TasksPageState extends State<TasksPage> {
         ],
       ),
     );
+
+    return _wrapHistoryCard(card, 'import', task.id, task.isRunning);
   }
 
   String importStatusText(ImportTask task) {
@@ -1047,7 +1104,7 @@ class _TasksPageState extends State<TasksPage> {
     var progressText = task.total == 0
         ? "0%"
         : "${(task.progress * 100).clamp(0, 100).toStringAsFixed(0)}%";
-    return Card(
+    final card = Card(
       elevation: 0,
       color: context.colorScheme.surface,
       margin: const EdgeInsets.only(bottom: 8),
@@ -1106,6 +1163,8 @@ class _TasksPageState extends State<TasksPage> {
         ],
       ),
     );
+
+    return _wrapHistoryCard(card, 'export', task.id, task.isRunning);
   }
 
   String exportStatusText(ExportTask task) {
@@ -1297,23 +1356,7 @@ class _TasksPageState extends State<TasksPage> {
       ),
     );
 
-    // 历史任务支持左滑删除
-    if (!task.isRunning) {
-      return Dismissible(
-        key: Key('datasync_${task.id}'),
-        direction: DismissDirection.endToStart,
-        onDismissed: (_) => _removeDataSyncTask(task),
-        background: Container(
-          alignment: Alignment.centerRight,
-          padding: const EdgeInsets.only(right: 16),
-          color: context.colorScheme.errorContainer,
-          child: Icon(Icons.delete_outline, color: context.colorScheme.onErrorContainer),
-        ),
-        child: card,
-      );
-    }
-
-    return card;
+    return _wrapHistoryCard(card, taskType, task.id, task.isRunning);
   }
 
   String dataSyncStatusText(DataSyncTask task) {
