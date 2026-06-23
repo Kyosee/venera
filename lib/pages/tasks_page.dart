@@ -72,7 +72,7 @@ class _TasksPageState extends State<TasksPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text("Clear History".tl),
-        content: Text("Delete all task history?".tl),
+        content: Text("Delete all WebDAV sync task history?".tl),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -97,16 +97,7 @@ class _TasksPageState extends State<TasksPage> {
   /// Wrap icon with rotation animation for running tasks
   Widget _wrapIconWithRotation(IconData icon, bool isRunning, String? status) {
     if (isRunning && status != 'paused') {
-      return TweenAnimationBuilder<double>(
-        tween: Tween(begin: 0, end: 1),
-        duration: const Duration(seconds: 2),
-        builder: (context, value, child) => Transform.rotate(
-          angle: value * 2 * 3.14159,
-          child: child,
-        ),
-        onEnd: () => setState(() {}), // Loop
-        child: Icon(icon),
-      );
+      return _RotatingIcon(icon: icon);
     }
     return Icon(icon);
   }
@@ -1365,6 +1356,43 @@ class _TasksPageState extends State<TasksPage> {
           ),
         ],
       ],
+    );
+  }
+}
+
+/// Rotating icon widget with proper animation controller
+class _RotatingIcon extends StatefulWidget {
+  final IconData icon;
+  const _RotatingIcon({required this.icon});
+
+  @override
+  State<_RotatingIcon> createState() => _RotatingIconState();
+}
+
+class _RotatingIconState extends State<_RotatingIcon>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(seconds: 2),
+      vsync: this,
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RotationTransition(
+      turns: _controller,
+      child: Icon(widget.icon),
     );
   }
 }
