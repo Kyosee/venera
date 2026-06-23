@@ -516,6 +516,13 @@ class SourceMigrationTaskManager with ChangeNotifier {
         .toList();
     appdata.writeImplicitData();
   }
+
+  /// Clear all history tasks
+  void clearHistory() {
+    historyTasks.clear();
+    _saveHistory();
+    notifyListeners();
+  }
 }
 
 FavoriteItem favoriteItemFromComic(Comic comic) {

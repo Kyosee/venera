@@ -493,4 +493,11 @@ class ExportTaskManager with ChangeNotifier {
             ));
     }
   }
+
+  /// Clear all history tasks
+  void clearHistory() {
+    historyTasks.clear();
+    _persist();
+    notifyListeners();
+  }
 }

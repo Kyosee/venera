@@ -283,4 +283,11 @@ class ComicSourceUpdateTaskManager with ChangeNotifier {
         .toList();
     appdata.writeImplicitData();
   }
+
+  /// Clear all history tasks
+  void clearHistory() {
+    historyTasks.clear();
+    _saveHistory();
+    notifyListeners();
+  }
 }

@@ -361,6 +361,13 @@ class FollowUpdateTaskManager with ChangeNotifier {
     appdata.writeImplicitData();
   }
 
+  /// Clear all history tasks
+  void clearHistory() {
+    historyTasks.clear();
+    _saveHistory();
+    notifyListeners();
+  }
+
   /// Restore tasks that were still running at last shutdown. They are marked
   /// running on disk; [resumePendingTasks] picks them up after init.
   void _loadActiveTasks() {

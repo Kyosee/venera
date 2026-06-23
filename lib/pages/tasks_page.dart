@@ -64,7 +64,14 @@ class _TasksPageState extends State<TasksPage> {
   }
 
   bool _hasHistoryTasks() {
-    return dataSyncManager.historyTasks.isNotEmpty;
+    return dataSyncManager.historyTasks.isNotEmpty ||
+        followUpdateManager.historyTasks.isNotEmpty ||
+        historyRefreshManager.historyTasks.isNotEmpty ||
+        relatedSourceManager.historyTasks.isNotEmpty ||
+        sourceMigrationManager.historyTasks.isNotEmpty ||
+        comicSourceUpdateManager.historyTasks.isNotEmpty ||
+        importManager.historyTasks.isNotEmpty ||
+        exportManager.historyTasks.isNotEmpty;
   }
 
   void _clearAllHistory() {
@@ -72,7 +79,7 @@ class _TasksPageState extends State<TasksPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text("Clear History".tl),
-        content: Text("Delete all WebDAV sync task history?".tl),
+        content: Text("Delete all task history?".tl),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -81,6 +88,13 @@ class _TasksPageState extends State<TasksPage> {
           TextButton(
             onPressed: () {
               dataSyncManager.clearHistory();
+              followUpdateManager.clearHistory();
+              historyRefreshManager.clearHistory();
+              relatedSourceManager.clearHistory();
+              sourceMigrationManager.clearHistory();
+              comicSourceUpdateManager.clearHistory();
+              importManager.clearHistory();
+              exportManager.clearHistory();
               Navigator.pop(context);
             },
             child: Text("Delete".tl),
