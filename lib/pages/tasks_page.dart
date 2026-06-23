@@ -63,6 +63,54 @@ class _TasksPageState extends State<TasksPage> {
     }
   }
 
+  bool _hasHistoryTasks() {
+    return dataSyncManager.historyTasks.isNotEmpty;
+  }
+
+  void _clearAllHistory() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text("Clear History".tl),
+        content: Text("Delete all task history?".tl),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text("Cancel".tl),
+          ),
+          TextButton(
+            onPressed: () {
+              dataSyncManager.clearHistory();
+              Navigator.pop(context);
+            },
+            child: Text("Delete".tl),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _removeDataSyncTask(DataSyncTask task) {
+    dataSyncManager.removeTask(task.id);
+  }
+
+  /// Wrap icon with rotation animation for running tasks
+  Widget _wrapIconWithRotation(IconData icon, bool isRunning, String? status) {
+    if (isRunning && status != 'paused') {
+      return TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: 1),
+        duration: const Duration(seconds: 2),
+        builder: (context, value, child) => Transform.rotate(
+          angle: value * 2 * 3.14159,
+          child: child,
+        ),
+        onEnd: () => setState(() {}), // Loop
+        child: Icon(icon),
+      );
+    }
+    return Icon(icon);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -72,10 +120,23 @@ class _TasksPageState extends State<TasksPage> {
         child: Column(
           children: [
             Material(
-              child: AppTabBar(
-                tabs: [
-                  Tab(text: "Current".tl),
-                  Tab(text: "History".tl),
+              child: Stack(
+                alignment: Alignment.centerRight,
+                children: [
+                  AppTabBar(
+                    tabs: [
+                      Tab(text: "Current".tl),
+                      Tab(text: "History".tl),
+                    ],
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: IconButton(
+                      icon: const Icon(Icons.delete_sweep),
+                      tooltip: "Clear History".tl,
+                      onPressed: _hasHistoryTasks() ? _clearAllHistory : null,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -318,8 +379,10 @@ class _TasksPageState extends State<TasksPage> {
       margin: const EdgeInsets.only(bottom: 8),
       child: ExpansionTile(
         initiallyExpanded: expanded,
-        leading: Icon(
+        leading: _wrapIconWithRotation(
           getTaskIcon('follow_update', task.isRunning, status: task.status.name),
+          task.isRunning,
+          task.status.name,
         ),
         title: Text(
           getTaskTitle('follow_update', {'folder': task.folder}),
@@ -369,8 +432,10 @@ class _TasksPageState extends State<TasksPage> {
       margin: const EdgeInsets.only(bottom: 8),
       child: ExpansionTile(
         initiallyExpanded: expanded,
-        leading: Icon(
+        leading: _wrapIconWithRotation(
           getTaskIcon('history_refresh', task.isRunning, status: task.status.name),
+          task.isRunning,
+          task.status.name,
         ),
         title: Text(getTaskTitle('history_refresh', {})),
         subtitle: buildTaskSubtitle(
@@ -412,8 +477,10 @@ class _TasksPageState extends State<TasksPage> {
       margin: const EdgeInsets.only(bottom: 8),
       child: ExpansionTile(
         initiallyExpanded: expanded,
-        leading: Icon(
+        leading: _wrapIconWithRotation(
           getTaskIcon('related_source', task.isRunning, status: task.status.name),
+          task.isRunning,
+          task.status.name,
         ),
         title: Text(
           getTaskTitle('related_source', {'folder': task.folder}),
@@ -470,8 +537,10 @@ class _TasksPageState extends State<TasksPage> {
       margin: const EdgeInsets.only(bottom: 8),
       child: ExpansionTile(
         initiallyExpanded: expanded,
-        leading: Icon(
+        leading: _wrapIconWithRotation(
           getTaskIcon('source_migration', task.isRunning, status: task.status.name),
+          task.isRunning,
+          task.status.name,
         ),
         title: Text(
           getTaskTitle('source_migration', {'folder': task.folder}),
@@ -529,8 +598,10 @@ class _TasksPageState extends State<TasksPage> {
       margin: const EdgeInsets.only(bottom: 8),
       child: ExpansionTile(
         initiallyExpanded: expanded,
-        leading: Icon(
+        leading: _wrapIconWithRotation(
           getTaskIcon('comic_source_update', task.isRunning, status: task.status.name),
+          task.isRunning,
+          task.status.name,
         ),
         title: Text(
           getTaskTitle('comic_source_update', {}),
@@ -875,8 +946,10 @@ class _TasksPageState extends State<TasksPage> {
       margin: const EdgeInsets.only(bottom: 8),
       child: ExpansionTile(
         initiallyExpanded: expanded,
-        leading: Icon(
+        leading: _wrapIconWithRotation(
           getTaskIcon('import', task.isRunning, status: task.status.name),
+          task.isRunning,
+          task.status.name,
         ),
         title: Text(
           getTaskTitle('import', {'file': task.fileName}),
@@ -975,8 +1048,10 @@ class _TasksPageState extends State<TasksPage> {
       margin: const EdgeInsets.only(bottom: 8),
       child: ExpansionTile(
         initiallyExpanded: expanded,
-        leading: Icon(
+        leading: _wrapIconWithRotation(
           getTaskIcon('export', task.isActive, status: task.status.name),
+          task.isActive,
+          task.status.name,
         ),
         title: Text(
           getTaskTitle('export', {}),
@@ -1177,14 +1252,17 @@ class _TasksPageState extends State<TasksPage> {
     final taskType = task.type == DataSyncTaskType.upload
         ? 'data_sync_upload'
         : 'data_sync_download';
-    return Card(
+
+    final card = Card(
       elevation: 0,
       color: context.colorScheme.surface,
       margin: const EdgeInsets.only(bottom: 8),
       child: ExpansionTile(
         initiallyExpanded: expanded,
-        leading: Icon(
+        leading: _wrapIconWithRotation(
           getTaskIcon(taskType, task.isRunning, status: task.status.name),
+          task.isRunning,
+          task.status.name,
         ),
         title: Text(
           getTaskTitle(taskType, {}),
@@ -1213,6 +1291,24 @@ class _TasksPageState extends State<TasksPage> {
         ],
       ),
     );
+
+    // 历史任务支持左滑删除
+    if (!task.isRunning) {
+      return Dismissible(
+        key: Key('datasync_${task.id}'),
+        direction: DismissDirection.endToStart,
+        onDismissed: (_) => _removeDataSyncTask(task),
+        background: Container(
+          alignment: Alignment.centerRight,
+          padding: const EdgeInsets.only(right: 16),
+          color: context.colorScheme.errorContainer,
+          child: Icon(Icons.delete_outline, color: context.colorScheme.onErrorContainer),
+        ),
+        child: card,
+      );
+    }
+
+    return card;
   }
 
   String dataSyncStatusText(DataSyncTask task) {
