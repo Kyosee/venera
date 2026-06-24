@@ -131,17 +131,19 @@ abstract class ImageDownloader {
     String imageKey,
     String? sourceKey,
     String cid,
-    String eid,
-  ) {
-    return _loadComicImage(imageKey, sourceKey, cid, eid);
+    String eid, {
+    bool forDownload = false,
+  }) {
+    return _loadComicImage(imageKey, sourceKey, cid, eid, forDownload);
   }
 
   static Stream<ImageDownloadProgress> _loadComicImage(
     String imageKey,
     String? sourceKey,
     String cid,
-    String eid,
-  ) async* {
+    String eid, [
+    bool forDownload = false,
+  ]) async* {
     final cacheKey = "$imageKey@$sourceKey@$cid@$eid";
     final cache = await CacheManager().findCache(cacheKey);
 
@@ -152,6 +154,10 @@ abstract class ImageDownloader {
         totalBytes: data.length,
         imageBytes: data,
       );
+      // A download reuses an already-cached image instead of re-fetching it,
+      // and never re-caches (avoids double-writing the bytes to disk and
+      // evicting the reader's prefetch cache) — see #4 / #17.
+      if (forDownload) return;
     }
 
     Future<Map<String, dynamic>?> Function()? onLoadFailed;
@@ -240,7 +246,9 @@ abstract class ImageDownloader {
           data = newData;
         }
 
-        await CacheManager().writeCache(cacheKey, data);
+        if (!forDownload) {
+          await CacheManager().writeCache(cacheKey, data);
+        }
         yield ImageDownloadProgress(
           currentBytes: data.length,
           totalBytes: data.length,

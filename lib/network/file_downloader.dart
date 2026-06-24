@@ -17,7 +17,13 @@ class FileDownloader {
 
   int _lastBytes = 0;
 
-  late int _fileSize;
+  int _fileSize = 0;
+
+  /// Whether the server supports HTTP range requests for this URL. When false
+  /// the file is fetched in a single sequential stream instead of parallel
+  /// blocks (B9: avoids corrupting non-range servers / silently "succeeding"
+  /// with an empty file when the size is unknown).
+  bool _useRanges = true;
 
   final _dio = Dio();
 
@@ -29,9 +35,21 @@ class FileDownloader {
 
   bool _canceled = false;
 
-  late List<_DownloadBlock> _blocks;
+  List<_DownloadBlock> _blocks = [];
 
-  Future<void> _writeStatus() async {
+  DateTime? _lastStatusWriteAt;
+
+  /// Persist block progress for resume. Throttled to ~1s (force on completion)
+  /// so a large download doesn't rewrite the status file on every 16KB flush
+  /// (#5).
+  Future<void> _writeStatus({bool force = false}) async {
+    final now = DateTime.now();
+    if (!force &&
+        _lastStatusWriteAt != null &&
+        now.difference(_lastStatusWriteAt!) < const Duration(seconds: 1)) {
+      return;
+    }
+    _lastStatusWriteAt = now;
     var file = File("$savePath.download");
     await file.writeAsString(_blocks.map((e) => e.toString()).join("\n"));
   }
@@ -65,9 +83,24 @@ class FileDownloader {
   }
 
   Future<void> _createTasks() async {
-    var res = await _dio.head(url);
-    var length = res.headers["content-length"]?.first;
-    _fileSize = length == null ? 0 : int.parse(length);
+    _fileSize = 0;
+    var ranged = false;
+    try {
+      var res = await _dio.head(url);
+      var length = res.headers["content-length"]?.first;
+      _fileSize = length == null ? 0 : (int.tryParse(length) ?? 0);
+      var acceptRanges = res.headers["accept-ranges"]?.first;
+      ranged = acceptRanges?.toLowerCase() == "bytes";
+    } catch (_) {
+      // HEAD not supported by the server; fall back to a single stream below.
+    }
+
+    // Need both a known size and explicit range support to split into blocks.
+    // Otherwise download sequentially (handled by _download).
+    _useRanges = _fileSize > 0 && ranged;
+    if (!_useRanges) {
+      return;
+    }
 
     await _prepareFile();
 
@@ -114,24 +147,24 @@ class FileDownloader {
         },
       );
 
-      // get file size
+      // determine file size + range support
       await _createTasks();
 
       if (_canceled) return;
 
-      // check if file is downloaded
-      if (_currentBytes >= _fileSize) {
+      // Range path: the file may already be fully downloaded (resume).
+      if (_useRanges && _file != null && _currentBytes >= _fileSize) {
         await _file!.close();
         _file = null;
-        _reportStatus(resultStream);
+        resultStream.add(DownloadingStatus(_currentBytes, _fileSize, 0, true));
         resultStream.close();
         return;
       }
 
       _reportStatus(resultStream);
 
-      Timer.periodic(const Duration(seconds: 1), (timer) {
-        if (_canceled || _currentBytes >= _fileSize) {
+      var timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (_canceled || (_fileSize > 0 && _currentBytes >= _fileSize)) {
           timer.cancel();
           return;
         }
@@ -140,22 +173,35 @@ class FileDownloader {
         _lastBytes = _currentBytes;
       });
 
-      // start downloading
-      await _scheduleDownload();
+      // download the body
+      if (_useRanges) {
+        await _scheduleDownload();
+      } else {
+        await _downloadSingleStreamBody();
+      }
+      timer.cancel();
+
       if (_canceled) {
         resultStream.close();
         return;
       }
-      await _file!.close();
+      await _file?.close();
       _file = null;
-      await File("$savePath.download").delete();
+      try {
+        await File("$savePath.download").delete();
+      } catch (_) {}
 
-      // check if download is finished
-      if (_currentBytes < _fileSize) {
+      // For a known size, verify completeness; an unknown size trusts the
+      // stream's natural end.
+      if (_fileSize > 0 && _currentBytes < _fileSize) {
         resultStream
             .addError(Exception("Download failed: Expected $_fileSize bytes, "
                 "but only $_currentBytes bytes downloaded."));
         resultStream.close();
+        return;
+      }
+      if (_fileSize == 0) {
+        _fileSize = _currentBytes;
       }
 
       resultStream.add(DownloadingStatus(_currentBytes, _fileSize, 0, true));
@@ -214,15 +260,30 @@ class FileDownloader {
     if (res.data == null) {
       throw Exception("Failed to block $start-$end");
     }
+    // If the server ignored the Range header (200 OK with the full body) while
+    // we are writing multiple blocks at different offsets, the file would be
+    // corrupted. Bail out clearly instead (B9).
+    if (res.statusCode == 200 && _blocks.length > 1) {
+      throw Exception("Server ignored range request (got 200): $url");
+    }
 
     var buffer = <int>[];
     await for (var data in res.data!.stream) {
       if (_canceled) return;
       buffer.addAll(data);
       if (buffer.length > 16 * 1024) {
-        if (_isWriting) continue;
-        _currentBytes += buffer.length;
+        // Overlap network reads with the other block's write while the buffer
+        // is small; once it grows large, apply back-pressure instead of letting
+        // it balloon (#5).
+        if (_isWriting && buffer.length < 8 * 1024 * 1024) {
+          continue;
+        }
+        while (_isWriting) {
+          if (_canceled) return;
+          await Future.delayed(const Duration(milliseconds: 5));
+        }
         _isWriting = true;
+        _currentBytes += buffer.length;
         await _file!.setPosition(start + block.downloadedBytes);
         await _file!.writeFrom(buffer);
         block.downloadedBytes += buffer.length;
@@ -241,11 +302,42 @@ class FileDownloader {
       await _file!.setPosition(start + block.downloadedBytes);
       await _file!.writeFrom(buffer);
       block.downloadedBytes += buffer.length;
-      await _writeStatus();
+      await _writeStatus(force: true);
       _isWriting = false;
     }
 
     block.downloading = false;
+  }
+
+  /// Sequentially fetch the whole file in a single stream — used when the
+  /// server doesn't support range requests (B9).
+  Future<void> _downloadSingleStreamBody() async {
+    var file = File(savePath);
+    if (await file.exists()) {
+      await file.delete();
+    }
+    await file.create(recursive: true);
+    _file = await file.open(mode: FileMode.write);
+
+    var res = await _dio.get<ResponseBody>(
+      url,
+      options: Options(
+        responseType: ResponseType.stream,
+        headers: {"Accept": "*/*"},
+      ),
+    );
+    if (res.data == null) {
+      throw Exception("Failed to download $url");
+    }
+    if (_fileSize == 0) {
+      var len = res.headers.value("content-length");
+      _fileSize = len == null ? 0 : (int.tryParse(len) ?? 0);
+    }
+    await for (var data in res.data!.stream) {
+      if (_canceled) return;
+      await _file!.writeFrom(data);
+      _currentBytes += data.length;
+    }
   }
 
   Future<void> stop() async {

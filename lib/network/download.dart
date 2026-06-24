@@ -746,7 +746,8 @@ class _ImageDownloadWrapper {
     int lastBytes = 0;
     try {
       await for (var p in ImageDownloader.loadComicImageUnwrapped(
-          image, task.source.key, task.comicId, chapter)) {
+          image, task.source.key, task.comicId, chapter,
+          forDownload: true)) {
         if (isCancelled) {
           _notifyWaiters();
           return;
