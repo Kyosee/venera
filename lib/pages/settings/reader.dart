@@ -308,43 +308,6 @@ class _ReaderSettingsState extends State<ReaderSettings> {
                   isEnabledSpecificSettings ? widget.comicSource : null,
               useDeviceSettings: useDeviceSpecificSettings,
             ),
-            _SwitchSetting(
-              title: 'Double tap to zoom'.tl,
-              settingKey: 'enableDoubleTapToZoom',
-              onChanged: () {
-                setState(() {});
-                widget.onChanged?.call('enableDoubleTapToZoom');
-              },
-              comicId: isEnabledSpecificSettings ? widget.comicId : null,
-              comicSource:
-                  isEnabledSpecificSettings ? widget.comicSource : null,
-              useDeviceSettings: useDeviceSpecificSettings,
-            ),
-            _SwitchSetting(
-              title: 'Long press to zoom'.tl,
-              settingKey: 'enableLongPressToZoom',
-              onChanged: () {
-                setState(() {});
-                widget.onChanged?.call('enableLongPressToZoom');
-              },
-              comicId: isEnabledSpecificSettings ? widget.comicId : null,
-              comicSource:
-                  isEnabledSpecificSettings ? widget.comicSource : null,
-              useDeviceSettings: useDeviceSpecificSettings,
-            ),
-            if (appdata.settings['enableLongPressToZoom'] == true)
-              SelectSetting(
-                title: "Long press zoom position".tl,
-                settingKey: "longPressZoomPosition",
-                optionTranslation: {
-                  "press": "Press position".tl,
-                  "center": "Screen center".tl,
-                },
-                comicId: isEnabledSpecificSettings ? widget.comicId : null,
-                comicSource:
-                    isEnabledSpecificSettings ? widget.comicSource : null,
-                useDeviceSettings: useDeviceSpecificSettings,
-              ),
             if (App.isAndroid)
               _SwitchSetting(
                 title: 'Turn page by volume keys'.tl,
@@ -454,6 +417,51 @@ class _ReaderSettingsState extends State<ReaderSettings> {
                   isEnabledSpecificSettings ? widget.comicSource : null,
               useDeviceSettings: useDeviceSpecificSettings,
             ),
+          ],
+        ).toSliver(),
+        ExpansionTile(
+          key: const PageStorageKey('readerGestureGroup'),
+          tilePadding: const EdgeInsets.symmetric(horizontal: 16),
+          childrenPadding: const EdgeInsets.only(bottom: 8),
+          title: Text("Gesture settings".tl),
+          children: [
+            _SwitchSetting(
+              title: 'Double tap to zoom'.tl,
+              settingKey: 'enableDoubleTapToZoom',
+              onChanged: () {
+                setState(() {});
+                widget.onChanged?.call('enableDoubleTapToZoom');
+              },
+              comicId: isEnabledSpecificSettings ? widget.comicId : null,
+              comicSource:
+                  isEnabledSpecificSettings ? widget.comicSource : null,
+              useDeviceSettings: useDeviceSpecificSettings,
+            ),
+            _SwitchSetting(
+              title: 'Long press to zoom'.tl,
+              settingKey: 'enableLongPressToZoom',
+              onChanged: () {
+                setState(() {});
+                widget.onChanged?.call('enableLongPressToZoom');
+              },
+              comicId: isEnabledSpecificSettings ? widget.comicId : null,
+              comicSource:
+                  isEnabledSpecificSettings ? widget.comicSource : null,
+              useDeviceSettings: useDeviceSpecificSettings,
+            ),
+            if (appdata.settings['enableLongPressToZoom'] == true)
+              SelectSetting(
+                title: "Long press zoom position".tl,
+                settingKey: "longPressZoomPosition",
+                optionTranslation: {
+                  "press": "Press position".tl,
+                  "center": "Screen center".tl,
+                },
+                comicId: isEnabledSpecificSettings ? widget.comicId : null,
+                comicSource:
+                    isEnabledSpecificSettings ? widget.comicSource : null,
+                useDeviceSettings: useDeviceSpecificSettings,
+              ),
           ],
         ).toSliver(),
         ExpansionTile(
