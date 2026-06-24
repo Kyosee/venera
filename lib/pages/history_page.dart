@@ -5,11 +5,17 @@ import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/history.dart';
 import 'package:venera/foundation/history_tasks.dart';
+import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/read_later.dart';
 import 'package:venera/pages/favorites/favorites_page.dart';
+import 'package:venera/utils/ext.dart';
 import 'package:venera/utils/translations.dart';
 
 const _historyReadFilterList = ['All', 'UnCompleted', 'Completed'];
+
+/// Above this row count, history is loaded in a background isolate so entering
+/// the page doesn't jank the navigation transition. See history.dart.
+const _asyncHistoryLimit = 500;
 
 class HistoryPage extends StatefulWidget {
   const HistoryPage({super.key});
@@ -22,6 +28,15 @@ class _HistoryPageState extends State<HistoryPage> {
   @override
   void initState() {
     HistoryManager().addListener(onUpdate);
+    if (HistoryManager().length < _asyncHistoryLimit) {
+      // Small dataset: load synchronously now. It's cheap, doesn't jank the
+      // transition, and avoids a one-frame loading flash.
+      comics = HistoryManager().getAll();
+      isLoading = false;
+    } else {
+      // Large dataset: defer past the first frame and load off the UI thread.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _loadAsync());
+    }
     super.initState();
   }
 
@@ -32,9 +47,34 @@ class _HistoryPageState extends State<HistoryPage> {
     super.dispose();
   }
 
+  void _loadAsync() async {
+    if (!mounted) return;
+    setState(() => isLoading = true);
+    try {
+      final value = await HistoryManager()
+          .getAllAsync()
+          .minTime(const Duration(milliseconds: 200));
+      if (!mounted) return;
+      setState(() {
+        comics = value;
+        isLoading = false;
+      });
+    } catch (e, s) {
+      Log.error("History", "async load failed: $e", s);
+      if (!mounted) return;
+      // Don't get stuck on the spinner: fall back to a synchronous load
+      // (getAll has its own corruption guard and returns [] on failure).
+      setState(() {
+        comics = HistoryManager().getAll();
+        isLoading = false;
+      });
+    }
+  }
+
   void onUpdate() {
     setState(() {
       comics = HistoryManager().getAll();
+      isLoading = false;
       if (multiSelectMode) {
         selectedComics.removeWhere((comic, _) => !comics.contains(comic));
         if (selectedComics.isEmpty) {
@@ -44,7 +84,8 @@ class _HistoryPageState extends State<HistoryPage> {
     });
   }
 
-  var comics = HistoryManager().getAll();
+  List<History> comics = [];
+  bool isLoading = true;
   var controller = FlyoutController();
   var searchTextController = TextEditingController();
   var keyword = "";
@@ -502,7 +543,12 @@ class _HistoryPageState extends State<HistoryPage> {
                   ),
                 ),
               ),
-            if (filteredComics.isEmpty)
+            if (isLoading && comics.isEmpty)
+              const SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (filteredComics.isEmpty)
               SliverFillRemaining(
                 hasScrollBody: false,
                 child: Center(

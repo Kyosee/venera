@@ -1716,11 +1716,11 @@ class LocalFavoritesManager with ChangeNotifier {
         .toList();
   }
 
-  List<FavoriteItemWithUpdateInfo> getComicsWithUpdatesInfo(String folder) {
-    if (!existsFolder(folder)) {
-      return [];
-    }
-    var res = _db.select("""
+  static List<FavoriteItemWithUpdateInfo> _queryComicsWithUpdatesInfo(
+    String folder,
+    CommonDatabase db,
+  ) {
+    var res = db.select("""
       select * from "$folder";
     """);
     return res
@@ -1733,6 +1733,36 @@ class LocalFavoritesManager with ChangeNotifier {
           ),
         )
         .toList();
+  }
+
+  List<FavoriteItemWithUpdateInfo> getComicsWithUpdatesInfo(String folder) {
+    if (!existsFolder(folder)) {
+      return [];
+    }
+    return _queryComicsWithUpdatesInfo(folder, _db);
+  }
+
+  static Future<List<FavoriteItemWithUpdateInfo>> _getComicsWithUpdatesInfoAsync(
+    String folder,
+    String dbPath,
+  ) {
+    return Isolate.run(() {
+      return withDatabase(
+        dbPath,
+        (db) async => _queryComicsWithUpdatesInfo(folder, db),
+      );
+    });
+  }
+
+  /// Same as [getComicsWithUpdatesInfo] but runs the query + row mapping in a
+  /// background isolate so a large folder doesn't jank the UI thread.
+  Future<List<FavoriteItemWithUpdateInfo>> getComicsWithUpdatesInfoAsync(
+    String folder,
+  ) {
+    if (!existsFolder(folder)) {
+      return Future.value(const []);
+    }
+    return _getComicsWithUpdatesInfoAsync(folder, _dbPath);
   }
 
   FavoriteItemWithUpdateInfo? getComicWithUpdatesInfo(

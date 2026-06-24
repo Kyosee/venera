@@ -572,18 +572,37 @@ class HistoryManager with ChangeNotifier {
     }
   }
 
-  List<History> getAll() {
-    if (!isInitialized || _isCorrupted) return [];
-    try {
-      var res = _db.select("""
+  static List<History> _queryAllHistory(CommonDatabase db) {
+    var res = db.select("""
       select * from history
       order by time DESC;
     """);
-      return res.map((element) => History.fromRow(element)).toList();
+    return res.map((element) => History.fromRow(element)).toList();
+  }
+
+  List<History> getAll() {
+    if (!isInitialized || _isCorrupted) return [];
+    try {
+      return _queryAllHistory(_db);
     } on SqliteException catch (e) {
       _handleCorruption(e);
       return [];
     }
+  }
+
+  static Future<List<History>> _getAllHistoryAsync(String dbPath) {
+    // Runs in a separate isolate. Only [dbPath] (a String) is captured, never
+    // `this` — the manager holds a live DB handle that can't cross isolates.
+    return Isolate.run(() {
+      return withDatabase(dbPath, (db) async => _queryAllHistory(db));
+    });
+  }
+
+  /// Load all history in a background isolate, keeping the UI thread free when
+  /// the table is large. Falls back to an empty list if not ready.
+  Future<List<History>> getAllAsync() {
+    if (!isInitialized || _isCorrupted) return Future.value(const []);
+    return _getAllHistoryAsync(_dbPath);
   }
 
   /// 获取最近阅读的漫画

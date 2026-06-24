@@ -12,6 +12,12 @@ import 'package:venera/utils/data_sync.dart';
 import 'package:venera/utils/translations.dart';
 import '../foundation/global_state.dart';
 import 'package:venera/foundation/history.dart';
+import 'package:venera/foundation/log.dart';
+import 'package:venera/utils/ext.dart';
+
+/// Above this row count, the followed folder is loaded in a background isolate
+/// so opening the page doesn't jank the transition. See favorites.dart.
+const _asyncDataFetchLimit = 500;
 
 class FollowUpdatesWidget extends StatefulWidget {
   const FollowUpdatesWidget({super.key});
@@ -138,7 +144,9 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
   String? get folder => appdata.settings["followUpdatesFolder"];
 
   var updatedComics = <FavoriteItemWithUpdateInfo>[];
+  var completedComics = <FavoriteItemWithUpdateInfo>[];
   var allComics = <FavoriteItemWithUpdateInfo>[];
+  bool isLoading = false;
 
   /// Sort comics by update time in descending order with nulls at the end.
   void sortComics() {
@@ -168,11 +176,67 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
   @override
   void initState() {
     super.initState();
-    if (folder != null) {
-      allComics = LocalFavoritesManager().getComicsWithUpdatesInfo(folder!);
-      sortComics();
-      updatedComics = allComics.where((c) => c.hasNewUpdate == true).toList();
+    final f = folder;
+    if (f != null &&
+        LocalFavoritesManager().folderComics(f) >= _asyncDataFetchLimit) {
+      // Large folder: defer + load off the UI thread so the page-push
+      // transition isn't blocked. A spinner shows until it's ready.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _loadAsync(f));
+    } else {
+      // Small (or unconfigured): load synchronously now — cheap, no flash.
+      _loadSync();
     }
+  }
+
+  /// Recompute the cached tab lists from [allComics]. `updated` (has-new-update)
+  /// and `completed` (comic status) only change when the folder data reloads, so
+  /// they're cached here. `completed` is the expensive filter (status lookup per
+  /// item); caching it is the main win. `unread` depends on read history (changes
+  /// whenever the user reads a comic), so it is NOT cached — it's recomputed in
+  /// build(), where each lookup is O(1) via the history-id cache.
+  void _recomputeDerived() {
+    updatedComics = allComics.where((c) => c.hasNewUpdate == true).toList();
+    completedComics = allComics.where(_isReadCompleted).toList();
+  }
+
+  /// Synchronously (re)load the followed folder and refresh derived lists.
+  /// Safe inside initState (assigns fields only); wrap in setState elsewhere.
+  void _loadSync() {
+    final f = folder;
+    if (f == null) {
+      allComics = [];
+    } else {
+      allComics = LocalFavoritesManager().getComicsWithUpdatesInfo(f);
+      sortComics();
+    }
+    _recomputeDerived();
+  }
+
+  /// Load folder [f] off the UI thread. Always clears [isLoading] when done —
+  /// on success, on error (falls back to a sync load), and if the user switched
+  /// folders mid-load (drops the stale result and resyncs to the current one).
+  void _loadAsync(String f) async {
+    if (!mounted) return;
+    setState(() => isLoading = true);
+    List<FavoriteItemWithUpdateInfo>? value;
+    try {
+      value = await LocalFavoritesManager()
+          .getComicsWithUpdatesInfoAsync(f)
+          .minTime(const Duration(milliseconds: 200));
+    } catch (e, s) {
+      Log.error("FollowUpdates", "async load failed: $e", s);
+    }
+    if (!mounted) return;
+    if (folder != f) {
+      _loadSync();
+    } else if (value != null) {
+      allComics = value;
+      sortComics();
+      _recomputeDerived();
+    } else {
+      _loadSync();
+    }
+    setState(() => isLoading = false);
   }
 
   @override
@@ -181,6 +245,8 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
       appBar: Appbar(title: Text('Follow Updates'.tl)),
       body: folder == null
           ? SmoothCustomScrollView(slivers: [buildNotConfigured(context)])
+          : (isLoading && allComics.isEmpty)
+          ? const Center(child: CircularProgressIndicator())
           : buildConfiguredTabs(context),
     );
   }
@@ -252,8 +318,10 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
   }
 
   Widget buildConfiguredTabs(BuildContext context) {
+    // `unread` is read-history-dependent (cheap O(1) lookups), so compute it
+    // live here rather than caching, to stay correct after the user reads a
+    // comic. `updated`/`completed` come from the cached fields.
     final unreadComics = allComics.where(_isUnread).toList();
-    final completedComics = allComics.where(_isReadCompleted).toList();
     return DefaultTabController(
       length: 3,
       child: Column(
@@ -290,9 +358,11 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
   }
 
   bool _isReadCompleted(FavoriteItemWithUpdateInfo comic) {
+    // Use the tags-only status (no DB lookups): this runs over the whole folder
+    // (hundreds of comics) on the UI thread right after the load, so the heavy
+    // displayInfoFor() here was the main source of the entry stutter.
     final status = const ComicStateRepository()
-        .displayInfoFor(comic)
-        .status
+        .quickStatusFor(comic)
         ?.trim()
         .toLowerCase();
     if (status == null || status.isEmpty) {
@@ -593,9 +663,7 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
       }
       setState(() {
         appdata.settings["followUpdatesFolder"] = folder;
-        updatedComics = [];
-        allComics = LocalFavoritesManager().getComicsWithUpdatesInfo(folder);
-        sortComics();
+        _loadSync();
       });
       // Persist the folder choice locally without triggering a sync upload:
       // this is a local config change, and uploading here could push a
@@ -672,18 +740,7 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
   }
 
   void updateComics() {
-    if (folder == null) {
-      setState(() {
-        allComics = [];
-        updatedComics = [];
-      });
-      return;
-    }
-    setState(() {
-      allComics = LocalFavoritesManager().getComicsWithUpdatesInfo(folder!);
-      sortComics();
-      updatedComics = allComics.where((c) => c.hasNewUpdate == true).toList();
-    });
+    setState(_loadSync);
   }
 
   @override

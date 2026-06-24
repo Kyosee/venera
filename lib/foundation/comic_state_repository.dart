@@ -281,6 +281,15 @@ class ComicStateRepository {
     );
   }
 
+  /// Cheap, tags-only comic status — does NO database lookups, unlike
+  /// [displayInfoFor]. [displayInfoFor] aggregates status across the domain DB,
+  /// favorites and local library (several queries per comic): fine for a single
+  /// visible tile, but catastrophic in a bulk filter over hundreds of comics
+  /// (e.g. the follow-updates "Ended" tab). Bulk callers that only need the
+  /// status string should use this instead.
+  String? quickStatusFor(Comic comic) =>
+      _ComicMetadata.statusFromTags(comic.tags);
+
   List<DomainComicSourceLink> relatedSourcesFor(Comic comic) {
     if (!_domainReady) {
       return const <DomainComicSourceLink>[];
