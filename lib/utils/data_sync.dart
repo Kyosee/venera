@@ -13,6 +13,7 @@ import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/res.dart';
 import 'package:venera/network/app_dio_io.dart';
 import 'package:venera/foundation/local.dart';
+import 'package:venera/init.dart' show deferredInitCompleter;
 import 'package:venera/utils/data.dart';
 import 'package:venera/utils/ext.dart';
 import 'package:venera/utils/venera_comics.dart';
@@ -25,7 +26,7 @@ import 'io.dart';
 class DataSync with ChangeNotifier {
   DataSync._() {
     if (isEnabled) {
-      downloadData();
+      _runStartupDownload();
     }
     LocalFavoritesManager().addListener(onDataChanged);
     ComicSourceManager().addListener(onDataChanged);
@@ -36,6 +37,27 @@ class DataSync with ChangeNotifier {
         controller.addCloseListener(_handleWindowClose);
       });
     }
+  }
+
+  /// Runs the initial WebDAV download, but only after heavy initialization has
+  /// finished. [downloadData] may import a backup, and [importAppData] closes
+  /// and swaps the favorites/history/local/domain SQLite files. Running that
+  /// concurrently with `App.initComponents()` (which is still opening those very
+  /// databases) raced into a native use-after-close crash on iOS that repeated
+  /// on every launch — the imported backup is only "committed" (dataVersion
+  /// advanced) after a successful import, so a crash mid-import re-downloaded and
+  /// re-crashed forever. Waiting for init to settle first removes that race; the
+  /// swap itself is also atomic against live UI reads (see `_replaceDatabaseFile`
+  /// in data.dart), so the import is safe once the app is up.
+  void _runStartupDownload() async {
+    // The timeout is a safety net for environments that never complete
+    // deferredInitCompleter — notably the `--headless` CLI, which runs its own
+    // explicit sync and exits without calling initDeferred(); without it this
+    // fire-and-forget future would dangle unresolved.
+    try {
+      await deferredInitCompleter.future.timeout(const Duration(seconds: 60));
+    } catch (_) {}
+    downloadData();
   }
 
   static String _platformTag() {

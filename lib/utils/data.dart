@@ -352,7 +352,15 @@ Future<File> exportAppData([bool sync = true]) async {
 /// `history.db` (and its `-wal`/`-shm` sidecars) can stay locked for a few
 /// milliseconds, causing `deleteSync` to fail with errno 32 ("another process
 /// is using this file"). A short retry loop resolves this race deterministically.
-Future<void> _deleteFileWithRetry(String path) async {
+///
+/// Synchronous on purpose: it runs inside the atomic close→replace→reopen
+/// section of [importAppData], which must not yield the event loop. An awaited
+/// gap there would let a UI query touch the just-disposed database handle and
+/// crash the process natively (this was the iOS startup WebDAV-sync crash). On
+/// iOS/Android/Linux/macOS `deleteSync` never blocks; the retry only ever trips
+/// on Windows, where the synchronous `sleep` rides out the handle-release race
+/// while keeping the swap a single uninterruptible step.
+void _deleteFileWithRetry(String path) {
   final file = File(path);
   if (!file.existsSync()) return;
   for (var attempt = 0; ; attempt++) {
@@ -361,18 +369,20 @@ Future<void> _deleteFileWithRetry(String path) async {
       return;
     } on FileSystemException {
       if (attempt >= 10) rethrow;
-      await Future.delayed(const Duration(milliseconds: 50));
+      sleep(const Duration(milliseconds: 50));
     }
   }
 }
 
 /// Replaces a live sqlite database file with [newFile], handling the WAL
 /// sidecars and the Windows handle-release race. The owning manager must be
-/// closed before calling this and re-initialized afterwards.
-Future<void> _replaceDatabaseFile(File newFile, String targetPath) async {
-  await _deleteFileWithRetry(targetPath);
-  await _deleteFileWithRetry('$targetPath-wal');
-  await _deleteFileWithRetry('$targetPath-shm');
+/// closed immediately before calling this and re-initialized immediately
+/// afterwards with NO `await` in between — the whole close→replace→reopen
+/// sequence must stay synchronous so no UI query can hit the disposed handle.
+void _replaceDatabaseFile(File newFile, String targetPath) {
+  _deleteFileWithRetry(targetPath);
+  _deleteFileWithRetry('$targetPath-wal');
+  _deleteFileWithRetry('$targetPath-shm');
   newFile.renameSync(targetPath);
 }
 
@@ -460,7 +470,7 @@ Future<void> importAppData(
     if (await historyFile.exists()) {
       report(ImportPhase.applying, 'Importing history');
       HistoryManager().close();
-      await _replaceDatabaseFile(
+      _replaceDatabaseFile(
         historyFile,
         FilePath.join(App.dataPath, "history.db"),
       );
@@ -469,7 +479,7 @@ Future<void> importAppData(
     if (await localFavoriteFile.exists()) {
       report(ImportPhase.applying, 'Importing favorites');
       LocalFavoritesManager().close();
-      await _replaceDatabaseFile(
+      _replaceDatabaseFile(
         localFavoriteFile,
         FilePath.join(App.dataPath, "local_favorite.db"),
       );
@@ -483,7 +493,7 @@ Future<void> importAppData(
       );
       domainDir.createSync(recursive: true);
       final target = DomainDatabase.databasePathFor(App.dataPath);
-      await _replaceDatabaseFile(domainFile, target);
+      _replaceDatabaseFile(domainFile, target);
       await App.domain.init(App.dataPath);
     }
     if (await appdataFile.exists()) {
@@ -513,7 +523,7 @@ Future<void> importAppData(
     if (await cookieFile.exists()) {
       report(ImportPhase.applying, 'Importing settings');
       SingleInstanceCookieJar.instance?.dispose();
-      await _replaceDatabaseFile(
+      _replaceDatabaseFile(
         cookieFile,
         FilePath.join(App.dataPath, "cookie.db"),
       );
@@ -525,7 +535,7 @@ Future<void> importAppData(
     if (await readLaterFile.exists()) {
       report(ImportPhase.applying, 'Importing read later');
       App.readLater.close();
-      await _replaceDatabaseFile(
+      _replaceDatabaseFile(
         readLaterFile,
         FilePath.join(App.dataPath, "read_later.db"),
       );
@@ -535,7 +545,7 @@ Future<void> importAppData(
     if (await localDbFile.exists()) {
       report(ImportPhase.applying, 'Importing local library');
       LocalManager().close();
-      await _replaceDatabaseFile(
+      _replaceDatabaseFile(
         localDbFile,
         FilePath.join(App.dataPath, "local.db"),
       );
