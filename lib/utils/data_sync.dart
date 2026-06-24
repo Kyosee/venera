@@ -50,6 +50,17 @@ class DataSync with ChangeNotifier {
   static const _syncLogKey = 'sync_logs';
   static const _maxSyncLogs = 100;
 
+  /// Overall request timeout for WebDAV sync operations. rhttp only enforces a
+  /// connect timeout by default, so without this a connected-but-stalled socket
+  /// (which iOS routinely produces when the network state changes) would hang
+  /// the request forever — leaving [_isDownloading]/[_isUploading] stuck and
+  /// every later sync busy-waiting until the user toggles the network. Bounding
+  /// the request lets it fail cleanly and the state reset on its own.
+  static const _syncRequestTimeout = Duration(seconds: 120);
+
+  /// Image-pack transfers move whole comic archives, so they get a longer bound.
+  static const _imageSyncRequestTimeout = Duration(minutes: 5);
+
   void _addSyncLog(String action, String? fileName, bool success, String? error) {
     var logs = (appdata.implicitData[_syncLogKey] as List?) ?? [];
     logs.insert(0, {
@@ -304,7 +315,7 @@ class DataSync with ChangeNotifier {
         url,
         user: user,
         password: pass,
-        adapter: RHttpAdapter(),
+        adapter: RHttpAdapter(timeout: _syncRequestTimeout),
       );
 
       File? data;
@@ -408,7 +419,7 @@ class DataSync with ChangeNotifier {
         url,
         user: user,
         password: pass,
-        adapter: RHttpAdapter(),
+        adapter: RHttpAdapter(timeout: _syncRequestTimeout),
       );
 
       try {
@@ -490,7 +501,7 @@ class DataSync with ChangeNotifier {
     String user = config[1];
     String pass = config[2];
     try {
-      var client = newClient(url, user: user, password: pass, adapter: RHttpAdapter());
+      var client = newClient(url, user: user, password: pass, adapter: RHttpAdapter(timeout: _syncRequestTimeout));
       var files = await client.readDir('/');
       var file = _latestBackup(files, (e) => e.name);
       if (file == null) {
@@ -513,7 +524,7 @@ class DataSync with ChangeNotifier {
     String user = config[1];
     String pass = config[2];
     try {
-      var client = newClient(url, user: user, password: pass, adapter: RHttpAdapter());
+      var client = newClient(url, user: user, password: pass, adapter: RHttpAdapter(timeout: _syncRequestTimeout));
       var files = await client.readDir('/');
       var backups = <RemoteBackupInfo>[];
       for (var f in files) {
@@ -543,7 +554,7 @@ class DataSync with ChangeNotifier {
       String url = config[0];
       String user = config[1];
       String pass = config[2];
-      var client = newClient(url, user: user, password: pass, adapter: RHttpAdapter());
+      var client = newClient(url, user: user, password: pass, adapter: RHttpAdapter(timeout: _syncRequestTimeout));
       try {
         var files = await client.readDir('/');
         var latest = _latestBackup(files, (e) => e.name);
@@ -613,7 +624,7 @@ class DataSync with ChangeNotifier {
         url,
         user: user,
         password: pass,
-        adapter: RHttpAdapter(),
+        adapter: RHttpAdapter(timeout: _imageSyncRequestTimeout),
       );
 
       await _ensureComicsDir(client);

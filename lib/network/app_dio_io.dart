@@ -84,16 +84,23 @@ rhttp.ClientSettings buildRhttpClientSettings({
   required Object? dnsOverrides,
   required bool sni,
   required bool verifyCertificates,
+  Duration? timeout,
 }) {
   return rhttp.ClientSettings(
     proxySettings: proxy == null
         ? const rhttp.ProxySettings.noProxy()
         : rhttp.ProxySettings.proxy(proxy),
     redirectSettings: const rhttp.RedirectSettings.limited(5),
-    timeoutSettings: const rhttp.TimeoutSettings(
-      connectTimeout: Duration(seconds: 15),
-      keepAliveTimeout: Duration(seconds: 60),
-      keepAlivePing: Duration(seconds: 30),
+    // `connectTimeout` only bounds connection establishment; `timeout` bounds
+    // the whole request. Without the latter, a connected-but-stalled socket
+    // (e.g. an iOS LAN socket left half-open after a network-state change) hangs
+    // forever. Callers needing a hard ceiling (WebDAV sync) pass one in; null
+    // keeps the previous unbounded behavior for long streaming image reads.
+    timeoutSettings: rhttp.TimeoutSettings(
+      timeout: timeout,
+      connectTimeout: const Duration(seconds: 15),
+      keepAliveTimeout: const Duration(seconds: 60),
+      keepAlivePing: const Duration(seconds: 30),
     ),
     throwOnStatusCode: false,
     dnsSettings: rhttp.DnsSettings.static(
@@ -110,9 +117,14 @@ rhttp.ClientSettings buildRhttpClientSettings({
 }
 
 class RHttpAdapter implements HttpClientAdapter {
-  RHttpAdapter({this.enableProxy = true});
+  RHttpAdapter({this.enableProxy = true, this.timeout});
 
   final bool enableProxy;
+
+  /// Optional overall request timeout. Null (the default for the app-wide
+  /// adapter) leaves requests bounded only by the connect timeout, preserving
+  /// the existing behavior for long streaming image reads.
+  final Duration? timeout;
 
   Future<rhttp.ClientSettings> get settings async {
     final proxy = enableProxy ? await getProxy() : null;
@@ -122,6 +134,7 @@ class RHttpAdapter implements HttpClientAdapter {
       dnsOverrides: appdata.settings['dnsOverrides'],
       sni: appdata.settings['sni'] != false,
       verifyCertificates: appdata.settings['ignoreBadCertificate'] != true,
+      timeout: timeout,
     );
   }
 
