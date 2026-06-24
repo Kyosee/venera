@@ -47,6 +47,8 @@
 	<true/>
 	<key>NSPhotoLibraryUsageDescription</key>
   <string>Choose images</string>
+	<key>NSCameraUsageDescription</key>
+  <string>Scan a QR code to import sync configuration.</string>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>

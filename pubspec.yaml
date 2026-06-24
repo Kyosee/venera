@@ -89,6 +89,8 @@ dependencies:
   archive: any
   tray_manager: ^0.5.3
   flutter_slidable: ^4.0.0
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^5.2.3
 
 dev_dependencies:
   flutter_test:

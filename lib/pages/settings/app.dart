@@ -520,6 +520,45 @@ class _WebdavSettingState extends State<_WebdavSetting> {
     });
   }
 
+  /// Shows the current config as a PIN-encrypted QR code for another device to
+  /// scan. Available on every platform (the "generate" side, incl. desktop).
+  void _showConfigQr() {
+    if (url.trim().isEmpty || user.trim().isEmpty || pass.isEmpty) {
+      context.showMessage(
+        message: "Fill in URL, username and password first".tl,
+      );
+      return;
+    }
+    showSyncConfigQrDialog(
+      context,
+      SyncConfigPayload(
+        url: url.trim(),
+        user: user.trim(),
+        pass: pass,
+        autoSync: autoSync,
+        disableSyncFields: disableSync,
+      ),
+    );
+  }
+
+  /// Scans another device's QR code and fills the form with the recovered
+  /// config (the user still taps Save to apply). Mobile only — the button is
+  /// hidden on desktop.
+  void _scanConfigQr() async {
+    final payload = await scanAndDecodeSyncConfig(context);
+    if (payload == null || !mounted) return;
+    setState(() {
+      url = payload.url;
+      user = payload.user;
+      pass = payload.pass;
+      autoSync = payload.autoSync;
+      disableSync = payload.disableSyncFields;
+    });
+    context.showMessage(
+      message: "Sync config imported. Tap Save to apply.".tl,
+    );
+  }
+
   void _showRemoteBackupList(BuildContext context) async {
     // The settings page lives inside the nested navigator created by
     // showPopUpWidget, but showDialog pushes onto the ROOT navigator by
@@ -675,6 +714,52 @@ class _WebdavSettingState extends State<_WebdavSetting> {
               ),
               controller: TextEditingController(text: disableSync),
               onChanged: (value) => disableSync = value,
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: Button.outlined(
+                    onPressed: _showConfigQr,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.qr_code_2, size: 18),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            "Show Config QR".tl,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (App.isAndroid || App.isIOS) ...[
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Button.outlined(
+                      onPressed: _scanConfigQr,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.qr_code_scanner, size: 18),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              "Scan to Import".tl,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
             const SizedBox(height: 12),
             ListTile(

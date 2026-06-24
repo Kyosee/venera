@@ -21,10 +21,12 @@ import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/tray.dart';
 import 'package:venera/network/app_dio.dart';
 import 'package:venera/pages/disclaimer.dart';
+import 'package:venera/pages/settings/sync_config_qr.dart';
 import 'package:venera/utils/data.dart';
 import 'package:venera/utils/data_sync.dart';
 import 'package:venera/utils/io.dart';
 import 'package:venera/utils/platform_abi.dart';
+import 'package:venera/utils/sync_config_transfer.dart';
 import 'package:venera/utils/translations.dart';
 
 part 'reader.dart';
