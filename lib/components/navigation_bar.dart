@@ -350,10 +350,14 @@ class NaviPaneState extends State<NaviPane>
         ),
         child: Column(
           children: [
-            const SizedBox(height: 16),
+            // Align the logo block with the main view's search bar: mirror the
+            // search bar's top margin (8) and height (mobile 52 / desktop 46)
+            // so the logo's vertical center lines up with the search box across
+            // the divider. Keep these in sync with `_SearchBar` in home_page.dart.
+            const SizedBox(height: 8),
             SizedBox(height: MediaQuery.of(context).padding.top),
             SizedBox(
-              height: 48,
+              height: App.isMobile ? 52 : 46,
               child: Material(
                 color: Colors.transparent,
                 borderRadius: BorderRadius.circular(8),
