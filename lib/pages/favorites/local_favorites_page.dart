@@ -491,15 +491,29 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
   }
 
   void downloadSelected() {
-    int count = 0;
+    // Build the tasks first, then enqueue them in one batch so the queue is
+    // persisted a single time instead of once per comic (#17).
+    var tasks = <DownloadTask>[];
     for (var c in selectedComics.keys) {
-      if (downloadComic(c as FavoriteItem)) {
-        count++;
-      }
+      var fav = c as FavoriteItem;
+      var source = fav.type.comicSource;
+      if (source == null) continue;
+      if (LocalManager().isDownloading(fav.id, fav.type)) continue;
+      if (LocalManager().isDownloaded(fav.id, fav.type)) continue;
+      tasks.add(
+        ImagesDownloadTask(
+          source: source,
+          comicId: fav.id,
+          comicTitle: fav.title,
+        ),
+      );
     }
-    if (count > 0) {
+    if (tasks.isNotEmpty) {
+      LocalManager().addTasks(tasks);
       context.showMessage(
-        message: "Added @c comics to download queue.".tlParams({"c": count}),
+        message: "Added @c comics to download queue.".tlParams(
+          {"c": tasks.length},
+        ),
       );
     }
   }

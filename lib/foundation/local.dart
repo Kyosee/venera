@@ -939,6 +939,22 @@ class LocalManager with ChangeNotifier {
     _advanceQueue();
   }
 
+  /// Enqueue several tasks at once with a single persistence write and a single
+  /// queue advance, instead of paying both costs per comic. Used by batch
+  /// "download selected" so adding 50 comics doesn't trigger 50 full-list
+  /// serializations (#17).
+  void addTasks(Iterable<DownloadTask> tasks) {
+    var added = false;
+    for (final task in tasks) {
+      downloadingTasks.add(task);
+      added = true;
+    }
+    if (!added) return;
+    notifyListeners();
+    saveCurrentDownloadingTasks();
+    _advanceQueue();
+  }
+
   void deleteComic(LocalComic c, [bool removeFileOnDisk = true]) {
     if (removeFileOnDisk) {
       var dir = Directory(FilePath.join(path, c.directory));
