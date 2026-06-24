@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
 
@@ -369,6 +370,21 @@ class LocalManager with ChangeNotifier {
     _checkNoMedia();
     await ComicSourceManager().ensureInit();
     restoreDownloadingTasks();
+    // Defer auto-resume so a cold start (DB init, home page) isn't competing
+    // with download network/IO, and to steer clear of startup races in this
+    // historically crash-prone path. Tasks the user manually paused stay paused
+    // (wasRunning was persisted as false for them).
+    Future.delayed(const Duration(seconds: 3), _autoResumeDownloads);
+  }
+
+  /// Resume downloads that were genuinely running when the app was last closed.
+  /// Serial model: only the head task runs (Phase 3 generalizes to N parallel).
+  void _autoResumeDownloads() {
+    final first = downloadingTasks.firstOrNull;
+    if (first != null && first.wasRunning && !first.isError) {
+      first.resume();
+      DownloadKeepAlive.instance.refresh();
+    }
   }
 
   String findValidId(ComicType type) {
@@ -680,11 +696,64 @@ class LocalManager with ChangeNotifier {
     }
   }
 
+  Timer? _saveDebounce;
+  bool _isSavingTasks = false;
+  bool _saveTasksAgain = false;
+
+  /// Debounced, low-priority persistence for the high-frequency per-image
+  /// progress updates. Coalesces a burst of calls into at most one write per
+  /// ~1.5s instead of re-serializing the entire task list (including every
+  /// chapter's image-URL map) on every single image — see #1.
+  void scheduleSaveDownloadingTasks() {
+    _saveDebounce ??= Timer(const Duration(milliseconds: 1500), () {
+      _saveDebounce = null;
+      _flushDownloadingTasks();
+    });
+  }
+
+  /// Durable, immediate persistence for important transitions (add/remove/
+  /// complete/pause, chapter list fetched, etc.). Flushes any pending debounce.
   Future<void> saveCurrentDownloadingTasks() async {
-    var tasks = downloadingTasks.map((e) => e.toJson()).toList();
-    await File(
-      FilePath.join(App.dataPath, 'downloading_tasks.json'),
-    ).writeAsString(jsonEncode(tasks));
+    _saveDebounce?.cancel();
+    _saveDebounce = null;
+    await _flushDownloadingTasks();
+  }
+
+  /// Single-flight, atomic writer. Serializes all writes through one in-flight
+  /// operation (re-running once if more changes arrived meanwhile) so two
+  /// concurrent `writeAsString` calls can never interleave and corrupt
+  /// downloading_tasks.json — see B4. Writes to a temp file then renames.
+  Future<void> _flushDownloadingTasks() async {
+    if (_isSavingTasks) {
+      _saveTasksAgain = true;
+      return;
+    }
+    _isSavingTasks = true;
+    try {
+      final path = FilePath.join(App.dataPath, 'downloading_tasks.json');
+      final tmp = '$path.tmp';
+      do {
+        _saveTasksAgain = false;
+        final data = jsonEncode(downloadingTasks.map((e) => e.toJson()).toList());
+        final tmpFile = File(tmp);
+        await tmpFile.writeAsString(data, flush: true);
+        try {
+          // rename() does not overwrite an existing file on Windows, so remove
+          // the destination first. If the rename still fails (e.g. cross-device
+          // temp dir), fall back to a direct write.
+          final dest = File(path);
+          if (dest.existsSync()) dest.deleteSync();
+          tmpFile.renameSync(path);
+        } catch (_) {
+          await File(path).writeAsString(data, flush: true);
+          tmpFile.deleteIgnoreError();
+        }
+      } while (_saveTasksAgain);
+    } catch (e) {
+      Log.error("LocalManager", "Failed to save downloading tasks: $e");
+    } finally {
+      _isSavingTasks = false;
+    }
   }
 
   void restoreDownloadingTasks() {

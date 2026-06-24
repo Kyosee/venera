@@ -45,6 +45,11 @@ abstract class DownloadTask with ChangeNotifier {
   /// root path for the comic. If null, the task is not scheduled.
   String? path;
 
+  /// Whether the task was actively running when its state was last persisted.
+  /// Lets the queue auto-resume genuinely-interrupted downloads on restart
+  /// without reviving tasks the user had manually paused.
+  bool wasRunning = false;
+
   /// convert current state to json, which can be used to restore the task
   Map<String, dynamic> toJson();
 
@@ -58,6 +63,8 @@ abstract class DownloadTask with ChangeNotifier {
     switch (json["type"]) {
       case "ImagesDownloadTask":
         return ImagesDownloadTask.fromJson(json);
+      case "ArchiveDownloadTask":
+        return ArchiveDownloadTask.fromJson(json);
       default:
         return null;
     }
@@ -160,6 +167,9 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
     }
     stopRecorder();
     notifyListeners();
+    // Persist the paused state (wasRunning=false) so a manual pause is not
+    // auto-resumed on next launch.
+    LocalManager().saveCurrentDownloadingTasks();
   }
 
   @override
@@ -256,6 +266,9 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
     _isRunning = true;
     notifyListeners();
     runRecorder();
+    // Persist wasRunning=true promptly so an interrupted download auto-resumes
+    // on next launch even if it crashes before the first progress checkpoint.
+    LocalManager().saveCurrentDownloadingTasks();
 
     if (comic == null) {
       _message = "Fetching comic info...".tl;
@@ -492,7 +505,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
             "b": _index,
             "c": images.length,
           });
-          await LocalManager().saveCurrentDownloadingTasks();
+          LocalManager().scheduleSaveDownloadingTasks();
         }
         _index = 0;
         _chapter++;
@@ -514,7 +527,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
           _index++;
           _downloadedCount++;
           _message = "$_downloadedCount/$_totalCount";
-          await LocalManager().saveCurrentDownloadingTasks();
+          LocalManager().scheduleSaveDownloadingTasks();
         }
         _index = 0;
         _chapter++;
@@ -537,6 +550,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
     _message = message;
     notifyListeners();
     stopRecorder();
+    LocalManager().saveCurrentDownloadingTasks();
   }
 
   @override
@@ -561,6 +575,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
       "totalChapters": _totalChapters,
       "index": _index,
       "chapter": _chapter,
+      "wasRunning": _isRunning,
     };
   }
 
@@ -585,13 +600,14 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
       chapters: ListOrNull.from(json["chapters"]),
     )
       ..path = json["path"]
+      ..wasRunning = json["wasRunning"] ?? false
       .._cover = json["cover"]
       .._images = images
-      .._downloadedCount = json["downloadedCount"]
-      .._totalCount = json["totalCount"]
+      .._downloadedCount = json["downloadedCount"] ?? 0
+      .._totalCount = json["totalCount"] ?? 0
       .._totalChapters = json["totalChapters"] ?? 0
-      .._index = json["index"]
-      .._chapter = json["chapter"];
+      .._index = json["index"] ?? 0
+      .._chapter = json["chapter"] ?? 0;
   }
 
   @override
@@ -785,6 +801,15 @@ class ArchiveDownloadTask extends DownloadTask {
 
   FileDownloader? _downloader;
 
+  /// Per-task temp path for the archive being downloaded. Keyed by source +
+  /// comic so a different archive download can't reuse a leftover partial file
+  /// (which would corrupt it). The matching `$path.download` status file lets
+  /// [FileDownloader] resume after an interrupted run.
+  String get _archiveTempPath => FilePath.join(
+        App.dataPath,
+        "archive_${source.key.hashCode}_${comic.id.hashCode}.zip",
+      );
+
   String _message = "Fetching comic info...".tl;
 
   bool _isRunning = false;
@@ -797,6 +822,7 @@ class ArchiveDownloadTask extends DownloadTask {
     _message = message;
     notifyListeners();
     Log.error("Download", message);
+    LocalManager().saveCurrentDownloadingTasks();
   }
 
   @override
@@ -807,6 +833,10 @@ class ArchiveDownloadTask extends DownloadTask {
       Directory(path!).deleteIgnoreError(recursive: true);
     }
     path = null;
+    // Drop the partial archive + its resume status so a cancelled task leaves
+    // nothing behind. (Pause/app-kill keep them so the download can resume.)
+    File(_archiveTempPath).deleteIgnoreError();
+    File("$_archiveTempPath.download").deleteIgnoreError();
     LocalManager().removeTask(this);
   }
 
@@ -840,6 +870,7 @@ class ArchiveDownloadTask extends DownloadTask {
     _message = "Paused".tl;
     _downloader?.stop();
     notifyListeners();
+    LocalManager().saveCurrentDownloadingTasks();
   }
 
   @override
@@ -855,6 +886,7 @@ class ArchiveDownloadTask extends DownloadTask {
     _isRunning = true;
     notifyListeners();
     _message = "Downloading...".tl;
+    LocalManager().saveCurrentDownloadingTasks();
 
     if (path == null) {
       var dir = await LocalManager().findValidDirectory(
@@ -873,8 +905,7 @@ class ArchiveDownloadTask extends DownloadTask {
       path = dir.path;
     }
 
-    var archiveFile =
-        File(FilePath.join(App.dataPath, "archive_downloading.zip"));
+    var archiveFile = File(_archiveTempPath);
 
     Log.info("Download", "Downloading $archiveUrl");
 
@@ -949,6 +980,7 @@ class ArchiveDownloadTask extends DownloadTask {
       "archiveUrl": archiveUrl,
       "comic": comic.toJson(),
       "path": path,
+      "wasRunning": _isRunning,
     };
   }
 
@@ -959,7 +991,9 @@ class ArchiveDownloadTask extends DownloadTask {
     return ArchiveDownloadTask(
       json["archiveUrl"],
       ComicDetails.fromJson(json["comic"]),
-    )..path = json["path"];
+    )
+      ..path = json["path"]
+      ..wasRunning = json["wasRunning"] ?? false;
   }
 
   String _findCover() {
