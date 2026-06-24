@@ -6,6 +6,7 @@ import 'package:flutter/widgets.dart' show ChangeNotifier;
 import 'package:flutter_saf/flutter_saf.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
+import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/comic_state_repository.dart';
 import 'package:venera/foundation/comic_type.dart';
@@ -377,12 +378,20 @@ class LocalManager with ChangeNotifier {
     Future.delayed(const Duration(seconds: 3), _autoResumeDownloads);
   }
 
-  /// Resume downloads that were genuinely running when the app was last closed.
-  /// Serial model: only the head task runs (Phase 3 generalizes to N parallel).
+  /// Resume downloads that were genuinely running when the app was last closed,
+  /// up to the configured parallelism. Tasks the user manually paused stay
+  /// paused (wasRunning was persisted as false for them).
   void _autoResumeDownloads() {
-    final first = downloadingTasks.firstOrNull;
-    if (first != null && first.wasRunning && !first.isError) {
-      first.resume();
+    final limit = _maxParallelDownloads;
+    var started = 0;
+    for (final t in downloadingTasks) {
+      if (started >= limit) break;
+      if (t.wasRunning && !t.isError) {
+        t.resume();
+        started++;
+      }
+    }
+    if (started > 0) {
       DownloadKeepAlive.instance.refresh();
     }
   }
@@ -713,26 +722,42 @@ class LocalManager with ChangeNotifier {
     _advanceQueue();
   }
 
-  /// Ensure a runnable task is downloading. Serial model: resume the first
-  /// non-error task (Phase 3 generalizes to N parallel). If every task has
-  /// errored, give the least-tried one a delayed auto-retry until the cap.
-  ///
-  /// NOTE: it can't yet tell a user-paused task from a queued one, so the rare
-  /// "cancel a queued task while the head is user-paused" case may resume the
-  /// head. Per-task user-pause tracking lands with the Phase 6 controls.
+  /// How many comics may download at once. Default 1 keeps the historical
+  /// serial behavior; the user can opt into 2–3 (#3).
+  int get _maxParallelDownloads {
+    final v = (appdata.settings["maxParallelDownloads"] as num?)?.toInt() ?? 1;
+    return v.clamp(1, 3);
+  }
+
+  /// Ensure up to [_maxParallelDownloads] non-error tasks are downloading,
+  /// resuming queued ones in order. If every task has errored, fall back to a
+  /// bounded delayed auto-retry of the least-tried task (#7).
   void _advanceQueue() {
     if (downloadingTasks.isEmpty) {
       DownloadKeepAlive.instance.refresh();
       return;
     }
-    final next = downloadingTasks.where((t) => !t.isError).firstOrNull;
-    if (next != null) {
-      if (next.isPaused) next.resume();
-      DownloadKeepAlive.instance.refresh();
-      return;
+    final limit = _maxParallelDownloads;
+    for (final t in downloadingTasks) {
+      final running =
+          downloadingTasks.where((x) => !x.isPaused && !x.isError).length;
+      if (running >= limit) break;
+      // NOTE: can't yet tell a user-paused task from a queued one, so the rare
+      // "cancel a queued task while the head is user-paused" case may resume
+      // the head. Per-task user-pause tracking lands with the Phase 6 controls.
+      if (!t.isError && t.isPaused) {
+        t.resume();
+      }
     }
-    // Every task has errored — schedule one bounded, delayed auto-retry of the
-    // least-tried task.
+    DownloadKeepAlive.instance.refresh();
+    if (!downloadingTasks.any((t) => !t.isPaused && !t.isError)) {
+      _scheduleErrorAutoRetry();
+    }
+  }
+
+  /// All tasks have errored: give the least-tried one a delayed auto-retry,
+  /// up to [_maxAutoRetry] attempts, then leave it for the user.
+  void _scheduleErrorAutoRetry() {
     DownloadTask? candidate;
     for (final t in downloadingTasks) {
       if (t.autoRetryCount >= _maxAutoRetry) continue;
@@ -740,10 +765,7 @@ class LocalManager with ChangeNotifier {
         candidate = t;
       }
     }
-    if (candidate == null) {
-      DownloadKeepAlive.instance.refresh();
-      return; // gave up; the user can retry manually
-    }
+    if (candidate == null) return; // gave up; the user can retry manually
     final task = candidate;
     task.autoRetryCount++;
     final delay = Duration(seconds: 15 * task.autoRetryCount); // 15s/30s/45s

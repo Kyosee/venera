@@ -28,6 +28,13 @@ class _NetworkSettingsState extends State<NetworkSettings> {
           min: 1,
           max: 16,
         ).toSliver(),
+        _SliderSetting(
+          title: "Parallel Downloads".tl,
+          settingsIndex: 'maxParallelDownloads',
+          interval: 1,
+          min: 1,
+          max: 3,
+        ).toSliver(),
       ],
     );
   }

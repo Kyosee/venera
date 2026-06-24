@@ -225,12 +225,15 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
         return;
       }
       if (tasks[i] != null) {
+        // A terminal image failure: stop scheduling and let the chapter pool
+        // surface the error (the wrapper already retried internally).
+        if (tasks[i]!.error != null) {
+          return;
+        }
         if (!tasks[i]!.isComplete) {
           downloading++;
         }
-        if (tasks[i]!.error == null) {
-          continue;
-        }
+        continue;
       }
       Directory saveTo;
       if (comic!.chapters != null) {
@@ -261,6 +264,51 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
       });
       downloading++;
     }
+  }
+
+  /// Download every image of the current chapter with a completion-based
+  /// concurrency pool: up to [_maxConcurrentTasks] images are in flight and the
+  /// progress frontier advances over whichever finish first, so a single slow
+  /// image no longer stalls the rest of the window (#2). Returns false if the
+  /// task was paused, cancelled or errored (caller should stop); true when the
+  /// whole chapter completed.
+  Future<bool> _downloadChapterPool(
+    List<String> images,
+    String Function() buildMessage,
+  ) async {
+    while (_isRunning && _index < images.length) {
+      _scheduleTasks();
+      // Fail the task if any image exhausted its retries.
+      for (final t in tasks.values) {
+        if (t.error != null) {
+          Log.error("Download", t.error.toString());
+          _setError("Error: ${t.error}");
+          return false;
+        }
+      }
+      final pending = tasks.values
+          .where((t) => !t.isComplete && t.error == null)
+          .map((t) => t.wait())
+          .toList();
+      if (pending.isEmpty) {
+        // Everything scheduled has finished; advance the frontier and exit.
+        while (tasks[_index]?.isComplete == true) {
+          _index++;
+          _downloadedCount++;
+        }
+        break;
+      }
+      // Wait for ANY in-flight image rather than the head specifically.
+      await Future.any(pending);
+      if (isPaused) return false;
+      while (tasks[_index]?.isComplete == true) {
+        _index++;
+        _downloadedCount++;
+      }
+      _message = buildMessage();
+      LocalManager().scheduleSaveDownloadingTasks();
+    }
+    return _isRunning;
   }
 
   @override
@@ -493,25 +541,15 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
 
         var images = _images![key]!;
         tasks.clear();
-        while (_index < images.length) {
-          _scheduleTasks();
-          var task = tasks[_index]!;
-          await task.wait();
-          if (isPaused) return;
-          if (task.error != null) {
-            Log.error("Download", task.error.toString());
-            _setError("Error: ${task.error}");
-            return;
-          }
-          _index++;
-          _downloadedCount++;
-          _message = "Ep.@a @b/@c".tlParams({
+        final ok = await _downloadChapterPool(
+          images,
+          () => "Ep.@a @b/@c".tlParams({
             "a": ci + 1,
             "b": _index,
             "c": images.length,
-          });
-          LocalManager().scheduleSaveDownloadingTasks();
-        }
+          }),
+        );
+        if (!ok) return;
         _index = 0;
         _chapter++;
       }
@@ -519,21 +557,11 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
       while (_chapter < _images!.length) {
         var images = _images![_images!.keys.elementAt(_chapter)]!;
         tasks.clear();
-        while (_index < images.length) {
-          _scheduleTasks();
-          var task = tasks[_index]!;
-          await task.wait();
-          if (isPaused) return;
-          if (task.error != null) {
-            Log.error("Download", task.error.toString());
-            _setError("Error: ${task.error}");
-            return;
-          }
-          _index++;
-          _downloadedCount++;
-          _message = "$_downloadedCount/$_totalCount";
-          LocalManager().scheduleSaveDownloadingTasks();
-        }
+        final ok = await _downloadChapterPool(
+          images,
+          () => "$_downloadedCount/$_totalCount",
+        );
+        if (!ok) return;
         _index = 0;
         _chapter++;
       }
