@@ -25,15 +25,19 @@ void main() {
     expect(platform.matchedAliasType, SourceAliasType.pluginKey);
   });
 
-  test('resolves ancient enum source ints only as alias metadata', () {
-    // Enum values 1-6 are the only hardcoded legacy mapping kept (for one-time
-    // migration of very old backups); they are not key.hashCode values.
+  test('resolves legacy source ints only as alias metadata once learned', () {
+    // No hardcoded legacy table remains: a legacy int resolves only after its
+    // mapping has been learned at runtime, and then carries the int purely as
+    // alias metadata. An unlearned int stays unresolved.
+    expect(SourcePlatformResolver.fromLegacyInt(5), isNull);
+
+    SourcePlatformResolver.registerLegacyIntSourceKey(5, 'source_d');
     final platform = SourcePlatformResolver.fromLegacyInt(5);
 
     expect(platform?.matchedAlias, '5');
     expect(platform?.matchedAliasType, SourceAliasType.legacyInt);
     expect(platform?.legacyIntType, 5);
-    expect(platform?.canonicalKey, isNotEmpty);
+    expect(platform?.canonicalKey, 'source_d');
   });
 
   test('learns hashCode-based source mappings at runtime', () {
