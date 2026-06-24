@@ -756,6 +756,17 @@ class _ImageDownloadWrapper {
         lastBytes = p.currentBytes;
         if (p.imageBytes != null) {
           var fileType = detectFileType(p.imageBytes!);
+          // Reject obvious garbage before saving it as a "page": a source can
+          // answer 200 with an HTML error page, a truncated body, or an empty
+          // response. detectFileType reports image/* only for real image magic
+          // bytes, so a non-image mime (or a suspiciously tiny body) is treated
+          // as a failure and retried instead of silently storing a broken page
+          // that would surface as a corrupt image offline (#14).
+          if (!fileType.mime.startsWith('image/') ||
+              p.imageBytes!.length < 100) {
+            throw "Invalid image data (${p.imageBytes!.length} bytes, "
+                "${fileType.mime})";
+          }
           var file = saveTo.joinFile("$index${fileType.ext}");
           await file.writeAsBytes(p.imageBytes!);
           isComplete = true;
@@ -1049,6 +1060,11 @@ class ArchiveDownloadTask extends DownloadTask {
       if (f.name.startsWith('cover')) {
         return f.name;
       }
+    }
+    // An empty archive (or one that extracted nothing) would crash on
+    // `files.first`; return no cover instead (B14).
+    if (files.isEmpty) {
+      return '';
     }
     files.sort((a, b) {
       return a.name.compareTo(b.name);
