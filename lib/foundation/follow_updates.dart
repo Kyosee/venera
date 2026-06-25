@@ -174,13 +174,19 @@ void updateFolderBase(
       }
       await channel.push(comic);
       c++;
-      // Throttle
+      // Throttle, but in short slices so a cancel during the backoff closes the
+      // channel within ~0.5s instead of blocking for the full delay (#3).
       if (c % 5 == 0) {
         var delay = c % 100 + 1;
         if (delay > 10) {
           delay = 10;
         }
-        await Future.delayed(Duration(seconds: delay));
+        for (var i = 0; i < delay * 2; i++) {
+          if (shouldCancel?.call() ?? false) {
+            break;
+          }
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
       }
     }
     channel.close();

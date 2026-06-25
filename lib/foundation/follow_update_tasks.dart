@@ -162,13 +162,23 @@ class FollowUpdateTaskManager with ChangeNotifier {
 
   void cancel(String id) {
     _canceledIds.add(id);
-    // A task that was restored as pending may not be running its [_run] loop
-    // yet (resume hasn't kicked in). Finalize it directly so cancellation
-    // sticks and it won't be resumed on the next launch.
     var task = currentTasks.where((t) => t.id == id).firstOrNull;
-    if (task != null && !_runningIds.contains(id)) {
-      task.status = FollowUpdateTaskStatus.canceled;
-      _finalize(task);
+    if (task == null) {
+      notifyListeners();
+      return;
+    }
+    task.status = FollowUpdateTaskStatus.canceled;
+    // Remove from the active list immediately so the UI reflects the cancel at
+    // once, instead of lingering for seconds while in-flight network fetches
+    // drain. A running [_run] loop keeps observing _canceledIds and winds its
+    // background workers down; its finally then clears the tracking sets once
+    // the stream has truly closed. Keep the id in _canceledIds until then so
+    // the still-running workers don't see the flag flip back to false.
+    _moveToHistory(task);
+    if (!_runningIds.contains(id)) {
+      // No _run loop is active to clear tracking for a pending (not-yet-running)
+      // or already-finished task, so drop the flag now.
+      _canceledIds.remove(id);
     }
     notifyListeners();
   }
@@ -211,8 +221,13 @@ class FollowUpdateTaskManager with ChangeNotifier {
         checkedSince: resume ? task.createdAt : null,
       )) {
         if (_canceledIds.contains(task.id)) {
+          // Keep draining (don't break) so the background producer/consumers
+          // observe the cancel flag and wind down; abandoning the stream here
+          // would leave detached workers running the whole folder to completion.
+          // The task is already in history (cancel() moved it there for an
+          // instant UI), so just skip counter/progress updates.
           task.status = FollowUpdateTaskStatus.canceled;
-          break;
+          continue;
         }
         var comic = progress.comic;
         if (comic != null) {
@@ -255,12 +270,19 @@ class FollowUpdateTaskManager with ChangeNotifier {
     }
   }
 
-  /// Moves a terminal task out of [currentTasks] into history and clears its
-  /// persisted active entry + keep-alive notification. Idempotent: a task that
-  /// was already finalized (e.g. cancelled while pending) is ignored.
+  /// Clears a task's run/cancel tracking and ensures it's in history. Called
+  /// from [_run]'s finally once the background stream has truly closed.
+  /// Idempotent.
   void _finalize(FollowUpdateTask task) {
     _canceledIds.remove(task.id);
     _runningIds.remove(task.id);
+    _moveToHistory(task);
+  }
+
+  /// Moves a terminal task out of [currentTasks] into history and clears its
+  /// persisted active entry + keep-alive notification. Idempotent: a task that
+  /// was already moved (e.g. cancelled while still draining) is ignored.
+  void _moveToHistory(FollowUpdateTask task) {
     if (!currentTasks.remove(task)) {
       return;
     }
