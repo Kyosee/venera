@@ -19,73 +19,156 @@ Future<void> showSyncConfigQrDialog(
   BuildContext context,
   SyncConfigPayload payload,
 ) {
-  final pin = generateSyncPin();
-  final uri = encodeSyncConfigToUri(payload, pin);
   return showDialog(
     context: context,
-    builder: (ctx) {
-      return ContentDialog(
-        title: "Sync Config QR".tl,
-        // Explicit width: ContentDialog wraps content in IntrinsicWidth, and
-        // QrImageView uses a LayoutBuilder internally which has no intrinsic
-        // width — measuring it crashes on desktop ("render box with no size").
-        // A fixed-width box short-circuits the intrinsic-width pass.
-        content: SizedBox(
-          width: 260,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                // Fixed both dimensions so neither intrinsic-width nor
-                // intrinsic-height measurement (ContentDialog's IntrinsicWidth)
-                // descends into QrImageView's LayoutBuilder, which throws on
-                // intrinsic queries.
-                child: SizedBox(
-                  width: 220,
-                  height: 220,
-                  child: QrImageView(
-                    data: uri,
-                    version: QrVersions.auto,
-                    size: 220,
-                    backgroundColor: Colors.white,
+    builder: (ctx) => _SyncConfigQrDialog(payload: payload),
+  );
+}
+
+class _SyncConfigQrDialog extends StatefulWidget {
+  const _SyncConfigQrDialog({required this.payload});
+
+  final SyncConfigPayload payload;
+
+  @override
+  State<_SyncConfigQrDialog> createState() => _SyncConfigQrDialogState();
+}
+
+class _SyncConfigQrDialogState extends State<_SyncConfigQrDialog> {
+  String? _pin;
+  String? _uri;
+
+  @override
+  void initState() {
+    super.initState();
+    // Encoding runs a 200k-round PBKDF2 (~hundreds of ms on mobile). Doing it
+    // before showDialog froze the UI; instead show the dialog immediately with
+    // a spinner and derive the QR one frame later so the spinner paints first.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final pin = generateSyncPin();
+      final uri = await Future(() => encodeSyncConfigToUri(widget.payload, pin));
+      if (!mounted) return;
+      setState(() {
+        _pin = pin;
+        _uri = uri;
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final uri = _uri;
+    final pin = _pin;
+    return ContentDialog(
+      title: "Sync Config QR".tl,
+      // Explicit width: ContentDialog wraps content in IntrinsicWidth, and
+      // QrImageView uses a LayoutBuilder internally which has no intrinsic
+      // width — measuring it crashes on desktop ("render box with no size").
+      // A fixed-width box short-circuits the intrinsic-width pass.
+      content: SizedBox(
+        width: 280,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // QR card. Fixed both dimensions so neither intrinsic-width nor
+            // intrinsic-height measurement (ContentDialog's IntrinsicWidth)
+            // descends into QrImageView's LayoutBuilder, which throws on
+            // intrinsic queries.
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.12),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
                   ),
-                ),
+                ],
               ),
-              const SizedBox(height: 16),
-              Text("PIN", style: Theme.of(ctx).textTheme.labelMedium),
-              const SizedBox(height: 4),
-              Text(
-                _spacedPin(pin),
-                style: const TextStyle(
+              child: SizedBox(
+                width: 220,
+                height: 220,
+                child: uri == null
+                    ? const Center(child: CircularProgressIndicator())
+                    : QrImageView(
+                        data: uri,
+                        version: QrVersions.auto,
+                        size: 220,
+                        backgroundColor: Colors.white,
+                        eyeStyle: const QrEyeStyle(
+                          eyeShape: QrEyeShape.circle,
+                          color: Colors.black,
+                        ),
+                        dataModuleStyle: const QrDataModuleStyle(
+                          dataModuleShape: QrDataModuleShape.circle,
+                          color: Colors.black,
+                        ),
+                      ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            // PIN chip.
+            Text(
+              "PIN".tl,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: context.colorScheme.outline,
+                letterSpacing: 2,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              decoration: BoxDecoration(
+                color: context.colorScheme.primaryContainer,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                pin == null ? '— — — — — —' : _spacedPin(pin),
+                style: TextStyle(
                   fontSize: 30,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 4,
+                  color: context.colorScheme.onPrimaryContainer,
+                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
               ),
-              const SizedBox(height: 16),
-              Text(
-                "Contains your password in plain text. Do not screenshot or share it; the other device needs this PIN to restore the config."
-                    .tl,
-                style: TextStyle(fontSize: 12, color: ctx.colorScheme.error),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 20),
+            // Warning row.
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.warning_amber_rounded,
+                  size: 18,
+                  color: context.colorScheme.error,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    "Contains your password in plain text. Do not screenshot or share it; the other device needs this PIN to restore the config."
+                        .tl,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.colorScheme.error,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
-        actions: [
-          Button.filled(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: Text("Done".tl),
-          ),
-        ],
-      );
-    },
-  );
+      ),
+      actions: [
+        Button.filled(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text("Done".tl),
+        ),
+      ],
+    );
+  }
 }
 
 /// Opens the camera scanner, then prompts for the PIN and decrypts. Returns the
