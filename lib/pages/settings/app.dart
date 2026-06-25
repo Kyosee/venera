@@ -854,7 +854,13 @@ class _WebdavSettingState extends State<_WebdavSetting> {
                       user.trim().isEmpty &&
                       pass.trim().isEmpty) {
                     appdata.settings['webdav'] = [];
-                    appdata.implicitData['webdavAutoSync'] = false;
+                    // Keep the user's auto-sync choice instead of forcing it
+                    // off: the toggle persists immediately via
+                    // onAutoSyncChanged, so hard-coding false here silently
+                    // reverted a switch the user had just turned on (#67).
+                    // With no config auto-sync stays inert (isEnabled requires
+                    // a non-empty config) and activates once a config is added.
+                    appdata.implicitData['webdavAutoSync'] = autoSync;
                     appdata.writeImplicitData();
                     appdata.saveData();
                     context.showMessage(message: "Saved".tl);

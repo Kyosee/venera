@@ -279,6 +279,21 @@ class DataSync with ChangeNotifier {
   }
 
   Future<Res<bool>> uploadData() async {
+    // No usable WebDAV config → nothing to sync. saveData() funnels every
+    // settings/search-history change through here (plus comic-source saves,
+    // imports, ...), so without bailing out up front an empty or malformed
+    // config would still flip the syncing indicator, fire notifyListeners and
+    // spawn a (then-cancelled) sync task — surfacing as a phantom upload on an
+    // unconfigured app (#67). Validate before any side effects and return.
+    final config = _validateConfig();
+    if (config == null) {
+      _lastError = 'Invalid WebDAV configuration';
+      return const Res.error('Invalid WebDAV configuration');
+    }
+    if (config.isEmpty) {
+      return const Res(true);
+    }
+
     _pendingAutoUpload?.cancel();
     _pendingAutoUpload = null;
     if (_haveWaitingTask) return const Res(true);
@@ -303,16 +318,6 @@ class DataSync with ChangeNotifier {
         _addSyncLog('upload', null, false, 'Blocked: initial sync not completed');
         taskManager.failTask(task.id, 'Initial sync not completed');
         return const Res.error('Initial sync not completed');
-      }
-      var config = _validateConfig();
-      if (config == null) {
-        _lastError = 'Invalid WebDAV configuration';
-        taskManager.failTask(task.id, 'Invalid WebDAV configuration');
-        return const Res.error('Invalid WebDAV configuration');
-      }
-      if (config.isEmpty) {
-        taskManager.cancelTask(task.id);
-        return const Res(true);
       }
       String url = config[0];
       String user = config[1];
