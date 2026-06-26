@@ -398,10 +398,26 @@ class _SyncButtonState extends State<_SyncButton> with WidgetsBindingObserver {
               ? null
               : () {
                   if (hasError) {
-                    showDialogMessage(
-                      App.rootContext,
-                      "Error".tl,
-                      DataSync().lastError!,
+                    showDialog(
+                      context: App.rootContext,
+                      builder: (context) => ContentDialog(
+                        title: "Error".tl,
+                        content: Text(DataSync().lastError!)
+                            .paddingHorizontal(16),
+                        actions: [
+                          Button.text(
+                            onPressed: context.pop,
+                            child: Text("OK".tl),
+                          ),
+                          Button.filled(
+                            onPressed: () {
+                              context.pop();
+                              DataSync().syncData();
+                            },
+                            child: Text("Retry".tl),
+                          ),
+                        ],
+                      ),
                     );
                   } else {
                     DataSync().syncData();
