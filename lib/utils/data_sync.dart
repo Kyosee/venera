@@ -50,6 +50,27 @@ int maxBackupVersion(Iterable<String?> fileNames) {
   return max;
 }
 
+/// The backup to prune when capping server retention: the one with the LOWEST
+/// numeric version (the oldest in the version lineage), or null when none parse.
+///
+/// Selecting by numeric version — never by lexicographic file-name order — is
+/// essential here too: string order ranks `…-100.venera` below `…-99.venera`,
+/// so a string sort would delete version 100, i.e. the NEWEST backup that every
+/// other device syncs from. Skips null and non-`.venera` entries. Pure function.
+String? lowestVersionBackup(Iterable<String?> fileNames) {
+  String? lowest;
+  int? lowestVersion;
+  for (final name in fileNames) {
+    if (name == null || !name.endsWith('.venera')) continue;
+    final v = RemoteBackupInfo.fromFileName(name).version;
+    if (lowestVersion == null || v < lowestVersion) {
+      lowestVersion = v;
+      lowest = name;
+    }
+  }
+  return lowest;
+}
+
 class DataSync with ChangeNotifier {
   DataSync._() {
     if (isEnabled) {
@@ -444,8 +465,14 @@ class DataSync with ChangeNotifier {
           await client.remove(old.name!);
         }
         if (files.length >= 10) {
-          files.sort((a, b) => a.name!.compareTo(b.name!));
-          await client.remove(files.first.name!);
+          // Prune the oldest by NUMERIC version, never the lexicographically
+          // first — string order ranks "…-100" below "…-99" and would delete
+          // the newest backup every other device syncs from. Exclude the
+          // same-day backup just removed above so it is never targeted twice.
+          final toPrune = lowestVersionBackup(
+            files.where((e) => e.name != old?.name).map((e) => e.name),
+          );
+          if (toPrune != null) await client.remove(toPrune);
         }
 
         taskManager.updateTask(task.id, currentPhase: 'Uploading', progress: 0.7);

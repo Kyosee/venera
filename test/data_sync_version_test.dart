@@ -136,4 +136,45 @@ void main() {
       expect(nextSyncVersion(0, 0), 1);
     });
   });
+
+  group('lowestVersionBackup', () {
+    test('returns null when there are no backups', () {
+      expect(lowestVersionBackup(const <String?>[]), isNull);
+    });
+
+    test('ignores non-.venera and null names', () {
+      expect(
+        lowestVersionBackup(['notes.txt', null, '20240-7.android.venera']),
+        '20240-7.android.venera',
+      );
+    });
+
+    test('picks the lowest version, never the lexicographically smallest (#80)',
+        () {
+      // Retention rotation must prune the OLDEST (lowest version), never the
+      // newest. Lexicographic order ranks "…-100" below "…-99", so a string
+      // sort would delete version 100 — the latest backup. Numeric order keeps
+      // it and prunes 99.
+      expect(
+        '20240-100.android.venera'.compareTo('20240-99.windows.venera') < 0,
+        isTrue, // the trap: string order calls -100 the "smallest"
+      );
+      expect(
+        lowestVersionBackup(
+            ['20240-100.android.venera', '20240-99.windows.venera']),
+        '20240-99.windows.venera',
+      );
+    });
+
+    test('picks the lowest among several', () {
+      expect(
+        lowestVersionBackup([
+          '20240-5.android.venera',
+          '20240-3.ios.venera',
+          '20240-12.windows.venera',
+        ]),
+        '20240-3.ios.venera',
+      );
+    });
+  });
 }
