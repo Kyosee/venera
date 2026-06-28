@@ -181,6 +181,12 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage>
   void updateFilteredComics() {
     filteredComics = filterComics(comics);
     _applySorting();
+    // `searchResults` is a cached field, so a data change while searching (e.g.
+    // a swipe-cancel or menu delete) must refresh it too — otherwise the
+    // dismissed row lingers in the search view as a ghost.
+    if (searchMode) {
+      updateSearchResult();
+    }
   }
 
   void _applySorting() {
