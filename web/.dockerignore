@@ -1,9 +1,0 @@
-node_modules/
-client/node_modules/
-client/dist/
-server/node_modules/
-server/.venera-helper-data/
-server/browser-data/
-server/server-data/
-build/
-*.log

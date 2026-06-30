@@ -64,12 +64,4 @@ CLAUDE.md
 .superpowers/
 venera-sign-v2.0.2/
 
-# Web server user data
-web/server/.venera-helper-data/
-web/server/browser-data/
-web/server/node_modules/
-web/server/server-data/
-web/build/
-web_server*.log
-web_chapters_raw.json
 app_chapters_raw.json

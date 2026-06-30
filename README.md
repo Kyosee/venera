@@ -8,7 +8,7 @@
 
 **[中文](README_CN.md) | English**
 
-A cross-platform manga/comic reader with self-hosted Web frontend support.
+A cross-platform manga/comic reader.
 
 > **Original Project:** This project is forked from [venera-app/venera](https://github.com/venera-app/venera).
 
@@ -22,13 +22,8 @@ A cross-platform manga/comic reader with self-hosted Web frontend support.
 >
 > By downloading, copying, modifying, or using this project, you are deemed to have read and accepted this disclaimer. The maintainers reserve the right to modify or supplement this disclaimer at any time.
 
-## Warning
-
-**Do NOT deploy the Web frontend on the public internet.** It is designed for personal use on a trusted LAN only. Exposing it publicly may lead to attacks, traffic abuse, and data leaks (cookies, WebDAV config, personal data). All legal and security risks are your own.
-
 ## Features
 
-- [x] Self-hosted Web frontend with Docker support (experimental)
 - [x] Improved WebDAV backup & sync
 - [x] Windows auto-updater (with fallback scripts) & Android APK auto-update
 - [x] Seamless continuous-chapter reading
@@ -54,49 +49,10 @@ flutter build linux      # Linux
 flutter build macos      # macOS
 ```
 
-### Web PWA
-
-Vue 3 PWA powered by a Node.js server + Rust image proxy sidecar. Primarily for iOS users who cannot sideload native apps — host on a local server and access via Safari.
-
-> **Experimental:** The Web PWA is still under active development. Expect bugs and incomplete features — many native-app capabilities are not yet fully ported. Use it for personal testing only.
-
-**Docker (Recommended)**
-
-```bash
-cd web
-docker compose up -d --build
-# http://localhost:60098
-```
-
-**Manual**
-
-Requires Node.js 20+ and Rust.
-
-```bash
-cd web/client && npm ci && npm run build   # build frontend
-cd ../server && npm install --omit=dev      # install deps
-VENERA_STATIC_DIR=../client/dist node server.js
-# http://localhost:8080
-```
-
-**Development**
-
-```bash
-# Terminal 1: server (port 3000)
-cd web/server
-VENERA_STATIC_DIR=../client/dist node server.js
-
-# Terminal 2: Vite hot-reload (port 5173)
-cd web/client
-npm ci && npm run dev
-```
-
 ## Build from Source
 
 1. Clone the repository
-2. Install [Flutter](https://flutter.dev/docs/get-started/install) (for native app)
-3. Install [Rust](https://rustup.rs/) (for server sidecar)
-4. Node.js 20+ (for Web frontend & server runtime)
+2. Install [Flutter](https://flutter.dev/docs/get-started/install)
 
 ## Migration
 

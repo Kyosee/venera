@@ -9,7 +9,7 @@
       "bundleIdentifier": "io.github.kyosee.venera",
       "developerName": "Kyosee",
       "subtitle": "A cross-platform manga/comic reader",
-      "localizedDescription": "Venera is a cross-platform manga/comic reader with self-hosted Web frontend support.",
+      "localizedDescription": "Venera is a cross-platform manga/comic reader.",
       "iconURL": "https://raw.githubusercontent.com/Kyosee/venera/master/assets/app_icon.png",
       "category": "entertainment",
       "screenshots": [],
