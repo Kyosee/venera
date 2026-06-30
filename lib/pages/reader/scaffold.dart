@@ -371,6 +371,11 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
   }
 
   void addImageFavorite() async {
+    // 章节评论页不是图片页：滑动收藏 / 双击收藏手势在此会被误触发，
+    // 既没有可收藏的图片，按页码换算出的索引还会越过图片列表导致崩溃，直接忽略。
+    if (context.reader.isOnChapterCommentsPage) {
+      return;
+    }
     try {
       if (context.reader.images![0].contains('file://')) {
         showToast(

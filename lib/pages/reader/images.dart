@@ -271,7 +271,14 @@ class _GalleryModeState extends State<_GalleryMode>
     if (reader.images == null || reader.images!.isEmpty) {
       return null;
     }
+    // 评论页没有图片，按页码算出的起始索引会越过图片列表，提前排除以免越界
+    if (reader.isOnChapterCommentsPage) {
+      return null;
+    }
     var (startIndex, endIndex) = getPageImagesRange(reader.page);
+    if (startIndex >= reader.images!.length) {
+      return null;
+    }
     return (startIndex, endIndex);
   }
 
@@ -355,6 +362,8 @@ class _GalleryModeState extends State<_GalleryMode>
           } else if (isChapterCommentsPage(index)) {
             return PhotoViewGalleryPageOptions.customChild(
               child: _buildChapterCommentsPage(),
+              // 评论页是普通可滚动列表，关闭 PhotoView 手势，避免被双指缩放整页放大
+              disableGestures: true,
             );
           } else {
             var (startIndex, endIndex) = getPageImagesRange(index);
@@ -551,8 +560,9 @@ class _GalleryModeState extends State<_GalleryMode>
       context.readerScaffold.addImageFavorite();
       return;
     }
-    var controller = photoViewControllers[reader.page]!;
-    controller.onDoubleClick?.call();
+    // 评论页等非图片页没有对应的 PhotoViewController，置空保护避免空指针
+    var controller = photoViewControllers[reader.page];
+    controller?.onDoubleClick?.call();
   }
 
   @override
@@ -560,7 +570,8 @@ class _GalleryModeState extends State<_GalleryMode>
     if (!appdata.settings['enableLongPressToZoom'] || fingers != 1) {
       return;
     }
-    var photoViewController = photoViewControllers[reader.page]!;
+    var photoViewController = photoViewControllers[reader.page];
+    if (photoViewController == null) return;
     double target = photoViewController.getInitialScale!.call()! * 1.75;
     var size = reader.size;
     Offset zoomPosition;
@@ -581,7 +592,11 @@ class _GalleryModeState extends State<_GalleryMode>
     if (!appdata.settings['enableLongPressToZoom'] || !isLongPressing) {
       return;
     }
-    var photoViewController = photoViewControllers[reader.page]!;
+    var photoViewController = photoViewControllers[reader.page];
+    if (photoViewController == null) {
+      isLongPressing = false;
+      return;
+    }
     double target = photoViewController.getInitialScale!.call()!;
     photoViewController.animateScale?.call(target);
     isLongPressing = false;
