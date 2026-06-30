@@ -340,10 +340,12 @@ class _GalleryModeState extends State<_GalleryMode>
       },
       onPointerMove: (event) {
         if (isLongPressing) {
-          var controller = photoViewControllers[reader.page]!;
-          Offset value = event.delta;
-          if (isLongPressing) {
-            controller.updateMultiple(position: controller.position + value);
+          // No controller on the comments page; guard against a null deref.
+          var controller = photoViewControllers[reader.page];
+          if (controller != null) {
+            controller.updateMultiple(
+              position: controller.position + event.delta,
+            );
           }
         }
       },
