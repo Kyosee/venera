@@ -240,6 +240,20 @@ class _ImageFavoritesItemState extends State<_ImageFavoritesItem> {
               "${imageFavorites.length}/${widget.imageFavoritesComic.maxPageFromEp}",
               style: ts.s12),
         ),
+        // 一键进入本漫画的网格相册页，方便查看与删图
+        IconButton(
+          icon: const Icon(Icons.grid_view),
+          iconSize: 20,
+          visualDensity: VisualDensity.compact,
+          tooltip: "Album View".tl,
+          onPressed: () {
+            App.rootContext.to(
+              () => SingleComicImageFavoritesPage(
+                comic: widget.imageFavoritesComic,
+              ),
+            );
+          },
+        ),
       ],
     ).paddingHorizontal(16).paddingVertical(8);
   }
