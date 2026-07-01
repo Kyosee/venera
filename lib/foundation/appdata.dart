@@ -297,6 +297,7 @@ class Settings with ChangeNotifier {
     'autoCleanHistoryDays': '0', // retention days; '0' keeps history forever
     'limitImageWidth': true,
     'webdav': [], // empty means not configured
+    'webdavUseProxy': true, // whether WebDAV sync goes through the app proxy
     "disableSyncFields": "", // "field1, field2, ..."
     'dataVersion': 0,
     'quickFavorite': null,

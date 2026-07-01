@@ -502,6 +502,8 @@ class _WebdavSettingState extends State<_WebdavSetting> {
 
   bool autoSync = true;
 
+  bool useProxy = true;
+
   bool syncLocalComicImages = false;
 
   bool isTesting = false;
@@ -522,6 +524,7 @@ class _WebdavSettingState extends State<_WebdavSetting> {
       pass = configs[2];
     }
     autoSync = appdata.implicitData['webdavAutoSync'] ?? true;
+    useProxy = appdata.settings['webdavUseProxy'] != false;
     syncLocalComicImages = appdata.settings['syncLocalComicImages'] ?? false;
   }
 
@@ -530,6 +533,14 @@ class _WebdavSettingState extends State<_WebdavSetting> {
       autoSync = value;
       appdata.implicitData['webdavAutoSync'] = value;
       appdata.writeImplicitData();
+    });
+  }
+
+  void onUseProxyChanged(bool value) {
+    setState(() {
+      useProxy = value;
+      appdata.settings['webdavUseProxy'] = value;
+      appdata.saveData();
     });
   }
 
@@ -780,6 +791,16 @@ class _WebdavSettingState extends State<_WebdavSetting> {
               title: Text("Auto Sync Data".tl),
               contentPadding: EdgeInsets.zero,
               trailing: Switch(value: autoSync, onChanged: onAutoSyncChanged),
+            ),
+            ListTile(
+              leading: Icon(Icons.lan_outlined),
+              title: Text("Use Proxy for Sync".tl),
+              subtitle: Text(
+                "Route WebDAV sync through the app proxy. Turn off if an unstable proxy makes sync fail.".tl,
+                style: const TextStyle(fontSize: 12),
+              ),
+              contentPadding: EdgeInsets.zero,
+              trailing: Switch(value: useProxy, onChanged: onUseProxyChanged),
             ),
             const SizedBox(height: 8),
             SwitchListTile(

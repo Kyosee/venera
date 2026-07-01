@@ -131,6 +131,16 @@ class DataSync with ChangeNotifier {
   /// Image-pack transfers move whole comic archives, so they get a longer bound.
   static const _imageSyncRequestTimeout = Duration(minutes: 5);
 
+  /// Whether WebDAV sync requests go through the app-wide proxy. Users can turn
+  /// this off when an unstable proxy makes sync fail (#99); direct connections
+  /// are often more reliable for reaching a WebDAV server on the local network.
+  static bool _useProxy() => appdata.settings['webdavUseProxy'] != false;
+
+  /// Builds the sync adapter, honoring the per-user proxy toggle and the given
+  /// overall request timeout.
+  static RHttpAdapter _syncAdapter(Duration timeout) =>
+      RHttpAdapter(enableProxy: _useProxy(), timeout: timeout);
+
   void _addSyncLog(String action, String? fileName, bool success, String? error) {
     var logs = (appdata.implicitData[_syncLogKey] as List?) ?? [];
     logs.insert(0, {
@@ -415,7 +425,7 @@ class DataSync with ChangeNotifier {
         url,
         user: user,
         password: pass,
-        adapter: RHttpAdapter(timeout: _syncRequestTimeout),
+        adapter: _syncAdapter(_syncRequestTimeout),
       );
 
       File? data;
@@ -538,7 +548,7 @@ class DataSync with ChangeNotifier {
         url,
         user: user,
         password: pass,
-        adapter: RHttpAdapter(timeout: _syncRequestTimeout),
+        adapter: _syncAdapter(_syncRequestTimeout),
       );
 
       try {
@@ -631,7 +641,7 @@ class DataSync with ChangeNotifier {
     String user = config[1];
     String pass = config[2];
     try {
-      var client = newClient(url, user: user, password: pass, adapter: RHttpAdapter(timeout: _syncRequestTimeout));
+      var client = newClient(url, user: user, password: pass, adapter: _syncAdapter(_syncRequestTimeout));
       var files = await client.readDir('/');
       var file = _latestBackup(files, (e) => e.name);
       if (file == null) {
@@ -654,7 +664,7 @@ class DataSync with ChangeNotifier {
     String user = config[1];
     String pass = config[2];
     try {
-      var client = newClient(url, user: user, password: pass, adapter: RHttpAdapter(timeout: _syncRequestTimeout));
+      var client = newClient(url, user: user, password: pass, adapter: _syncAdapter(_syncRequestTimeout));
       var files = await client.readDir('/');
       var backups = <RemoteBackupInfo>[];
       for (var f in files) {
@@ -684,7 +694,7 @@ class DataSync with ChangeNotifier {
       String url = config[0];
       String user = config[1];
       String pass = config[2];
-      var client = newClient(url, user: user, password: pass, adapter: RHttpAdapter(timeout: _syncRequestTimeout));
+      var client = newClient(url, user: user, password: pass, adapter: _syncAdapter(_syncRequestTimeout));
       // User explicitly chose this backup to restore — always a real transfer, so
       // engage keep-alive across the download + apply.
       _refreshSyncKeepAlive(
@@ -764,7 +774,7 @@ class DataSync with ChangeNotifier {
         url,
         user: user,
         password: pass,
-        adapter: RHttpAdapter(timeout: _imageSyncRequestTimeout),
+        adapter: _syncAdapter(_imageSyncRequestTimeout),
       );
 
       // Image-pack sync moves whole comic archives and is the longest-running,
