@@ -7,6 +7,7 @@ import 'package:flutter_saf/flutter_saf.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/cache_manager.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
+import 'package:venera/foundation/history.dart';
 import 'package:venera/foundation/image_enhance_shader.dart';
 import 'package:venera/foundation/js_engine.dart';
 import 'package:venera/foundation/log.dart';
@@ -69,6 +70,7 @@ Future<void> initDeferred() async {
     CacheManager().setLimitSize(appdata.settings['cacheSize']);
     RelatedSourceTaskManager.instance;
     _checkOldConfigs();
+    _autoCleanHistory();
     if (App.isAndroid) {
       initAndroidExtras();
       await trySetHighRefreshRate();
@@ -102,6 +104,26 @@ void _checkOldConfigs() {
       appdata.implicitData['webdavAutoSync'] = false;
     }
     appdata.writeImplicitData();
+  }
+}
+
+/// Removes reading history older than the user-selected retention window.
+/// Driven by the `autoCleanHistoryDays` setting (0 = keep forever). Runs once
+/// per startup after the history DB is ready; failures are swallowed so they
+/// never block app launch.
+void _autoCleanHistory() {
+  var raw = appdata.settings['autoCleanHistoryDays'];
+  var days = raw is num ? raw.toInt() : int.tryParse(raw?.toString() ?? '') ?? 0;
+  if (days <= 0) return;
+  try {
+    var removed =
+        HistoryManager().cleanHistoryOlderThan(Duration(days: days));
+    if (removed > 0) {
+      Log.info("History", "Auto-cleaned $removed history record(s) older "
+          "than $days day(s).");
+    }
+  } catch (e, s) {
+    Log.error("History", "Auto-clean failed: $e", s);
   }
 }
 

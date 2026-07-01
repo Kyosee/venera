@@ -503,6 +503,26 @@ class HistoryManager with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Delete history records older than [maxAge], counted from each record's
+  /// last-read time. Returns the number of rows removed. A no-op (returns 0)
+  /// when not initialized or corrupted.
+  int cleanHistoryOlderThan(Duration maxAge) {
+    if (!isInitialized || _isCorrupted) return 0;
+    var cutoff = DateTime.now().subtract(maxAge).millisecondsSinceEpoch;
+    try {
+      _db.execute("delete from history where time < ?;", [cutoff]);
+      var removed = _db.updatedRows;
+      if (removed > 0) {
+        updateCache();
+        notifyListeners();
+      }
+      return removed;
+    } on SqliteException catch (e) {
+      _handleCorruption(e);
+      return 0;
+    }
+  }
+
   void remove(String id, ComicType type) async {
     if (!isInitialized) return;
     _db.execute(
