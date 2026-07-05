@@ -929,7 +929,10 @@ class _WebdavSettingState extends State<_WebdavSetting> {
               children: [
                 Button.outlined(
                   onPressed: () async {
-                    var result = await DataSync().uploadData();
+                    // Explicit "publish": the user tapped Upload, so this
+                    // device's data wins even if it trails the server (#86
+                    // guard is for automatic uploads only).
+                    var result = await DataSync().uploadData(force: true);
                     if (result.error) {
                       context.showMessage(message: result.errorMessage!);
                     } else {

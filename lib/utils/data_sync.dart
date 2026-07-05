@@ -35,6 +35,26 @@ import 'io.dart';
 int nextSyncVersion(int localVersion, int remoteMaxVersion) =>
     (localVersion > remoteMaxVersion ? localVersion : remoteMaxVersion) + 1;
 
+/// Whether an automatic upload must be skipped because this device is behind
+/// the server, and should download first instead of overwriting newer remote
+/// data with its own stale snapshot (issue #86).
+///
+/// Sync is a whole-library snapshot with last-writer-wins keyed on the numeric
+/// version. If a device holding older data ([localVersion] < [remoteMaxVersion])
+/// uploads, [nextSyncVersion] stamps that stale snapshot with `remoteMax + 1`,
+/// making every other device pull the old data back and revert the newer data
+/// they had. Guarding automatic uploads against this is the fix.
+///
+/// [force] uploads are explicit "publish, this is the source of truth" actions
+/// (manual upload button, local-file import, headless CLI) and intentionally
+/// bypass the guard, preserving the #80 "always wins" behavior. Pure function.
+bool shouldSkipStaleUpload({
+  required bool force,
+  required int localVersion,
+  required int remoteMaxVersion,
+}) =>
+    !force && remoteMaxVersion > localVersion;
+
 /// Highest backup version present among [fileNames], or 0 when none parse.
 ///
 /// Compares by numeric version (via [RemoteBackupInfo.fromFileName]), never by
@@ -357,7 +377,18 @@ class DataSync with ChangeNotifier {
     }
   }
 
-  Future<Res<bool>> uploadData() async {
+  /// Uploads the current data as a new backup.
+  ///
+  /// [force] distinguishes an explicit "publish this, it is the source of
+  /// truth" (manual upload button, local-file import, headless CLI) from an
+  /// automatic or reconciling upload fired by a routine data change
+  /// ([saveData], [onDataChanged], comic-source saves) or by [syncData]. Only
+  /// the latter run the fall-behind guard below; forced uploads keep the #80
+  /// "version = server max + 1, always wins" behavior. [syncData] intentionally
+  /// stays unforced so that a device losing a race — the server gaining a newer
+  /// backup between syncData's direction check and this re-read — pulls instead
+  /// of overwriting it.
+  Future<Res<bool>> uploadData({bool force = false}) async {
     // No usable WebDAV config → nothing to sync. saveData() funnels every
     // settings/search-history change through here (plus comic-source saves,
     // imports, ...), so without bailing out up front an empty or malformed
@@ -439,10 +470,53 @@ class DataSync with ChangeNotifier {
         // and never auto-pulled (#80).
         var files = await client.readDir('/');
         files = files.where((e) => e.name!.endsWith('.venera')).toList();
-        final nextVersion = nextSyncVersion(
-          previousVersion,
-          maxBackupVersion(files.map((e) => e.name)),
-        );
+        final remoteMax = maxBackupVersion(files.map((e) => e.name));
+
+        // Fall-behind guard (auto uploads only). If the server already holds a
+        // newer backup than this device, we are behind — uploading now would
+        // stamp our STALE snapshot with `remoteMax + 1` and, because sync is a
+        // whole-library snapshot (last-writer-wins by version number), that
+        // higher number makes every other device pull our old data back,
+        // reverting the newer data they had (#86). So instead of pushing, we
+        // pull the newer backup to catch up. No busy-waiting: the upload turns
+        // into a download and returns. Once the download realigns local data,
+        // this device is no longer behind, and any genuine later change flows
+        // up normally through onDataChanged — recovery needs no explicit retry.
+        //
+        // Explicit uploads (`force`) skip this: a manual "Upload" tap, a local
+        // file import ("make this the source of truth"), and the headless CLI
+        // have already decided this device wins — exactly the #80 behavior we
+        // must preserve. syncData() stays unforced on purpose: its direction
+        // check races the re-read here, and losing that race means the server
+        // gained a newer backup we should pull, not overwrite.
+        if (shouldSkipStaleUpload(
+          force: force,
+          localVersion: previousVersion,
+          remoteMaxVersion: remoteMax,
+        )) {
+          Log.info(
+            "Data Sync",
+            "Local (v$previousVersion) behind server (v$remoteMax); "
+                "pulling instead of overwriting with stale data",
+          );
+          _addSyncLog(
+            'upload',
+            null,
+            false,
+            'Skipped: local behind server, downloading first',
+          );
+          taskManager.cancelTask(task.id);
+          // Release the upload lock so the download we kick off below doesn't
+          // wait on our own in-flight flag. downloadData()'s synchronous prefix
+          // sets _isDownloading before its first await, so the outer finally
+          // sees the download has taken over and keeps the keep-alive up rather
+          // than flickering it off.
+          _isUploading = false;
+          unawaited(downloadData());
+          return const Res(true);
+        }
+
+        final nextVersion = nextSyncVersion(previousVersion, remoteMax);
         appdata.settings['dataVersion'] = nextVersion;
         await appdata.saveData(false);
 

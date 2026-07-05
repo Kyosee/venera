@@ -228,8 +228,10 @@ class ImportTaskManager with ChangeNotifier {
       }
       if (task.status == ImportTaskStatus.completed && !task.isPica) {
         // A manual import is an explicit "make this the source of truth", so
-        // push it back up to WebDAV (no-op when sync is disabled).
-        unawaited(DataSync().uploadData());
+        // push it back up to WebDAV, winning even if this device trails the
+        // server — force past the #86 fall-behind guard (no-op when sync is
+        // disabled).
+        unawaited(DataSync().uploadData(force: true));
       }
       onTaskFinished?.call(task);
     }

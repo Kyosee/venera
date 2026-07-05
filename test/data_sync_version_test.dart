@@ -177,4 +177,64 @@ void main() {
       );
     });
   });
+
+  group('shouldSkipStaleUpload', () {
+    test('behind the server: an automatic upload is skipped (#86)', () {
+      // The core #86 case. Device B still holds v5 while the server already has
+      // A's newer v6. Auto-uploading would stamp B's stale data v7 and make
+      // every device pull it back, reverting A. B must download instead.
+      expect(
+        shouldSkipStaleUpload(force: false, localVersion: 5, remoteMaxVersion: 6),
+        isTrue,
+      );
+    });
+
+    test('aligned with the server: normal auto-upload proceeds', () {
+      // Steady state — local matches the server's newest. Nothing stale, so a
+      // routine change uploads as usual.
+      expect(
+        shouldSkipStaleUpload(force: false, localVersion: 6, remoteMaxVersion: 6),
+        isFalse,
+      );
+    });
+
+    test('ahead of the server: auto-upload proceeds', () {
+      // Server backups were rotated away; local is the source of truth and keeps
+      // climbing. Not behind, so no skip.
+      expect(
+        shouldSkipStaleUpload(force: false, localVersion: 9, remoteMaxVersion: 4),
+        isFalse,
+      );
+    });
+
+    test('forced upload never skips, even when behind (#80 preserved)', () {
+      // A manual "Upload" tap, a local-file import ("make this the source of
+      // truth"), or the headless CLI must still win over a newer server backup.
+      expect(
+        shouldSkipStaleUpload(force: true, localVersion: 5, remoteMaxVersion: 6),
+        isFalse,
+      );
+    });
+
+    test('forced upload proceeds when aligned or ahead too', () {
+      expect(
+        shouldSkipStaleUpload(force: true, localVersion: 6, remoteMaxVersion: 6),
+        isFalse,
+      );
+      expect(
+        shouldSkipStaleUpload(force: true, localVersion: 9, remoteMaxVersion: 4),
+        isFalse,
+      );
+    });
+
+    test('fresh state (both zero) does not skip', () {
+      // A brand-new device with an empty server is not "behind"; guarded by the
+      // separate initial-sync check, an unforced upload here is not blocked by
+      // this predicate.
+      expect(
+        shouldSkipStaleUpload(force: false, localVersion: 0, remoteMaxVersion: 0),
+        isFalse,
+      );
+    });
+  });
 }

@@ -39,7 +39,7 @@ Future<void> runHeadlessMode(List<String> args) async {
     case 'webdav':
       if (subCommand == 'up') {
         cliPrint({'status': 'running', 'message': 'Uploading WebDAV data...'});
-        await DataSync().uploadData();
+        await DataSync().uploadData(force: true);
         cliPrint({'status': 'success', 'message': 'Upload complete.'});
       } else if (subCommand == 'down') {
         cliPrint({'status': 'running', 'message': 'Downloading WebDAV data...'});
