@@ -1506,7 +1506,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
       physics: _physics,
       scrollBehavior: _scrollBehavior,
       anchor: 0.0,
-      cacheExtent: cacheExtent,
+      scrollCacheExtent: ScrollCacheExtent.pixels(cacheExtent),
       slivers: [
         // Leading sliver: entries before the pivot, in reverse so element 0 of
         // the builder is the entry immediately above the pivot.
