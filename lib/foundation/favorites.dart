@@ -296,6 +296,21 @@ class FavoriteItemWithUpdateInfo extends FavoriteItem {
       super.hashCode ^ updateTime.hashCode ^ hasNewUpdate.hashCode;
 }
 
+/// Follow-update bookkeeping of one favorited comic, captured with
+/// [LocalFavoritesManager.snapshotUpdateInfo] before a backup import replaces
+/// the favorites database and re-applied with
+/// [LocalFavoritesManager.mergeUpdateInfo] afterwards.
+typedef FollowUpdateInfoRow = ({
+  String id,
+  int type,
+  String? lastUpdateTime,
+  bool hasNewUpdate,
+  int? lastCheckTime,
+});
+
+/// Folder name -> rows carrying follow-update bookkeeping.
+typedef FollowUpdateInfoSnapshot = Map<String, List<FollowUpdateInfoRow>>;
+
 class LocalFavoritesManager with ChangeNotifier {
   factory LocalFavoritesManager() =>
       cache ?? (cache = LocalFavoritesManager._create());
@@ -1615,33 +1630,207 @@ class LocalFavoritesManager with ChangeNotifier {
   }
 
   void prepareTableForFollowUpdates(String table, [bool clearData = true]) {
-    // check if the table has the column "last_update_time" "has_new_update" "last_check_time"
-    var columns = _db.select("""
-      pragma table_info("$table");
-    """);
-    if (!columns.any((element) => element["name"] == "last_update_time")) {
-      _db.execute("""
-        alter table "$table"
-        add column last_update_time TEXT;
-      """);
-    }
-    if (!columns.any((element) => element["name"] == "has_new_update")) {
-      _db.execute("""
-        alter table "$table"
-        add column has_new_update int;
-      """);
-    }
+    _ensureUpdateColumns(_db, table);
     if (clearData) {
       _db.execute("""
         update "$table"
         set has_new_update = 0;
       """);
     }
-    if (!columns.any((element) => element["name"] == "last_check_time")) {
-      _db.execute("""
+  }
+
+  static Set<String> _columnsOf(CommonDatabase db, String table) {
+    return db
+        .select('pragma table_info("$table");')
+        .map((e) => e["name"] as String)
+        .toSet();
+  }
+
+  /// Adds the follow-update columns ("last_update_time", "has_new_update",
+  /// "last_check_time") to [table] if missing.
+  static void _ensureUpdateColumns(CommonDatabase db, String table) {
+    var columns = _columnsOf(db, table);
+    if (!columns.contains("last_update_time")) {
+      db.execute("""
+        alter table "$table"
+        add column last_update_time TEXT;
+      """);
+    }
+    if (!columns.contains("has_new_update")) {
+      db.execute("""
+        alter table "$table"
+        add column has_new_update int;
+      """);
+    }
+    if (!columns.contains("last_check_time")) {
+      db.execute("""
         alter table "$table"
         add column last_check_time int;
       """);
+    }
+  }
+
+  static List<String> _favoriteFolderTablesOf(CommonDatabase db) {
+    const requiredColumns = {
+      'id',
+      'name',
+      'author',
+      'tags',
+      'cover_path',
+      'time',
+    };
+    return db
+        .select("SELECT name FROM sqlite_master WHERE type='table';")
+        .map((e) => e["name"] as String)
+        .where(
+          (table) =>
+              !_nonFavoriteTables.contains(table) &&
+              !table.startsWith('sqlite_') &&
+              _columnsOf(db, table).containsAll(requiredColumns),
+        )
+        .toList();
+  }
+
+  /// Captures every row carrying follow-update bookkeeping, so it can be
+  /// merged back after a backup import replaces the database wholesale.
+  static FollowUpdateInfoSnapshot snapshotUpdateInfoOf(CommonDatabase db) {
+    var result = <String, List<FollowUpdateInfoRow>>{};
+    for (var table in _favoriteFolderTablesOf(db)) {
+      var columns = _columnsOf(db, table);
+      var hasTime = columns.contains('last_update_time');
+      var hasFlag = columns.contains('has_new_update');
+      var hasCheck = columns.contains('last_check_time');
+      if (!hasTime && !hasFlag && !hasCheck) {
+        continue;
+      }
+      var conditions = [
+        if (hasFlag) 'has_new_update == 1',
+        if (hasTime) 'last_update_time is not null',
+        if (hasCheck) 'last_check_time is not null',
+      ];
+      var rows = db.select(
+        'select * from "$table" where ${conditions.join(' or ')};',
+      );
+      var snapshot = <FollowUpdateInfoRow>[];
+      for (var row in rows) {
+        var id = row['id'];
+        var type = row['type'];
+        if (id is! String || type is! int) {
+          continue;
+        }
+        snapshot.add((
+          id: id,
+          type: type,
+          lastUpdateTime: hasTime ? row['last_update_time'] as String? : null,
+          hasNewUpdate: hasFlag && row['has_new_update'] == 1,
+          lastCheckTime: hasCheck
+              ? (row['last_check_time'] as num?)?.toInt()
+              : null,
+        ));
+      }
+      if (snapshot.isNotEmpty) {
+        result[table] = snapshot;
+      }
+    }
+    return result;
+  }
+
+  /// Re-applies a pre-import [snapshot] onto the just-imported database.
+  ///
+  /// Backups replace the favorites database wholesale, but follow-update
+  /// bookkeeping is written by each device's own update checks and may be
+  /// missing or stale in the incoming backup — without this merge, a startup
+  /// or catch-up sync download silently erased every unread update mark while
+  /// the follow-update task history kept counting them (#106).
+  ///
+  /// Per (id, type) row that exists on both sides:
+  /// - `has_new_update` is sticky-OR'd: an unread mark from either side
+  ///   survives; only the read path (markAsRead) may clear it.
+  /// - `last_update_time` / `last_check_time` follow the freshest check: they
+  ///   are restored from the snapshot only when its check is at least as
+  ///   recent as the imported row's. Restoring a stale baseline would make
+  ///   the next check re-flag comics the user already read; keeping a newer
+  ///   imported one preserves the other device's later observation.
+  ///
+  /// Rows or folders absent from the imported database are skipped: the
+  /// backup deleted them, and the merge must not resurrect anything.
+  static void mergeUpdateInfoInto(
+    CommonDatabase db,
+    FollowUpdateInfoSnapshot snapshot,
+  ) {
+    if (snapshot.isEmpty) {
+      return;
+    }
+    var tables = _favoriteFolderTablesOf(db).toSet();
+    db.execute('begin;');
+    try {
+      for (var entry in snapshot.entries) {
+        var table = entry.key;
+        if (!tables.contains(table)) {
+          continue;
+        }
+        _ensureUpdateColumns(db, table);
+        var statement = db.prepare("""
+          update "$table" set
+            has_new_update = (coalesce(has_new_update, 0) | ?),
+            last_update_time = case
+              when ? >= coalesce(last_check_time, 0) and ? is not null then ?
+              else last_update_time end,
+            last_check_time = case
+              when ? >= coalesce(last_check_time, 0) and ? is not null then ?
+              else last_check_time end
+          where id == ? and type == ?;
+        """);
+        try {
+          for (var row in entry.value) {
+            var checkTime = row.lastCheckTime ?? 0;
+            statement.execute([
+              row.hasNewUpdate ? 1 : 0,
+              checkTime,
+              row.lastUpdateTime,
+              row.lastUpdateTime,
+              checkTime,
+              row.lastCheckTime,
+              row.lastCheckTime,
+              row.id,
+              row.type,
+            ]);
+          }
+        } finally {
+          statement.dispose();
+        }
+      }
+      db.execute('commit;');
+    } catch (_) {
+      db.execute('rollback;');
+      rethrow;
+    }
+  }
+
+  /// See [snapshotUpdateInfoOf]. Returns an empty snapshot (never throws) so
+  /// a bookkeeping failure can't abort the import that calls it.
+  FollowUpdateInfoSnapshot snapshotUpdateInfo() {
+    if (!isInitialized) {
+      return const {};
+    }
+    try {
+      return snapshotUpdateInfoOf(_db);
+    } catch (e, s) {
+      Log.error("Follow Updates", "Failed to snapshot update info: $e", s);
+      return const {};
+    }
+  }
+
+  /// See [mergeUpdateInfoInto]. Failures are logged, not thrown — a merge
+  /// problem must not fail the whole import.
+  void mergeUpdateInfo(FollowUpdateInfoSnapshot snapshot) {
+    if (!isInitialized || snapshot.isEmpty) {
+      return;
+    }
+    try {
+      mergeUpdateInfoInto(_db, snapshot);
+    } catch (e, s) {
+      Log.error("Follow Updates", "Failed to merge update info: $e", s);
     }
   }
 

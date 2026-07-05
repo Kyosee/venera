@@ -517,12 +517,20 @@ Future<void> _importAppDataLocked(
     }
     if (await localFavoriteFile.exists()) {
       report(ImportPhase.applying, 'Importing favorites');
+      // The swap below replaces the favorites DB wholesale, but follow-update
+      // bookkeeping (has_new_update / last_update_time / last_check_time) is
+      // written by THIS device's update checks and may be missing or stale in
+      // the incoming backup — a startup or catch-up sync download used to
+      // silently erase every unread update mark while the follow-update task
+      // history kept counting them (#106). Snapshot it and merge it back in.
+      var updateInfo = LocalFavoritesManager().snapshotUpdateInfo();
       LocalFavoritesManager().close();
       _replaceDatabaseFile(
         localFavoriteFile,
         FilePath.join(App.dataPath, "local_favorite.db"),
       );
-      LocalFavoritesManager().init();
+      await LocalFavoritesManager().init();
+      LocalFavoritesManager().mergeUpdateInfo(updateInfo);
     }
     if (await domainFile.exists()) {
       report(ImportPhase.applying, 'Importing library');
