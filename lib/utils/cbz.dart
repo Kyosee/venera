@@ -27,26 +27,27 @@ class ComicMetaData {
   final List<ComicChapter>? chapters;
 
   Map<String, dynamic> toJson() => {
-        'title': title,
-        'author': author,
-        'artist': artist,
-        'description': description,
-        'status': status,
-        'tags': tags,
-        'chapters': chapters?.map((e) => e.toJson()).toList()
-      };
+    'title': title,
+    'author': author,
+    'artist': artist,
+    'description': description,
+    'status': status,
+    'tags': tags,
+    'chapters': chapters?.map((e) => e.toJson()).toList(),
+  };
 
   ComicMetaData.fromJson(Map<String, dynamic> json)
-      : title = json['title'] ?? '',
-        author = json['author'] ?? '',
-        artist = json['artist'] ?? '',
-        description = json['description'] ?? '',
-        status = json['status'] ?? '',
-        tags = List<String>.from(json['tags'] ?? const []),
-        chapters = json['chapters'] == null
-            ? null
-            : List<ComicChapter>.from(
-                json['chapters'].map((e) => ComicChapter.fromJson(e)));
+    : title = json['title'] ?? '',
+      author = json['author'] ?? '',
+      artist = json['artist'] ?? '',
+      description = json['description'] ?? '',
+      status = json['status'] ?? '',
+      tags = List<String>.from(json['tags'] ?? const []),
+      chapters = json['chapters'] == null
+          ? null
+          : List<ComicChapter>.from(
+              json['chapters'].map((e) => ComicChapter.fromJson(e)),
+            );
 
   ComicMetaData({
     required this.title,
@@ -69,9 +70,9 @@ class ComicChapter {
   Map<String, dynamic> toJson() => {'title': title, 'start': start, 'end': end};
 
   ComicChapter.fromJson(Map<String, dynamic> json)
-      : title = json['title'],
-        start = json['start'],
-        end = json['end'];
+    : title = json['title'],
+      start = json['start'],
+      end = json['end'];
 
   ComicChapter({required this.title, required this.start, required this.end});
 }
@@ -156,7 +157,8 @@ abstract class CBZ {
       for (var i = 0; i < files.length; i++) {
         var src = files[i];
         var dst = File(
-            FilePath.join(dest.path, '${i + 1}.${src.path.split('.').last}'));
+          FilePath.join(dest.path, '${i + 1}.${src.path.split('.').last}'),
+        );
         await src.copyMem(dst.path);
       }
     } else {
@@ -173,8 +175,12 @@ abstract class CBZ {
         chapterDir.createSync();
         for (var i = 0; i < chapter.value.length; i++) {
           var src = chapter.value[i];
-          var dst = File(FilePath.join(
-              chapterDir.path, '${i + 1}.${src.path.split('.').last}'));
+          var dst = File(
+            FilePath.join(
+              chapterDir.path,
+              '${i + 1}.${src.path.split('.').last}',
+            ),
+          );
           await src.copyMem(dst.path);
         }
       }
@@ -201,80 +207,87 @@ abstract class CBZ {
     // 'cbz_export' dir was left behind whenever an export threw mid-way
     // (large libraries copy every image, so a disk-full/IO error is real),
     // and only got cleared on the next export's entry.
-    var cache = Directory(FilePath.join(
-      App.cachePath,
-      'cbz_export_${DateTime.now().microsecondsSinceEpoch}',
-    ));
+    var cache = Directory(
+      FilePath.join(
+        App.cachePath,
+        'cbz_export_${DateTime.now().microsecondsSinceEpoch}',
+      ),
+    );
     if (cache.existsSync()) cache.deleteSync(recursive: true);
     cache.createSync();
     try {
-    List<ComicChapter>? chapters;
-    if (comic.chapters == null) {
-      var images = await LocalManager().getImages(comic.id, comic.comicType, 1);
-      int i = 1;
-      for (var image in images) {
-        var src = File(image.replaceFirst('file://', ''));
-        var width = images.length.toString().length;
-        var dstName =
-            '${i.toString().padLeft(width, '0')}.${image.split('.').last}';
-        var dst = File(FilePath.join(cache.path, dstName));
-        await src.copyMem(dst.path);
-        i++;
-      }
-    } else {
-      chapters = [];
-      var allImages = <String>[];
-      for (var c in comic.downloadedChapters) {
-        var chapterName = comic.chapters![c];
+      List<ComicChapter>? chapters;
+      if (comic.chapters == null) {
         var images = await LocalManager().getImages(
           comic.id,
           comic.comicType,
-          c,
+          1,
         );
-        allImages.addAll(images);
-        var chapter = ComicChapter(
-          title: chapterName!,
-          start: chapters.length + 1,
-          end: chapters.length + images.length,
-        );
-        chapters.add(chapter);
+        int i = 1;
+        for (var image in images) {
+          var src = File(image.replaceFirst('file://', ''));
+          var width = images.length.toString().length;
+          var dstName =
+              '${i.toString().padLeft(width, '0')}.${image.split('.').last}';
+          var dst = File(FilePath.join(cache.path, dstName));
+          await src.copyMem(dst.path);
+          i++;
+        }
+      } else {
+        chapters = [];
+        var allImages = <String>[];
+        for (var c in comic.downloadedChapters) {
+          var chapterName = comic.chapters![c];
+          var images = await LocalManager().getImages(
+            comic.id,
+            comic.comicType,
+            c,
+          );
+          allImages.addAll(images);
+          var chapter = ComicChapter(
+            title: chapterName!,
+            start: chapters.length + 1,
+            end: chapters.length + images.length,
+          );
+          chapters.add(chapter);
+        }
+        int i = 1;
+        for (var image in allImages) {
+          var src = File(image);
+          var width = allImages.length.toString().length;
+          var dstName =
+              '${i.toString().padLeft(width, '0')}.${image.split('.').last}';
+          var dst = File(FilePath.join(cache.path, dstName));
+          await src.copyMem(dst.path);
+          i++;
+        }
       }
-      int i = 1;
-      for (var image in allImages) {
-        var src = File(image);
-        var width = allImages.length.toString().length;
-        var dstName =
-            '${i.toString().padLeft(width, '0')}.${image.split('.').last}';
-        var dst = File(FilePath.join(cache.path, dstName));
-        await src.copyMem(dst.path);
-        i++;
-      }
-    }
-    var cover = comic.coverFile;
-    await cover.copyMem(
-        FilePath.join(cache.path, 'cover.${cover.path.split('.').last}'));
-    final statusTag = comic.tags.firstWhere(
-      (t) => t.startsWith('Status:'),
-      orElse: () => '',
-    );
-    final metaData = ComicMetaData(
-      title: comic.title,
-      author: comic.subtitle,
-      tags: comic.tags,
-      chapters: chapters,
-      description: comic.description,
-      status: statusTag.isEmpty ? '' : statusTag.substring('Status:'.length),
-    );
-    await File(FilePath.join(cache.path, 'metadata.json')).writeAsString(
-      jsonEncode(metaData),
-    );
-    await File(FilePath.join(cache.path, 'ComicInfo.xml')).writeAsString(
-      _buildComicInfoXml(metaData),
-    );
-    var cbz = File(outFilePath);
-    if (cbz.existsSync()) cbz.deleteSync();
-    await _compress(cache.path, cbz.path);
-    return cbz;
+      var cover = comic.coverFile;
+      await cover.copyMem(
+        FilePath.join(cache.path, 'cover.${cover.path.split('.').last}'),
+      );
+      final statusTag = comic.tags.firstWhere(
+        (t) => t.startsWith('Status:'),
+        orElse: () => '',
+      );
+      final metaData = ComicMetaData(
+        title: comic.title,
+        author: comic.subtitle,
+        tags: comic.tags,
+        chapters: chapters,
+        description: comic.description,
+        status: statusTag.isEmpty ? '' : statusTag.substring('Status:'.length),
+      );
+      await File(
+        FilePath.join(cache.path, 'metadata.json'),
+      ).writeAsString(jsonEncode(metaData));
+      await File(
+        FilePath.join(cache.path, 'ComicInfo.xml'),
+      ).writeAsString(_buildComicInfoXml(metaData));
+      var cbz = File(outFilePath);
+      if (cbz.existsSync()) cbz.deleteSync();
+      await _compress(cache.path, cbz.path);
+      return cbz;
     } finally {
       cache.deleteIgnoreError(recursive: true);
     }
@@ -283,7 +296,9 @@ abstract class CBZ {
   static String _buildComicInfoXml(ComicMetaData data) {
     final buffer = StringBuffer();
     buffer.writeln('<?xml version="1.0" encoding="utf-8"?>');
-    buffer.writeln('<ComicInfo xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">');
+    buffer.writeln(
+      '<ComicInfo xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">',
+    );
 
     buffer.writeln('  <Title>${_escapeXml(data.title)}</Title>');
     buffer.writeln('  <Series>${_escapeXml(data.title)}</Series>');
@@ -313,9 +328,12 @@ abstract class CBZ {
     }
 
     if (data.chapters != null && data.chapters!.isNotEmpty) {
-      final chaptersInfo = data.chapters!.map((chapter) =>
-        '${_escapeXml(chapter.title)}: ${chapter.start}-${chapter.end}'
-      ).join('; ');
+      final chaptersInfo = data.chapters!
+          .map(
+            (chapter) =>
+                '${_escapeXml(chapter.title)}: ${chapter.start}-${chapter.end}',
+          )
+          .join('; ');
       buffer.writeln('  <Notes>Chapters: $chaptersInfo</Notes>');
     }
 
@@ -331,15 +349,14 @@ abstract class CBZ {
 
   static String _escapeXml(String text) {
     return text
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&apos;');
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&apos;');
   }
 
   static _compress(String src, String dst) async {
     await ZipFile.compressFolderAsync(src, dst, 4);
   }
 }
-

@@ -359,11 +359,7 @@ class ExportTaskManager with ChangeNotifier {
             await copyFileStreaming(
               produced,
               target,
-              onProgress: (copied, totalBytes) {
-                task.writeProgress =
-                    totalBytes == 0 ? null : copied / totalBytes;
-                notifyListeners();
-              },
+              onProgress: _writeProgress(task),
             );
             task.writeProgress = null;
             produced.deleteIgnoreError();
@@ -408,6 +404,23 @@ class ExportTaskManager with ChangeNotifier {
       _persist();
       notifyListeners();
     }
+  }
+
+  /// Byte-progress callback for the destination write. Updates the task's
+  /// [ExportTask.writeProgress] but only notifies listeners when the integer
+  /// percentage changes, so a multi-GB write drives at most ~100 UI rebuilds
+  /// instead of one per 8 MiB chunk.
+  void Function(int, int) _writeProgress(ExportTask task) {
+    var lastPercent = -1;
+    return (copied, totalBytes) {
+      final frac = totalBytes == 0 ? null : copied / totalBytes;
+      task.writeProgress = frac;
+      final percent = frac == null ? -1 : (frac * 100).floor();
+      if (percent != lastPercent) {
+        lastPercent = percent;
+        notifyListeners();
+      }
+    };
   }
 
   void _refreshKeepAlive(ExportTask task) {
@@ -481,10 +494,7 @@ class ExportTaskManager with ChangeNotifier {
     await copyFileStreaming(
       produced,
       target,
-      onProgress: (copied, totalBytes) {
-        task.writeProgress = totalBytes == 0 ? null : copied / totalBytes;
-        notifyListeners();
-      },
+      onProgress: _writeProgress(task),
     );
     task.writeProgress = null;
     produced.deleteIgnoreError();
