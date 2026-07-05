@@ -9,6 +9,7 @@ import 'package:venera/foundation/background_keepalive.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/data_sync_tasks.dart';
 import 'package:venera/foundation/favorites.dart';
+import 'package:venera/foundation/history.dart';
 import 'package:venera/foundation/read_later.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/res.dart';
@@ -16,7 +17,7 @@ import 'package:venera/network/app_dio_io.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/init.dart' show deferredInitCompleter;
 import 'package:venera/utils/data.dart';
-import 'package:venera/utils/ext.dart';
+import 'package:venera/utils/sync_protocol.dart';
 import 'package:venera/utils/venera_comics.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite3_pkg;
 import 'package:webdav_client/webdav_client.dart' hide File;
@@ -24,72 +25,10 @@ import 'package:venera/utils/translations.dart';
 
 import 'io.dart';
 
-/// The version number to stamp on a freshly uploaded WebDAV backup.
-///
-/// It must beat BOTH the local version and the highest version already on the
-/// server. Deriving it from the local version alone let a device whose local
-/// version trailed the server — a fresh device, or one that just imported a
-/// foreign archive carrying an unrelated lower `dataVersion` — upload a backup
-/// that the numeric version-based sync direction treated as "older", so other
-/// devices never pulled it (issue #80). Pure function, easy to unit-test.
-int nextSyncVersion(int localVersion, int remoteMaxVersion) =>
-    (localVersion > remoteMaxVersion ? localVersion : remoteMaxVersion) + 1;
-
-/// Whether an automatic upload must be skipped because this device is behind
-/// the server, and should download first instead of overwriting newer remote
-/// data with its own stale snapshot (issue #86).
-///
-/// Sync is a whole-library snapshot with last-writer-wins keyed on the numeric
-/// version. If a device holding older data ([localVersion] < [remoteMaxVersion])
-/// uploads, [nextSyncVersion] stamps that stale snapshot with `remoteMax + 1`,
-/// making every other device pull the old data back and revert the newer data
-/// they had. Guarding automatic uploads against this is the fix.
-///
-/// [force] uploads are explicit "publish, this is the source of truth" actions
-/// (manual upload button, local-file import, headless CLI) and intentionally
-/// bypass the guard, preserving the #80 "always wins" behavior. Pure function.
-bool shouldSkipStaleUpload({
-  required bool force,
-  required int localVersion,
-  required int remoteMaxVersion,
-}) =>
-    !force && remoteMaxVersion > localVersion;
-
-/// Highest backup version present among [fileNames], or 0 when none parse.
-///
-/// Compares by numeric version (via [RemoteBackupInfo.fromFileName]), never by
-/// file-name string order — `…-10.venera` outranks `…-9.venera`. Skips null and
-/// non-`.venera` entries. Pure function, easy to unit-test.
-int maxBackupVersion(Iterable<String?> fileNames) {
-  var max = 0;
-  for (final name in fileNames) {
-    if (name == null || !name.endsWith('.venera')) continue;
-    final v = RemoteBackupInfo.fromFileName(name).version;
-    if (v > max) max = v;
-  }
-  return max;
-}
-
-/// The backup to prune when capping server retention: the one with the LOWEST
-/// numeric version (the oldest in the version lineage), or null when none parse.
-///
-/// Selecting by numeric version — never by lexicographic file-name order — is
-/// essential here too: string order ranks `…-100.venera` below `…-99.venera`,
-/// so a string sort would delete version 100, i.e. the NEWEST backup that every
-/// other device syncs from. Skips null and non-`.venera` entries. Pure function.
-String? lowestVersionBackup(Iterable<String?> fileNames) {
-  String? lowest;
-  int? lowestVersion;
-  for (final name in fileNames) {
-    if (name == null || !name.endsWith('.venera')) continue;
-    final v = RemoteBackupInfo.fromFileName(name).version;
-    if (lowestVersion == null || v < lowestVersion) {
-      lowestVersion = v;
-      lowest = name;
-    }
-  }
-  return lowest;
-}
+// All sync direction / version / file-selection DECISIONS are pure functions
+// in sync_protocol.dart — one audited, unit-tested place. This file owns only
+// IO, locking, task/UI surface and triggers.
+export 'package:venera/utils/sync_protocol.dart';
 
 class DataSync with ChangeNotifier {
   DataSync._() {
@@ -99,6 +38,11 @@ class DataSync with ChangeNotifier {
     LocalFavoritesManager().addListener(onDataChanged);
     ComicSourceManager().addListener(onDataChanged);
     ReadLaterManager().addListener(onDataChanged);
+    // History and image-favorites changes must schedule an upload too:
+    // without these, a deletion made on this device was silently reverted by
+    // the next pull from a device still holding the record.
+    HistoryManager().addListener(onDataChanged);
+    ImageFavoriteManager().addListener(onDataChanged);
     if (App.isDesktop) {
       Future.delayed(const Duration(seconds: 1), () {
         var controller = WindowFrame.of(App.rootContext);
@@ -181,23 +125,68 @@ class DataSync with ChangeNotifier {
     return [];
   }
 
-  void onDataChanged() {
-    if (isEnabled) {
-      _pendingAutoUpload?.cancel();
-      _pendingAutoUpload = Timer(const Duration(seconds: 2), () {
-        _pendingAutoUpload = null;
-        uploadData();
-      });
+  /// True while a downloaded/imported backup is being APPLIED to local state.
+  ///
+  /// Applying a backup closes and re-inits the favorites/read-later/comic-source
+  /// managers, and every one of those `init()`/`reload()` calls fires
+  /// `notifyListeners` — the very listeners wired to [onDataChanged]. Without
+  /// this flag every successful download was followed ~2s later by an "echo"
+  /// upload of the just-downloaded content stamped one version higher: two
+  /// aligned devices ping-ponged versions forever, a restored old backup was
+  /// instantly re-published fleet-wide, and server retention churned. Data
+  /// changes caused by APPLYING remote/imported data must never re-upload it.
+  bool _isApplyingBackup = false;
+
+  /// Runs [apply] (an importAppData-based restore) with echo-upload
+  /// suppression, also cancelling any auto-upload already pending — that
+  /// debounced change is about to be overwritten by the backup anyway.
+  Future<T> applyBackup<T>(Future<T> Function() apply) async {
+    _pendingAutoUpload?.cancel();
+    _pendingAutoUpload = null;
+    _isApplyingBackup = true;
+    try {
+      return await apply();
+    } finally {
+      _isApplyingBackup = false;
     }
+  }
+
+  /// Single funnel for every AUTOMATIC upload trigger (manager listeners,
+  /// settings/search-history saves, comic-source saves). Honors the user's
+  /// auto-sync toggle, ignores echo notifications while a backup is being
+  /// applied, and debounces bursts. Explicit publishes (manual button, local
+  /// import, headless CLI) do not come through here — they call
+  /// [uploadData] with `force: true` directly.
+  void requestAutoUpload() {
+    if (!isEnabled) return;
+    if (_isApplyingBackup) return;
+    _pendingAutoUpload?.cancel();
+    _pendingAutoUpload = Timer(const Duration(seconds: 2), () {
+      _pendingAutoUpload = null;
+      if (_isApplyingBackup) return;
+      uploadData();
+    });
+  }
+
+  void onDataChanged() {
+    requestAutoUpload();
   }
 
   bool _handleWindowClose() {
     if (_pendingAutoUpload?.isActive ?? false) {
       _pendingAutoUpload?.cancel();
       _pendingAutoUpload = null;
-      uploadData();
+      // Flush the pending change before exit. Deliberately NOT forced: if this
+      // device is behind the server, uploading would overwrite newer remote
+      // data (#86). The guard inside uploadData skips the stale push; we do
+      // not let it convert into a download either — pulling a whole backup
+      // during window close would silently revert the change the user just
+      // made and delay shutdown. Skipping is the safe, predictable choice.
+      uploadData(allowCatchUpDownload: false);
     }
-    if (_isUploading || _isDownloading || _haveWaitingTask) {
+    // Include image sync: exiting mid-PUT used to leave a partial pack on the
+    // server that the dedup check then treated as complete forever.
+    if (_isUploading || _isDownloading || _haveWaitingTask || _isSyncingImages) {
       _showWindowCloseDialog();
       return false;
     }
@@ -212,7 +201,10 @@ class DataSync with ChangeNotifier {
       barrierDismissible: false,
       message: "Syncing Data".tl,
     );
-    while (_isUploading || _isDownloading || _haveWaitingTask) {
+    while (_isUploading ||
+        _isDownloading ||
+        _haveWaitingTask ||
+        _isSyncingImages) {
       await Future.delayed(const Duration(milliseconds: 50));
     }
     exit(0);
@@ -388,7 +380,10 @@ class DataSync with ChangeNotifier {
   /// stays unforced so that a device losing a race — the server gaining a newer
   /// backup between syncData's direction check and this re-read — pulls instead
   /// of overwriting it.
-  Future<Res<bool>> uploadData({bool force = false}) async {
+  Future<Res<bool>> uploadData({
+    bool force = false,
+    bool allowCatchUpDownload = true,
+  }) async {
     // No usable WebDAV config → nothing to sync. saveData() funnels every
     // settings/search-history change through here (plus comic-source saves,
     // imports, ...), so without bailing out up front an empty or malformed
@@ -398,6 +393,9 @@ class DataSync with ChangeNotifier {
     final config = _validateConfig();
     if (config == null) {
       _lastError = 'Invalid WebDAV configuration';
+      // Surface the error state on the sync button; without this the button
+      // stayed visibly idle and taps appeared to do nothing.
+      notifyListeners();
       return const Res.error('Invalid WebDAV configuration');
     }
     if (config.isEmpty) {
@@ -407,7 +405,10 @@ class DataSync with ChangeNotifier {
     _pendingAutoUpload?.cancel();
     _pendingAutoUpload = null;
     if (_haveWaitingTask) return const Res(true);
-    while (isDownloading || isUploading) {
+    // Waits for image sync too: exportAppData snapshots local.db while image
+    // sync may be importing packs into it. Image sync yields between comics
+    // when it sees _haveWaitingTask, so this wait is bounded.
+    while (isDownloading || isUploading || isSyncingImages) {
       _haveWaitingTask = true;
       await Future.delayed(const Duration(milliseconds: 100));
     }
@@ -506,19 +507,19 @@ class DataSync with ChangeNotifier {
             'Skipped: local behind server, downloading first',
           );
           taskManager.cancelTask(task.id);
-          // Release the upload lock so the download we kick off below doesn't
-          // wait on our own in-flight flag. downloadData()'s synchronous prefix
-          // sets _isDownloading before its first await, so the outer finally
-          // sees the download has taken over and keeps the keep-alive up rather
-          // than flickering it off.
-          _isUploading = false;
-          unawaited(downloadData());
+          if (allowCatchUpDownload) {
+            // Release the upload lock so the download we kick off below doesn't
+            // wait on our own in-flight flag. downloadData()'s synchronous prefix
+            // sets _isDownloading before its first await, so the outer finally
+            // sees the download has taken over and keeps the keep-alive up rather
+            // than flickering it off.
+            _isUploading = false;
+            unawaited(downloadData());
+          }
           return const Res(true);
         }
 
         final nextVersion = nextSyncVersion(previousVersion, remoteMax);
-        appdata.settings['dataVersion'] = nextVersion;
-        await appdata.saveData(false);
 
         taskManager.updateTask(task.id, currentPhase: 'Exporting', progress: 0.3);
         data = await exportAppData(
@@ -544,24 +545,54 @@ class DataSync with ChangeNotifier {
           formatTaskStatus(title: 'Uploading data'.tl, detail: filename),
         );
 
-        var old = files.firstWhereOrNull((e) => e.name!.startsWith("$time-"));
-        if (old != null) {
-          await client.remove(old.name!);
+        // Publish FIRST, claim and clean up after. The old order — persist
+        // dataVersion, delete today's previous backup, then write — had two
+        // failure holes: a process kill mid-upload left a local claim to a
+        // version that exists nowhere ("phantom version", which later makes
+        // this device skip other devices' legitimate uploads at the same
+        // number), and a failed write after the delete permanently destroyed
+        // the day's newest snapshot. Writing the new backup before touching
+        // anything else means every failure mode leaves the server holding at
+        // least everything it held before.
+        taskManager.updateTask(task.id, currentPhase: 'Uploading', progress: 0.7);
+        await client.write(filename, await data.readAsBytes());
+        data.deleteIgnoreError();
+
+        // The backup is on the server — only now adopt the version locally.
+        appdata.settings['dataVersion'] = nextVersion;
+        await appdata.saveData(false);
+
+        // Supersede today's OWN earlier backup(s). Restricted to this
+        // platform: a bare "$time-" prefix match would also delete a backup
+        // another device uploaded today — possibly the fleet's newest data.
+        for (final stale in sameDayOwnBackups(
+          fileNames: files.map((e) => e.name),
+          day: time,
+          platform: _platformTag(),
+          newFileName: filename,
+        )) {
+          try {
+            await client.remove(stale);
+          } catch (e) {
+            // Cleanup is best-effort; the new backup is already safe.
+            Log.warning("Upload Data", "Failed to prune same-day backup $stale: $e");
+          }
         }
         if (files.length >= 10) {
           // Prune the oldest by NUMERIC version, never the lexicographically
           // first — string order ranks "…-100" below "…-99" and would delete
-          // the newest backup every other device syncs from. Exclude the
-          // same-day backup just removed above so it is never targeted twice.
+          // the newest backup every other device syncs from.
           final toPrune = lowestVersionBackup(
-            files.where((e) => e.name != old?.name).map((e) => e.name),
+            files.map((e) => e.name).where((n) => n != filename),
           );
-          if (toPrune != null) await client.remove(toPrune);
+          if (toPrune != null) {
+            try {
+              await client.remove(toPrune);
+            } catch (e) {
+              Log.warning("Upload Data", "Failed to prune $toPrune: $e");
+            }
+          }
         }
-
-        taskManager.updateTask(task.id, currentPhase: 'Uploading', progress: 0.7);
-        await client.write(filename, await data.readAsBytes());
-        data.deleteIgnoreError();
 
         Log.info("Upload Data", "Data uploaded successfully");
         _addSyncLog('upload', filename, true, null);
@@ -569,8 +600,8 @@ class DataSync with ChangeNotifier {
         _scheduleImageSync();
         return const Res(true);
       } catch (e, s) {
-        appdata.settings['dataVersion'] = previousVersion;
-        await appdata.saveData(false);
+        // dataVersion is only adopted AFTER a successful publish, so a failure
+        // here needs no version rollback — the local claim never moved.
         Log.error("Upload Data", e, s);
         _lastError = e.toString();
         _addSyncLog('upload', null, false, e.toString());
@@ -587,8 +618,22 @@ class DataSync with ChangeNotifier {
   }
 
   Future<Res<bool>> downloadData() async {
+    // Never apply a backup while heavy init is still opening the very SQLite
+    // files importAppData swaps — that race was the iOS startup crash loop.
+    // _runStartupDownload already waits, but downloads can also be reached
+    // early via the #86 catch-up path (auto upload converted to download);
+    // gate ALL of them here. Headless completes the completer right after its
+    // own init, so CLI runs don't stall on the timeout.
+    if (!deferredInitCompleter.isCompleted) {
+      try {
+        await deferredInitCompleter.future.timeout(const Duration(seconds: 60));
+      } catch (_) {}
+    }
     if (_haveWaitingTask) return const Res(true);
-    while (isDownloading || isUploading) {
+    // Also wait for image sync: applying a backup swaps local.db, which image
+    // sync reads/writes (use-after-close otherwise). Image sync yields between
+    // comics when it sees us waiting, so this wait is bounded.
+    while (isDownloading || isUploading || isSyncingImages) {
       _haveWaitingTask = true;
       await Future.delayed(const Duration(milliseconds: 100));
     }
@@ -631,8 +676,16 @@ class DataSync with ChangeNotifier {
         var files = await client.readDir('/');
         var file = _latestBackup(files, (e) => e.name);
         if (file == null) {
-          taskManager.failTask(task.id, 'No data file found');
-          throw 'No data file found';
+          // Empty server: nothing to pull, and there never will be until
+          // someone uploads. Treating this as a failure used to deadlock a
+          // brand-new fleet — the initial-sync flag stayed unset, which
+          // blocked every upload ("complete initial sync first"), which meant
+          // the server stayed empty forever. An empty server IS a completed
+          // initial sync: this device holds the fleet's only data.
+          _markInitialSyncCompleted();
+          Log.info("Data Sync", 'No backups on server; initial sync complete');
+          taskManager.completeTask(task.id);
+          return const Res(true);
         }
         var remoteVersion = _versionOfFileName(file.name!);
         var currentVersion = _dataVersion();
@@ -665,7 +718,11 @@ class DataSync with ChangeNotifier {
 
           taskManager.updateTask(task.id, currentPhase: 'Applying', progress: 0.6);
 
-          await importAppData(localFile, checkVersion: true);
+          // applyBackup suppresses the echo: applying re-inits the favorites/
+          // read-later/comic-source managers, whose notifyListeners used to
+          // fire onDataChanged and re-upload the just-downloaded data 2s
+          // later, one version higher — aligned devices ping-ponged forever.
+          await applyBackup(() => importAppData(localFile, checkVersion: true));
           if (!_hasCompletedInitialSync()) {
             _markInitialSyncCompleted();
           }
@@ -719,6 +776,9 @@ class DataSync with ChangeNotifier {
       var files = await client.readDir('/');
       var file = _latestBackup(files, (e) => e.name);
       if (file == null) {
+        // Empty server: this device's data is the fleet's only copy. Mark
+        // initial sync complete so the first publish isn't gated, then upload.
+        _markInitialSyncCompleted();
         return uploadData();
       }
       if (_versionOfFileName(file.name!) > _dataVersion()) {
@@ -726,7 +786,14 @@ class DataSync with ChangeNotifier {
       }
       return uploadData();
     } catch (e) {
-      return uploadData();
+      // Could not even LIST the server. Blindly falling back to an upload
+      // here could push stale data whose staleness we failed to detect; the
+      // in-upload guard re-reads the directory anyway, so if that read also
+      // fails the upload fails too. Surface the error instead of pretending.
+      Log.error("Data Sync", e);
+      _lastError = e.toString();
+      notifyListeners();
+      return Res.error(e.toString());
     }
   }
 
@@ -754,7 +821,9 @@ class DataSync with ChangeNotifier {
 
   Future<Res<bool>> downloadSpecificBackup(String fileName) async {
     if (_haveWaitingTask) return const Res(true);
-    while (isDownloading || isUploading) {
+    // Waits for image sync too — the apply below swaps the very SQLite files
+    // image sync reads/writes.
+    while (isDownloading || isUploading || isSyncingImages) {
       _haveWaitingTask = true;
       await Future.delayed(const Duration(milliseconds: 100));
     }
@@ -764,7 +833,9 @@ class DataSync with ChangeNotifier {
     notifyListeners();
     try {
       var config = _validateConfig();
-      if (config == null) return const Res.error('Invalid WebDAV configuration');
+      if (config == null || config.isEmpty) {
+        return const Res.error('Invalid WebDAV configuration');
+      }
       String url = config[0];
       String user = config[1];
       String pass = config[2];
@@ -775,30 +846,37 @@ class DataSync with ChangeNotifier {
         formatTaskStatus(title: 'Downloading data'.tl, detail: fileName),
       );
       try {
-        var files = await client.readDir('/');
-        var latest = _latestBackup(files, (e) => e.name);
-        int maxRemoteVersion = 0;
-        if (latest != null) {
-          maxRemoteVersion = _versionOfFileName(latest.name!);
-        }
-
         var localFile = File(FilePath.join(App.cachePath, fileName));
         try {
           await client.read2File(fileName, localFile.path);
-          await importAppData(localFile, checkVersion: false);
+          // Suppress the echo upload the manager re-inits would fire.
+          await applyBackup(
+            () => importAppData(localFile, checkVersion: false),
+          );
         } finally {
           localFile.deleteIgnoreError();
         }
 
-        appdata.settings['dataVersion'] = maxRemoteVersion + 1;
-        await appdata.saveData(false);
-
-        // Apply imported appearance settings (e.g. theme color) immediately
-        // rather than only after a restart (#87).
+        // Restoring an old backup is an explicit "make this the state again".
+        // The old approach claimed dataVersion = remoteMax + 1 locally WITHOUT
+        // publishing a backup at that version — a phantom claim. When another
+        // device later uploaded (legitimately) at that same number, this
+        // device judged it "not newer" and skipped it, then steamrolled it on
+        // its own next upload. Instead, publish the restored state as a real
+        // new backup: uploadData stamps it above the server max and only
+        // adopts the version after the write succeeds, so claim == published.
+        // (importAppData -> appdata.syncData already max-merged dataVersion,
+        // so a force upload here lands above everything on the server.)
         App.forceRebuild();
 
         if (!_hasCompletedInitialSync()) _markInitialSyncCompleted();
         _addSyncLog('download', fileName, true, null);
+
+        // Release the download lock before the publish upload; uploadData
+        // busy-waits on it otherwise.
+        _isDownloading = false;
+        unawaited(uploadData(force: true));
+
         // Mirror downloadData: the backup only restores base app data. If the
         // user has image-pack sync enabled locally, download the comic image
         // packs in the background instead of blocking this call.
@@ -836,8 +914,18 @@ class DataSync with ChangeNotifier {
 
   Future<void> syncComicImages() async {
     if (_isSyncingImages || !_shouldSyncImages()) return;
+    // Mutual exclusion with data sync. Image packs read from and import into
+    // local.db — running while downloadData's importAppData swaps that very
+    // file was a use-after-close race. Wait without consuming the
+    // _haveWaitingTask slot (that queue belongs to real data syncs); data
+    // sync waits for us symmetrically via isSyncingImages in its wait loops.
+    while (isDownloading || isUploading) {
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+    if (_isSyncingImages) return;
     _isSyncingImages = true;
     notifyListeners();
+    var failures = 0;
     try {
       var config = _validateConfig();
       if (config == null || config.isEmpty) return;
@@ -855,10 +943,19 @@ class DataSync with ChangeNotifier {
       // most background-prone sync op — hold the process across backgrounding.
       _refreshSyncKeepAlive('Syncing images'.tl);
       await _ensureComicsDir(client);
-      await _uploadComicImages(client);
-      await _downloadComicImages(client);
+      failures += await _uploadComicImages(client);
+      failures += await _downloadComicImages(client);
+      // Image sync used to be entirely invisible; record the pass so the
+      // sync-log page reflects reality.
+      _addSyncLog(
+        'images',
+        null,
+        failures == 0,
+        failures == 0 ? null : '$failures comic(s) failed',
+      );
     } catch (e, s) {
       Log.error("Image Sync", e, s);
+      _addSyncLog('images', null, false, e.toString());
     } finally {
       _isSyncingImages = false;
       _maybeStopSyncKeepAlive();
@@ -876,11 +973,13 @@ class DataSync with ChangeNotifier {
     }
   }
 
-  Future<void> _uploadComicImages(Client client) async {
+  /// Uploads image packs for downloaded comics missing on the server.
+  /// Returns the number of comics that failed.
+  Future<int> _uploadComicImages(Client client) async {
     var comics = LocalManager().getComics(LocalSortType.defaultSort)
         .where((c) => c.status == LocalComicStatus.downloaded)
         .toList();
-    if (comics.isEmpty) return;
+    if (comics.isEmpty) return 0;
 
     List<String> remoteFiles;
     try {
@@ -893,32 +992,52 @@ class DataSync with ChangeNotifier {
       remoteFiles = [];
     }
 
+    var failures = 0;
     for (var comic in comics) {
-      var fileName =
-          '${comic.id}_${comic.comicType.value}.venera_comics';
+      var fileName = _imagePackFileName(comic);
+      // Ids containing path separators can't map to a server file name; a raw
+      // '/' both broke the dedup check (readDir returns basenames) and made
+      // every pass re-export and re-upload the pack forever.
+      if (fileName == null) continue;
       if (remoteFiles.contains(fileName)) continue;
+      // A data sync wants the lock — finish this comic's turn and yield; the
+      // rescheduled pass will pick up where we left off.
+      if (_haveWaitingTask) break;
 
+      File? file;
       try {
-        var file =
-            await exportVeneraComics([comic], includeImages: true);
+        file = await exportVeneraComics([comic], includeImages: true);
         await client.write(
           '/venera-comics/$fileName',
           await file.readAsBytes(),
         );
-        file.deleteIgnoreError();
         Log.info("Image Sync", "Uploaded: ${comic.title}");
       } catch (e, s) {
+        failures++;
         Log.error(
           "Image Sync", "Failed to upload ${comic.title}: $e", s);
+      } finally {
+        file?.deleteIgnoreError();
       }
     }
+    return failures;
   }
 
-  Future<void> _downloadComicImages(Client client) async {
+  /// Server file name for a comic's image pack, or null when the id cannot be
+  /// safely embedded in a single path segment.
+  String? _imagePackFileName(LocalComic comic) {
+    var id = comic.id;
+    if (id.contains('/') || id.contains('\\')) return null;
+    return '${id}_${comic.comicType.value}.venera_comics';
+  }
+
+  /// Downloads image packs for comics known but not downloaded locally.
+  /// Returns the number of comics that failed.
+  Future<int> _downloadComicImages(Client client) async {
     var comics = LocalManager().getComics(LocalSortType.defaultSort)
         .where((c) => c.status == LocalComicStatus.notDownloaded)
         .toList();
-    if (comics.isEmpty) return;
+    if (comics.isEmpty) return 0;
 
     List<String> remoteFiles;
     try {
@@ -928,86 +1047,33 @@ class DataSync with ChangeNotifier {
           .where((n) => n.isNotEmpty)
           .toList();
     } catch (_) {
-      return;
+      return 0;
     }
 
+    var failures = 0;
     for (var comic in comics) {
-      var fileName =
-          '${comic.id}_${comic.comicType.value}.venera_comics';
+      var fileName = _imagePackFileName(comic);
+      if (fileName == null) continue;
       if (!remoteFiles.contains(fileName)) continue;
+      if (_haveWaitingTask) break;
 
+      var localFile = File(FilePath.join(App.cachePath, fileName));
       try {
-        var localFile = File(FilePath.join(App.cachePath, fileName));
         await client.read2File(
           '/venera-comics/$fileName', localFile.path);
         await importVeneraComics(localFile);
-        localFile.deleteIgnoreError();
         Log.info("Image Sync", "Downloaded: ${comic.title}");
       } catch (e, s) {
+        failures++;
         Log.error(
           "Image Sync", "Failed to download ${comic.title}: $e", s);
+      } finally {
+        // Delete on failure too — a mid-transfer abort used to leak the
+        // partial archive in cache.
+        localFile.deleteIgnoreError();
       }
     }
+    return failures;
   }
 }
 
-class RemoteBackupInfo {
-  final String fileName;
-  final int version;
-  final String platform;
-  final DateTime date;
-  final DateTime? mTime;
-
-  RemoteBackupInfo({
-    required this.fileName,
-    required this.version,
-    required this.platform,
-    required this.date,
-    this.mTime,
-  });
-
-  /// The most precise timestamp available for display: prefer the WebDAV
-  /// last-modified time (has hour/minute/second) and fall back to the
-  /// day-precision date parsed from the file name.
-  DateTime get effectiveDate => mTime ?? date;
-
-  factory RemoteBackupInfo.fromFileName(String name, {DateTime? mTime}) {
-    var parts = name.replaceAll('.venera', '').split('-');
-    var leadingSegment = int.tryParse(parts.firstOrNull ?? '') ?? 0;
-    var versionStr = parts.elementAtOrNull(1)?.split('.').first ?? '0';
-    var version = int.tryParse(versionStr) ?? 0;
-    var platform = 'unknown';
-    var dotParts = parts.elementAtOrNull(1)?.split('.') ?? [];
-    if (dotParts.length >= 2) {
-      platform = dotParts[1];
-    }
-    return RemoteBackupInfo(
-      fileName: name,
-      version: version,
-      platform: platform,
-      date: _dateFromLeadingSegment(leadingSegment),
-      mTime: mTime,
-    );
-  }
-
-  static const int _msPerDay = 86400000;
-
-  /// Upper bound of [DateTime.fromMillisecondsSinceEpoch]'s valid range.
-  static const int _maxValidMs = 8640000000000000;
-
-  /// Resolves the date encoded in a backup file name's leading segment.
-  ///
-  /// The segment is normally days-since-epoch (~5 digits). Older and foreign
-  /// backups instead store a full `millisecondsSinceEpoch` (~13 digits); blindly
-  /// multiplying that by [_msPerDay] overflows 64-bit int on Android and throws
-  /// a RangeError that aborts the entire directory scan (issue #51). So multiply
-  /// only when the value is small enough to be a real day count, otherwise treat
-  /// it as milliseconds, and clamp so the constructor can never throw.
-  static DateTime _dateFromLeadingSegment(int value) {
-    var ms =
-        value.abs() <= _maxValidMs ~/ _msPerDay ? value * _msPerDay : value;
-    if (ms > _maxValidMs) ms = _maxValidMs;
-    if (ms < -_maxValidMs) ms = -_maxValidMs;
-    return DateTime.fromMillisecondsSinceEpoch(ms);
-  }
-}

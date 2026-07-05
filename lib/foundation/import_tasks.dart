@@ -191,10 +191,17 @@ class ImportTaskManager with ChangeNotifier {
           shouldCancel: shouldCancel,
         );
       } else {
-        await importAppData(
-          File(task.filePath),
-          onProgress: onProgress,
-          shouldCancel: shouldCancel,
+        // applyBackup: the manager re-inits inside importAppData fire the
+        // very listeners that schedule auto uploads; without suppression the
+        // imported data would be echoed to WebDAV once by them AND once by
+        // the explicit force upload below. Suppression keeps the publish
+        // single and intentional.
+        await DataSync().applyBackup(
+          () => importAppData(
+            File(task.filePath),
+            onProgress: onProgress,
+            shouldCancel: shouldCancel,
+          ),
         );
       }
       // Cancellation during extraction throws ImportCanceledException (handled

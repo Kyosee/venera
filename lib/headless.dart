@@ -31,6 +31,12 @@ Future<void> runHeadlessMode(List<String> args) async {
 
   // Need to initialize the app for some features to work
   await init();
+  // Headless never runs initDeferred(); complete the gate so DataSync's
+  // download entry (which waits for deferred init before applying backups)
+  // proceeds immediately instead of stalling on its 60s safety timeout.
+  if (!deferredInitCompleter.isCompleted) {
+    deferredInitCompleter.complete();
+  }
 
   var command = args[commandIndex];
   var subCommand = (commandIndex + 1 < args.length) ? args[commandIndex + 1] : null;
@@ -39,11 +45,25 @@ Future<void> runHeadlessMode(List<String> args) async {
     case 'webdav':
       if (subCommand == 'up') {
         cliPrint({'status': 'running', 'message': 'Uploading WebDAV data...'});
-        await DataSync().uploadData(force: true);
+        var result = await DataSync().uploadData(force: true);
+        if (result.error) {
+          cliPrint({
+            'status': 'error',
+            'message': 'Upload failed: ${result.errorMessage}',
+          });
+          exit(1);
+        }
         cliPrint({'status': 'success', 'message': 'Upload complete.'});
       } else if (subCommand == 'down') {
         cliPrint({'status': 'running', 'message': 'Downloading WebDAV data...'});
-        await DataSync().downloadData();
+        var result = await DataSync().downloadData();
+        if (result.error) {
+          cliPrint({
+            'status': 'error',
+            'message': 'Download failed: ${result.errorMessage}',
+          });
+          exit(1);
+        }
         cliPrint({'status': 'success', 'message': 'Download complete.'});
       } else {
         cliPrint({'status': 'error', 'message': 'Invalid webdav command. Use "up" or "down".'});

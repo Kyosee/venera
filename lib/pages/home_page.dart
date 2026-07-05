@@ -355,6 +355,10 @@ class _SyncButtonState extends State<_SyncButton> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
+      // Honor the auto-sync toggle: this observer stays registered even when
+      // the sync button is hidden, so without the check a resume pulled (and
+      // applied!) remote data on a device whose auto-sync the user disabled.
+      if (!DataSync().isEnabled) return;
       if (DateTime.now().difference(lastCheck) > const Duration(minutes: 10)) {
         lastCheck = DateTime.now();
         DataSync().downloadData();
@@ -403,7 +407,9 @@ class _SyncButtonState extends State<_SyncButton> with WidgetsBindingObserver {
                       context: App.rootContext,
                       builder: (context) => ContentDialog(
                         title: "Error".tl,
-                        content: Text(DataSync().lastError!)
+                        // A background op may clear lastError between the tap
+                        // and this dialog building — don't null-assert.
+                        content: Text(DataSync().lastError ?? "Error".tl)
                             .paddingHorizontal(16),
                         actions: [
                           Button.text(

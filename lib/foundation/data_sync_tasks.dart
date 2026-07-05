@@ -107,6 +107,12 @@ class DataSyncTaskManager with ChangeNotifier {
   }
 
   void _persist() {
+    // Trim the in-memory list too — every finished sync used to append
+    // forever, growing without bound over a long-lived session.
+    final overflow = _tasks.where((t) => !t.isRunning).skip(_maxHistory).toList();
+    for (final t in overflow) {
+      _tasks.remove(t);
+    }
     final history = _tasks
         .where((t) => !t.isRunning)
         .take(_maxHistory)

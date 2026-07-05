@@ -47,7 +47,11 @@ class Appdata with Init {
       _isSavingData = false;
     }
     if (sync) {
-      DataSync().uploadData();
+      // Funnel through the auto-upload gate: honors the user's auto-sync
+      // toggle (a configured-but-disabled device must NOT upload on every
+      // settings change), debounces bursts, and stays silent while a backup
+      // is being applied (echo suppression).
+      DataSync().requestAutoUpload();
     }
   }
 
@@ -139,14 +143,17 @@ class Appdata with Init {
         }
       }
 
-      // Never let an imported/older backup pull the local version backwards.
-      // If a restore wrote a lower dataVersion, this device would look "behind"
-      // the server and get overwritten by stale remote data on the next sync.
+      // Never let an imported/older backup pull the local version backwards
+      // (a restore writing a lower dataVersion would make this device look
+      // "behind" and get overwritten by stale remote data on the next sync),
+      // and never adopt an implausibly huge foreign version (e.g. a
+      // milliseconds timestamp) that would permanently inflate the whole
+      // fleet's version lineage. Both rules live in mergeIncomingDataVersion.
       int incomingDataVersion = _asVersion(settings['dataVersion']);
-      this.settings['dataVersion'] =
-          localDataVersion > incomingDataVersion
-              ? localDataVersion
-              : incomingDataVersion;
+      this.settings['dataVersion'] = mergeIncomingDataVersion(
+        localDataVersion,
+        incomingDataVersion,
+      );
     }
     searchHistory = List.from(data['searchHistory'] ?? []);
     var implicitDataChanged = false;

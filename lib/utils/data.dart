@@ -285,6 +285,9 @@ Future<File> exportAppData([bool sync = true]) async {
     'local_favorite.db',
     'local.db',
     'read_later.db',
+    // Without a checkpoint, logins living in cookie.db's WAL sidecar were
+    // silently missing from every backup.
+    'cookie.db',
   ]) {
     try {
       final db = sqlite3.open(FilePath.join(App.dataPath, dbName));
@@ -424,7 +427,38 @@ Future<void> _restoreWebdavConfigIfAbsent(Map<String, dynamic> data) async {
   await appdata.saveData(false);
 }
 
+/// Serializes concurrent [importAppData] runs. A WebDAV download-apply and a
+/// manual file import could previously run at once: both used the SAME fixed
+/// `temp_data` staging dir and each deleted it wholesale on entry, yanking
+/// extracted files out from under the other mid-apply.
+Future<void>? _importInProgress;
+
 Future<void> importAppData(
+  File file, {
+  bool checkVersion = false,
+  ImportProgressCallback? onProgress,
+  bool Function()? shouldCancel,
+}) async {
+  while (_importInProgress != null) {
+    // Wait for the other import to fully finish (ignore its outcome).
+    await _importInProgress!.catchError((_) {});
+  }
+  final completer = Completer<void>();
+  _importInProgress = completer.future;
+  try {
+    await _importAppDataLocked(
+      file,
+      checkVersion: checkVersion,
+      onProgress: onProgress,
+      shouldCancel: shouldCancel,
+    );
+  } finally {
+    _importInProgress = null;
+    completer.complete();
+  }
+}
+
+Future<void> _importAppDataLocked(
   File file, {
   bool checkVersion = false,
   ImportProgressCallback? onProgress,
@@ -435,7 +469,12 @@ Future<void> importAppData(
   }
 
   report(ImportPhase.preparing);
-  var cacheDirPath = FilePath.join(App.cachePath, 'temp_data');
+  // Unique staging dir per run — a leftover from a crashed run can't collide,
+  // and (defense in depth) neither can a concurrent caller.
+  var cacheDirPath = FilePath.join(
+    App.cachePath,
+    'temp_data_${DateTime.now().microsecondsSinceEpoch}',
+  );
   var cacheDir = Directory(cacheDirPath);
   if (cacheDir.existsSync()) {
     cacheDir.deleteSync(recursive: true);
@@ -509,12 +548,29 @@ Future<void> importAppData(
       try {
         var implicitData = jsonDecode(await implicitDataFile.readAsString());
         if (implicitData is Map) {
-          await implicitDataFile.copy(
-            FilePath.join(App.dataPath, "implicitData.json"),
-          );
+          // Device-local state must survive a restore: the backup's copy of
+          // these keys describes ANOTHER device. Wholesale replacement used to
+          // silently flip this device's auto-sync toggle, forget its completed
+          // initial sync (blocking all uploads), and clobber its sync/task
+          // history.
+          const deviceLocalKeys = [
+            'webdavAutoSync',
+            'hasCompletedInitialSync',
+            'sync_logs',
+            'data_sync_tasks',
+          ];
+          final merged = Map<String, dynamic>.from(implicitData);
+          for (final key in deviceLocalKeys) {
+            if (appdata.implicitData.containsKey(key)) {
+              merged[key] = appdata.implicitData[key];
+            } else {
+              merged.remove(key);
+            }
+          }
           appdata.implicitData
             ..clear()
-            ..addAll(Map<String, dynamic>.from(implicitData));
+            ..addAll(merged);
+          appdata.writeImplicitData();
         }
       } catch (e, s) {
         Log.warning('Import Data', 'Failed to import implicit data: $e\n$s');
@@ -554,22 +610,25 @@ Future<void> importAppData(
     var comicSourceDir = FilePath.join(cacheDirPath, "comic_source");
     if (Directory(comicSourceDir).existsSync()) {
       report(ImportPhase.reloading);
-      Directory(
-        FilePath.join(App.dataPath, "comic_source"),
-      ).deleteIfExistsSync(recursive: true);
-      Directory(FilePath.join(App.dataPath, "comic_source")).createSync();
+      // Stage-then-swap. The old delete-then-copy order meant a copy failure
+      // midway (disk full, locked file) permanently wiped EVERY installed
+      // source together with its login/config .data. Copy into a sibling
+      // staging dir first; only after all copies succeed, swap it in.
+      final liveDir = Directory(FilePath.join(App.dataPath, "comic_source"));
+      final stagingDir = Directory(
+        FilePath.join(App.dataPath, "comic_source.staging"),
+      );
+      stagingDir.deleteIfExistsSync(recursive: true);
+      stagingDir.createSync();
       for (var file in Directory(comicSourceDir).listSync()) {
         if (file is File) {
           if (file.name.endsWith(".js") || file.name.endsWith(".data")) {
-            var targetFile = FilePath.join(
-              App.dataPath,
-              "comic_source",
-              file.name,
-            );
-            await file.copy(targetFile);
+            await file.copy(FilePath.join(stagingDir.path, file.name));
           }
         }
       }
+      liveDir.deleteIfExistsSync(recursive: true);
+      stagingDir.renameSync(liveDir.path);
       await ComicSourceManager().reload();
     }
   } finally {

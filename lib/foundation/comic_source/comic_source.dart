@@ -339,13 +339,18 @@ class ComicSource {
       _haveWaitingTask = false;
     }
     _isSaving = true;
-    var file = File("${App.dataPath}/comic_source/$key.data");
-    if (!await file.exists()) {
-      await file.create(recursive: true);
+    try {
+      var file = File("${App.dataPath}/comic_source/$key.data");
+      if (!await file.exists()) {
+        await file.create(recursive: true);
+      }
+      await file.writeAsString(jsonEncode(data));
+    } finally {
+      // Without try/finally a single IO error left _isSaving stuck true and
+      // every later saveData (and its sync trigger) spun forever.
+      _isSaving = false;
     }
-    await file.writeAsString(jsonEncode(data));
-    _isSaving = false;
-    DataSync().uploadData();
+    DataSync().requestAutoUpload();
   }
 
   Future<bool> reLogin() async {

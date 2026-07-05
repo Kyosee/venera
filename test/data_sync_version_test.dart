@@ -1,5 +1,6 @@
+// Tests target the pure protocol module directly — no IO, no app state.
 import 'package:flutter_test/flutter_test.dart';
-import 'package:venera/utils/data_sync.dart';
+import 'package:venera/utils/sync_protocol.dart';
 
 void main() {
   group('RemoteBackupInfo.fromFileName', () {
@@ -234,6 +235,86 @@ void main() {
       expect(
         shouldSkipStaleUpload(force: false, localVersion: 0, remoteMaxVersion: 0),
         isFalse,
+      );
+    });
+  });
+
+  group('mergeIncomingDataVersion', () {
+    test('incoming newer wins', () {
+      expect(mergeIncomingDataVersion(5, 8), 8);
+    });
+
+    test('incoming older never pulls local backwards', () {
+      // Restoring an old backup must not make this device look "behind" and
+      // re-enter the stale-overwrite loop.
+      expect(mergeIncomingDataVersion(8, 5), 8);
+    });
+
+    test('implausibly huge foreign version is rejected', () {
+      // A foreign archive carrying a milliseconds timestamp as dataVersion
+      // would otherwise permanently inflate the whole fleet's versions — and a
+      // near-int64 value would overflow nextSyncVersion into negative,
+      // inverting every later direction decision.
+      expect(mergeIncomingDataVersion(42, 1781595522559), 42);
+      expect(mergeIncomingDataVersion(42, 9223372036854775807), 42);
+    });
+
+    test('negative incoming is rejected', () {
+      expect(mergeIncomingDataVersion(42, -3), 42);
+    });
+
+    test('boundary: exactly the ceiling is accepted', () {
+      expect(
+        mergeIncomingDataVersion(1, maxReasonableDataVersion),
+        maxReasonableDataVersion,
+      );
+      expect(mergeIncomingDataVersion(1, maxReasonableDataVersion + 1), 1);
+    });
+  });
+
+  group('sameDayOwnBackups', () {
+    test('selects only this platform, same day, excluding the new file', () {
+      expect(
+        sameDayOwnBackups(
+          fileNames: [
+            '20240-5.android.venera', // same day, own platform → prune
+            '20240-7.windows.venera', // same day, OTHER device → keep!
+            '20239-4.android.venera', // other day → keep
+            '20240-8.android.venera', // the new upload itself → keep
+            'notes.txt', null,
+          ],
+          day: '20240',
+          platform: 'android',
+          newFileName: '20240-8.android.venera',
+        ),
+        ['20240-5.android.venera'],
+      );
+    });
+
+    test('another platform backup today is never treated as stale', () {
+      // The old bare "day-" prefix match deleted whatever same-day file it
+      // found first — including a backup another device uploaded today, which
+      // could be the fleet's newest data.
+      expect(
+        sameDayOwnBackups(
+          fileNames: ['20240-9.windows.venera'],
+          day: '20240',
+          platform: 'android',
+          newFileName: '20240-10.android.venera',
+        ),
+        isEmpty,
+      );
+    });
+
+    test('empty listing yields nothing', () {
+      expect(
+        sameDayOwnBackups(
+          fileNames: const <String?>[],
+          day: '20240',
+          platform: 'android',
+          newFileName: '20240-1.android.venera',
+        ),
+        isEmpty,
       );
     });
   });
