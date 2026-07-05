@@ -177,6 +177,10 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
   @override
   void initState() {
     super.initState();
+    // While a check runs, update marks land in the database comic-by-comic,
+    // but this page used to reload only when the whole task finished — the
+    // home badge counted up while an already-open list stayed stale (#106).
+    FollowUpdateTaskManager.instance.addListener(_onTaskProgress);
     final f = folder;
     if (f != null &&
         LocalFavoritesManager().folderComics(f) >= _asyncDataFetchLimit) {
@@ -187,6 +191,45 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
       // Small (or unconfigured): load synchronously now — cheap, no flash.
       _loadSync();
     }
+  }
+
+  @override
+  void dispose() {
+    _liveRefreshTimer?.cancel();
+    FollowUpdateTaskManager.instance.removeListener(_onTaskProgress);
+    super.dispose();
+  }
+
+  Timer? _liveRefreshTimer;
+
+  /// Reloads the list while a check is writing new update marks, throttled to
+  /// once per second (the manager notifies per checked comic). The trailing
+  /// timer also picks up the final progress events; a full unconditional
+  /// reload still happens on task finish via [updateFollowUpdatesUI].
+  void _onTaskProgress() {
+    if (_liveRefreshTimer != null) {
+      return;
+    }
+    _liveRefreshTimer = Timer(const Duration(seconds: 1), () {
+      _liveRefreshTimer = null;
+      if (!mounted) {
+        return;
+      }
+      final f = folder;
+      if (f == null) {
+        return;
+      }
+      // Cheap change signal: reload only when the flagged count moved, so an
+      // idle notify doesn't re-read and re-sort the whole folder.
+      if (LocalFavoritesManager().countUpdates(f) == updatedComics.length) {
+        return;
+      }
+      if (LocalFavoritesManager().folderComics(f) >= _asyncDataFetchLimit) {
+        _loadAsync(f);
+      } else {
+        setState(_loadSync);
+      }
+    });
   }
 
   /// Recompute the cached tab lists from [allComics]. `updated` (has-new-update)
