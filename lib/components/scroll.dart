@@ -278,7 +278,13 @@ class _AppScrollBarState extends State<AppScrollBar> {
 
   bool _isVisible = false;
   Timer? _hideTimer;
+  DateTime _lastActivityAt = DateTime.now();
   static const _hideDuration = Duration(seconds: 2);
+
+  /// Repaint signal for the thumb. The scroll listener fires on every scrolled
+  /// frame; poking this rebuilds only the thumb subtree instead of setState on
+  /// the whole scrollbar (which re-ran the LayoutBuilder and Stack each frame).
+  final _thumbSignal = _RepaintSignal();
 
   @override
   void initState() {
@@ -289,7 +295,7 @@ class _AppScrollBarState extends State<AppScrollBar> {
     _dragGestureRecognizer = VerticalDragGestureRecognizer()
       ..onUpdate = onUpdate
       ..onStart = (_) {
-        _showScrollbar();
+        _showScrollbar(holdOpen: true);
       }
       ..onEnd = (_) {
         _scheduleHide();
@@ -301,27 +307,45 @@ class _AppScrollBarState extends State<AppScrollBar> {
     _hideTimer?.cancel();
     _scrollController.removeListener(onChanged);
     _dragGestureRecognizer.dispose();
+    _thumbSignal.dispose();
     super.dispose();
   }
 
-  void _showScrollbar() {
+  /// [holdOpen] cancels the pending auto-hide, for hover/drag interactions
+  /// that must keep the thumb visible until they end.
+  void _showScrollbar({bool holdOpen = false}) {
     if (!_isVisible && mounted) {
       setState(() {
         _isVisible = true;
       });
     }
-    _hideTimer?.cancel();
+    if (holdOpen) {
+      _hideTimer?.cancel();
+      _hideTimer = null;
+    }
   }
 
+  /// Refreshes the auto-hide deadline. A single timer re-checks the deadline
+  /// when it fires, instead of being cancelled and re-created on every scroll
+  /// tick.
   void _scheduleHide() {
-    _hideTimer?.cancel();
-    _hideTimer = Timer(_hideDuration, () {
-      if (mounted && _isVisible) {
-        setState(() {
-          _isVisible = false;
-        });
-      }
-    });
+    _lastActivityAt = DateTime.now();
+    _hideTimer ??= Timer(_hideDuration, _onHideTimeout);
+  }
+
+  void _onHideTimeout() {
+    _hideTimer = null;
+    if (!mounted) return;
+    final idle = DateTime.now().difference(_lastActivityAt);
+    if (idle < _hideDuration) {
+      _hideTimer = Timer(_hideDuration - idle, _onHideTimeout);
+      return;
+    }
+    if (_isVisible) {
+      setState(() {
+        _isVisible = false;
+      });
+    }
   }
 
   void onUpdate(DragUpdateDetails details) {
@@ -342,83 +366,88 @@ class _AppScrollBarState extends State<AppScrollBar> {
     if (_scrollController.positions.isEmpty) return;
     var position = _scrollController.position;
 
-    bool hasChanged = false;
-    if (position.minScrollExtent != minExtent ||
-        position.maxScrollExtent != maxExtent ||
-        position.pixels != this.position) {
-      hasChanged = true;
-      minExtent = position.minScrollExtent;
-      maxExtent = position.maxScrollExtent;
-      this.position = position.pixels;
+    if (position.minScrollExtent == minExtent &&
+        position.maxScrollExtent == maxExtent &&
+        position.pixels == this.position) {
+      return;
     }
+    minExtent = position.minScrollExtent;
+    maxExtent = position.maxScrollExtent;
+    this.position = position.pixels;
 
-    if (hasChanged) {
-      _showScrollbar();
-      _scheduleHide();
-    }
-
-    if (hasChanged && mounted) {
-      setState(() {});
-    }
+    _thumbSignal.notify();
+    _showScrollbar();
+    _scheduleHide();
   }
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constrains) {
-        var scrollHeight = (maxExtent - minExtent);
         var height = constrains.maxHeight - widget.topPadding;
         viewHeight = height;
-        var top = scrollHeight == 0
-            ? 0.0
-            : (position - minExtent) /
-                  scrollHeight *
-                  (height - _scrollIndicatorSize);
         return Stack(
           children: [
             Positioned.fill(child: widget.child),
-            Positioned(
-              top: top + widget.topPadding,
-              right: 0,
-              child: AnimatedOpacity(
-                opacity: _isVisible ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 200),
-                child: MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  onEnter: (_) => _showScrollbar(),
-                  onExit: (_) => _scheduleHide(),
-                  child: Listener(
-                    behavior: HitTestBehavior.translucent,
-                    onPointerDown: (event) {
-                      _dragGestureRecognizer.addPointer(event);
-                    },
-                    child: SizedBox(
-                      width: _scrollIndicatorSize / 2,
-                      height: _scrollIndicatorSize,
-                      child: CustomPaint(
-                        painter: _ScrollIndicatorPainter(
-                          backgroundColor: context.colorScheme.surface,
-                          shadowColor: context.colorScheme.shadow,
+            ListenableBuilder(
+              listenable: _thumbSignal,
+              builder: (context, _) {
+                var scrollHeight = (maxExtent - minExtent);
+                var top = scrollHeight == 0
+                    ? 0.0
+                    : (position - minExtent) /
+                          scrollHeight *
+                          (height - _scrollIndicatorSize);
+                return Positioned(
+                  top: top + widget.topPadding,
+                  right: 0,
+                  child: AnimatedOpacity(
+                    opacity: _isVisible ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 200),
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      onEnter: (_) => _showScrollbar(holdOpen: true),
+                      onExit: (_) => _scheduleHide(),
+                      child: Listener(
+                        behavior: HitTestBehavior.translucent,
+                        onPointerDown: (event) {
+                          _dragGestureRecognizer.addPointer(event);
+                        },
+                        child: SizedBox(
+                          width: _scrollIndicatorSize / 2,
+                          height: _scrollIndicatorSize,
+                          child: CustomPaint(
+                            painter: _ScrollIndicatorPainter(
+                              backgroundColor: context.colorScheme.surface,
+                              shadowColor: context.colorScheme.shadow,
+                            ),
+                            child: Column(
+                              children: [
+                                const Spacer(),
+                                Icon(Icons.arrow_drop_up, size: 18),
+                                Icon(Icons.arrow_drop_down, size: 18),
+                                const Spacer(),
+                              ],
+                            ).paddingLeft(4),
+                          ),
                         ),
-                        child: Column(
-                          children: [
-                            const Spacer(),
-                            Icon(Icons.arrow_drop_up, size: 18),
-                            Icon(Icons.arrow_drop_down, size: 18),
-                            const Spacer(),
-                          ],
-                        ).paddingLeft(4),
                       ),
                     ),
                   ),
-                ),
-              ),
+                );
+              },
             ),
           ],
         );
       },
     );
   }
+}
+
+/// A [ChangeNotifier] whose only job is exposing [notifyListeners] as a
+/// public repaint signal for a scoped [ListenableBuilder].
+class _RepaintSignal extends ChangeNotifier {
+  void notify() => notifyListeners();
 }
 
 class _ScrollIndicatorPainter extends CustomPainter {
