@@ -51,7 +51,6 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
 
   void addDragListener() async {
     if (!mounted) return;
-    var readerMode = context.reader.mode;
 
     // 横向阅读的时候, 如果纵向滑就触发收藏, 纵向阅读的时候, 如果横向滑动就触发收藏
     if (appdata.settings['quickCollectImage'] == 'Swipe') {
@@ -71,7 +70,9 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
                 point.dx < edgeExclusion || point.dx > width - edgeExclusion;
           },
           onMove: (offset) {
-            switch (readerMode) {
+            // 每次读取当前阅读模式：监听器只注册一次，若捕获创建时的模式，
+            // 阅读中途切换方向后收藏手势的轴向判断会一直沿用旧模式。
+            switch (context.reader.mode) {
               case ReaderMode.continuousTopToBottom:
               case ReaderMode.galleryTopToBottom:
                 crossAxisDistance += offset.dx;

@@ -560,12 +560,16 @@ Future<void> _importAppDataLocked(
           // these keys describes ANOTHER device. Wholesale replacement used to
           // silently flip this device's auto-sync toggle, forget its completed
           // initial sync (blocking all uploads), and clobber its sync/task
-          // history.
+          // history. The follow-update task records are this device's own run
+          // history/breakpoints too — importing a foreign copy showed another
+          // device's task counts and could resume its interrupted check here.
           const deviceLocalKeys = [
             'webdavAutoSync',
             'hasCompletedInitialSync',
             'sync_logs',
             'data_sync_tasks',
+            'follow_update_active_tasks',
+            'follow_update_task_history',
           ];
           final merged = Map<String, dynamic>.from(implicitData);
           for (final key in deviceLocalKeys) {
