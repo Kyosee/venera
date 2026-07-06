@@ -27,8 +27,12 @@ class Appdata with Init {
       var futures = <Future>[];
       var json = toJson();
       var data = jsonEncode(json);
-      var file = File(FilePath.join(App.dataPath, 'appdata.json'));
-      futures.add(file.writeAsString(data));
+      // Atomic replace: a kill mid-write used to truncate appdata.json, and
+      // the load path resets a corrupt file — silently wiping every setting
+      // (WebDAV credentials, dataVersion, ...) on the next launch.
+      futures.add(
+        writeStringAtomic(FilePath.join(App.dataPath, 'appdata.json'), data),
+      );
 
       var disableSyncFields = json["settings"]["disableSyncFields"] as String;
       if (disableSyncFields.isNotEmpty) {
@@ -38,8 +42,12 @@ class Appdata with Init {
           json4sync["settings"].remove(field);
         }
         var data4sync = jsonEncode(json4sync);
-        var file4sync = File(FilePath.join(App.dataPath, 'syncdata.json'));
-        futures.add(file4sync.writeAsString(data4sync));
+        futures.add(
+          writeStringAtomic(
+            FilePath.join(App.dataPath, 'syncdata.json'),
+            data4sync,
+          ),
+        );
       }
 
       await Future.wait(futures);
@@ -82,17 +90,12 @@ class Appdata with Init {
 
   static const sourceTypeRegistryKey = 'sourceTypeRegistry';
 
-  static const syncImplicitDataKeys = [
-    'follow_update_task_history',
-    sourceTypeRegistryKey,
-  ];
-
-  Map<String, dynamic> implicitDataForSync() {
-    return {
-      for (final key in syncImplicitDataKeys)
-        if (implicitData.containsKey(key)) key: implicitData[key],
-    };
-  }
+  /// Implicit-data keys adopted from a backup that embeds an `implicitData`
+  /// map inside its appdata.json (foreign/older archives; our own exports
+  /// don't produce one). Follow-update task records are deliberately NOT
+  /// here: they are this device's own run history/breakpoints, and importing
+  /// another device's copy showed foreign task counts (#106 confusion class).
+  static const syncImplicitDataKeys = [sourceTypeRegistryKey];
 
   List<String> splitField(String merged) {
     return merged
@@ -216,8 +219,13 @@ class Appdata with Init {
     }
     _isSavingData = true;
     try {
-      var file = File(FilePath.join(App.dataPath, 'implicitData.json'));
-      await file.writeAsString(jsonEncode(implicitData));
+      // Atomic replace — same rationale as [saveData]: implicitData.json
+      // carries task histories/breakpoints and the completed-initial-sync
+      // flag; a truncated file is reset wholesale on the next launch.
+      await writeStringAtomic(
+        FilePath.join(App.dataPath, 'implicitData.json'),
+        jsonEncode(implicitData),
+      );
     } finally {
       _isSavingData = false;
     }

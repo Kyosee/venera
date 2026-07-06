@@ -87,6 +87,28 @@ extension FileExtension on File {
   }
 }
 
+/// Writes [content] to [path] through a flushed temp file + rename, so a
+/// crash or process kill mid-write can never leave a truncated file behind.
+///
+/// A truncated JSON config is worse than a stale one: the load paths treat
+/// unparseable content as corrupt and RESET it (appdata.json carries every
+/// setting including the WebDAV credentials and dataVersion). With the
+/// temp-then-rename order, any interruption leaves either the old intact
+/// file or the fully-written new one.
+Future<void> writeStringAtomic(String path, String content) async {
+  final tmp = File('$path.tmp');
+  await tmp.writeAsString(content, flush: true);
+  try {
+    await tmp.rename(path);
+  } on FileSystemException {
+    // Some platforms/filesystems refuse to rename onto an existing file;
+    // remove the target first. The temp file survives a crash in this
+    // window, so the data is still recoverable on disk.
+    await File(path).deleteIgnoreError();
+    await tmp.rename(path);
+  }
+}
+
 /// Copies [src] into [dst] by streaming fixed-size chunks through a
 /// [RandomAccessFile], so a multi-gigabyte file is never fully loaded into
 /// memory the way [FileExtension.copyMem] / readAsBytes would (issue #93:
