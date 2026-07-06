@@ -1459,16 +1459,22 @@ class _EditFilePage extends StatefulWidget {
 
 class __EditFilePageState extends State<_EditFilePage> {
   var current = '';
+  var _initial = '';
 
   @override
   void initState() {
     super.initState();
     current = File(widget.path).readAsStringSync();
+    _initial = current;
   }
 
   @override
   void dispose() {
-    File(widget.path).writeAsStringSync(current);
+    if (current != _initial) {
+      // Atomic replace: dispose can race an app kill; a truncated script
+      // would fail to parse at next startup and lose the source.
+      writeStringAtomicSync(widget.path, current);
+    }
     widget.onExit();
     super.dispose();
   }

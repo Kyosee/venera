@@ -1,11 +1,11 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/network/app_dio.dart';
 import 'package:venera/utils/ext.dart';
+import 'package:venera/utils/io.dart';
 
 enum ComicSourceUpdateTaskStatus { running, completed, canceled, failed }
 
@@ -251,7 +251,9 @@ class ComicSourceUpdateTaskManager with ChangeNotifier {
       ComicSourceManager().remove(source.key);
       removed = true;
       final parsed = await ComicSourceParser().parse(data, source.filePath);
-      await File(source.filePath).writeAsString(data);
+      // Atomic replace: a kill mid-write would leave a truncated script that
+      // fails to parse at next startup, silently losing the source.
+      await writeStringAtomic(source.filePath, data);
       ComicSourceManager().clearAvailableUpdate(source.key);
       return parsed.version;
     } finally {

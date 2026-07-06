@@ -76,7 +76,7 @@ class ComicSourceParser {
         i++;
       }
     }
-    await file.writeAsString(js);
+    await writeStringAtomic(file.path, js);
     try {
       return await parse(js, file.path);
     } catch (e) {

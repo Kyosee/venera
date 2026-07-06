@@ -109,6 +109,21 @@ Future<void> writeStringAtomic(String path, String content) async {
   }
 }
 
+/// Synchronous variant of [writeStringAtomic] for callers that must write
+/// from a synchronous context (e.g. `State.dispose`).
+void writeStringAtomicSync(String path, String content) {
+  final tmp = File('$path.tmp');
+  tmp.writeAsStringSync(content, flush: true);
+  try {
+    tmp.renameSync(path);
+  } on FileSystemException {
+    try {
+      File(path).deleteSync();
+    } catch (_) {}
+    tmp.renameSync(path);
+  }
+}
+
 /// Copies [src] into [dst] by streaming fixed-size chunks through a
 /// [RandomAccessFile], so a multi-gigabyte file is never fully loaded into
 /// memory the way [FileExtension.copyMem] / readAsBytes would (issue #93:

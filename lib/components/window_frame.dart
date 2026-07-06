@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -8,6 +7,7 @@ import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/tray.dart';
+import 'package:venera/utils/io.dart';
 import 'package:window_manager/window_manager.dart';
 
 const _kTitleBarHeight = 36.0;
@@ -473,14 +473,19 @@ class WindowPlacement {
   }
 
   Future<void> writeToFile() async {
-    var file = File("${App.dataPath}/window_placement");
-    await file.writeAsString(jsonEncode({
-      'width': rect.width,
-      'height': rect.height,
-      'x': rect.topLeft.dx,
-      'y': rect.topLeft.dy,
-      'isMaximized': isMaximized
-    }));
+    // Atomic replace: this is rewritten on every geometry change from a
+    // 100ms poll loop, so a kill mid-write (typically at app close) would
+    // corrupt the file and reset the window placement.
+    await writeStringAtomic(
+      "${App.dataPath}/window_placement",
+      jsonEncode({
+        'width': rect.width,
+        'height': rect.height,
+        'x': rect.topLeft.dx,
+        'y': rect.topLeft.dy,
+        'isMaximized': isMaximized
+      }),
+    );
   }
 
   static Future<WindowPlacement> loadFromFile() async {

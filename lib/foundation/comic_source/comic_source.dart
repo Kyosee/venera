@@ -324,7 +324,14 @@ class ComicSource {
   Future<void> loadData() async {
     var file = File("${App.dataPath}/comic_source/$key.data");
     if (await file.exists()) {
-      data = Map.from(jsonDecode(await file.readAsString()));
+      try {
+        data = Map.from(jsonDecode(await file.readAsString()));
+      } catch (e) {
+        // A corrupt data file must not abort parsing: losing the stored
+        // account/settings is recoverable (re-login), losing the whole
+        // source at startup is not.
+        Log.error("ComicSource", "Failed to load data for $key: $e");
+      }
     }
   }
 
@@ -341,10 +348,11 @@ class ComicSource {
     _isSaving = true;
     try {
       var file = File("${App.dataPath}/comic_source/$key.data");
-      if (!await file.exists()) {
-        await file.create(recursive: true);
-      }
-      await file.writeAsString(jsonEncode(data));
+      await file.parent.create(recursive: true);
+      // Atomic replace: this file holds the account/login state; a kill
+      // mid-write would truncate it and log the user out (or worse, before
+      // loadData tolerated corrupt json, break source loading entirely).
+      await writeStringAtomic(file.path, jsonEncode(data));
     } finally {
       // Without try/finally a single IO error left _isSaving stuck true and
       // every later saveData (and its sync trigger) spun forever.
