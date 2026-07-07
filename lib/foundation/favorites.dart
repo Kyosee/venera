@@ -387,6 +387,48 @@ class LocalFavoritesManager with ChangeNotifier {
     });
   }
 
+  /// Replaces this store's content with the database at [sourcePath] without
+  /// closing or swapping the underlying file — see [overwriteDatabaseContent].
+  /// Callers wanting the #106 semantics must snapshot/merge follow-update
+  /// bookkeeping around this call ([snapshotUpdateInfo] / [mergeUpdateInfo]).
+  Future<void> restoreFrom(String sourcePath) async {
+    if (!isInitialized) {
+      throw StateError(
+        "LocalFavoritesManager is not initialized; cannot restore",
+      );
+    }
+    await overwriteDatabaseContent(_db, sourcePath);
+    // Re-run the schema upkeep init() performs: the imported file may come
+    // from an older version or lack the bookkeeping tables entirely.
+    _db.execute("""
+      create table if not exists folder_order (
+        folder_name text primary key,
+        order_value int
+      );
+    """);
+    _db.execute("""
+      create table if not exists folder_sync (
+        folder_name text primary key,
+        source_key text,
+        source_folder text
+      );
+    """);
+    var names = _getFolderNamesWithDB();
+    for (var folder in names) {
+      _ensureFavoriteFolderSchema(folder);
+    }
+    // Unlike init(), a follow folder missing from the backup does NOT
+    // unconfigure the setting: it is device-local, and a foreign backup must
+    // not wipe this device's choice.
+    var followUpdateFolder = appdata.settings['followUpdatesFolder'];
+    if (followUpdateFolder is String && names.contains(followUpdateFolder)) {
+      prepareTableForFollowUpdates(followUpdateFolder, false);
+    }
+    counts = {};
+    initCounts();
+    notifyListeners();
+  }
+
   void refreshHashedIds() {
     _initHashedIds(folderNames, _dbPath).then((value) {
       _hashedIds = value;
@@ -715,7 +757,12 @@ class LocalFavoritesManager with ChangeNotifier {
     """).first["c"];
   }
 
-  List<String> get folderNames => _getFolderNamesWithDB();
+  /// Empty while the store is down (init not run yet, or failed): reading
+  /// through the `late` handle here used to throw LateInitializationError
+  /// inside widget builds during degraded sessions, corrupting the element
+  /// tree. Callers treat "no folders" as the safe degraded answer.
+  List<String> get folderNames =>
+      isInitialized ? _getFolderNamesWithDB() : const <String>[];
 
   int maxValue(String folder) {
     return _db.select("""
@@ -2003,6 +2050,7 @@ class LocalFavoritesManager with ChangeNotifier {
   }
 
   void close() {
+    if (!isInitialized) return;
     isInitialized = false;
     _db.dispose();
     closeSqliteDatabase(_dbPath);

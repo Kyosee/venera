@@ -14,6 +14,7 @@ import 'package:venera/foundation/download_keepalive.dart';
 import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/history.dart';
 import 'package:venera/foundation/log.dart';
+import 'package:venera/foundation/sqlite_connection.dart';
 import 'package:venera/network/download.dart';
 import 'package:venera/pages/reader/reader.dart';
 import 'package:venera/utils/io.dart';
@@ -338,12 +339,48 @@ class LocalManager with ChangeNotifier {
     }
   }
 
+  bool isInitialized = false;
+
   void close() {
+    if (!isInitialized) return;
+    isInitialized = false;
     _db.dispose();
   }
 
   Future<void> init() async {
     _db = sqlite3.open('${App.dataPath}/local.db');
+    _ensureSchema();
+    if (File(FilePath.join(App.dataPath, 'local_path')).existsSync()) {
+      path = File(FilePath.join(App.dataPath, 'local_path')).readAsStringSync();
+      if (!directory.existsSync()) {
+        path = await findDefaultPath();
+      }
+    } else {
+      path = await findDefaultPath();
+    }
+    try {
+      if (!directory.existsSync()) {
+        await directory.create();
+      }
+    } catch (e, s) {
+      Log.error("IO", "Failed to create local folder: $e", s);
+    }
+    _checkPathValidation();
+    _checkNoMedia();
+    isInitialized = true;
+    await ComicSourceManager().ensureInit();
+    restoreDownloadingTasks();
+    // Defer auto-resume so a cold start (DB init, home page) isn't competing
+    // with download network/IO, and to steer clear of startup races in this
+    // historically crash-prone path. Tasks the user manually paused stay paused
+    // (wasRunning was persisted as false for them).
+    Future.delayed(const Duration(seconds: 3), _autoResumeDownloads);
+  }
+
+  /// Creates the comics table when missing and upgrades older layouts.
+  /// Idempotent; also run after [restoreFrom], whose page-level copy may bring
+  /// in a backup created by an older app version.
+  void _ensureSchema() {
     _db.execute('''
       CREATE TABLE IF NOT EXISTS comics (
         id TEXT NOT NULL,
@@ -368,30 +405,19 @@ class LocalManager with ChangeNotifier {
       _db.execute(
           "ALTER TABLE comics ADD COLUMN description TEXT NOT NULL DEFAULT '';");
     }
-    if (File(FilePath.join(App.dataPath, 'local_path')).existsSync()) {
-      path = File(FilePath.join(App.dataPath, 'local_path')).readAsStringSync();
-      if (!directory.existsSync()) {
-        path = await findDefaultPath();
-      }
-    } else {
-      path = await findDefaultPath();
+  }
+
+  /// Replaces the local-library database content with the file at
+  /// [sourcePath] without closing or swapping the underlying file — see
+  /// [overwriteDatabaseContent]. Path configuration, download-task state and
+  /// comic-source init are process-level and deliberately not re-run here.
+  Future<void> restoreFrom(String sourcePath) async {
+    if (!isInitialized) {
+      throw StateError("LocalManager is not initialized; cannot restore");
     }
-    try {
-      if (!directory.existsSync()) {
-        await directory.create();
-      }
-    } catch (e, s) {
-      Log.error("IO", "Failed to create local folder: $e", s);
-    }
-    _checkPathValidation();
-    _checkNoMedia();
-    await ComicSourceManager().ensureInit();
-    restoreDownloadingTasks();
-    // Defer auto-resume so a cold start (DB init, home page) isn't competing
-    // with download network/IO, and to steer clear of startup races in this
-    // historically crash-prone path. Tasks the user manually paused stay paused
-    // (wasRunning was persisted as false for them).
-    Future.delayed(const Duration(seconds: 3), _autoResumeDownloads);
+    await overwriteDatabaseContent(_db, sourcePath);
+    _ensureSchema();
+    notifyListeners();
   }
 
   /// Resume downloads that were genuinely running when the app was last closed,

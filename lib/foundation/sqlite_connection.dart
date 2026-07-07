@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:sqlite3/common.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 Database openSqliteDatabase(String path) {
@@ -15,6 +16,70 @@ Database openSqliteDatabase(String path) {
 }
 
 void closeSqliteDatabase(String path) {}
+
+/// Replaces [target]'s entire content — schema included — with the database
+/// file at [sourcePath], IN PLACE via SQLite's online backup API.
+///
+/// The target file is never deleted or renamed, so every other connection in
+/// this process keeps a valid handle throughout: background-isolate readers
+/// (image-favorites compute, async folder loads), a mid-flight follow-update
+/// check, or a leftover hot-restart handle. The old close→delete→rename→reopen
+/// swap crashed natively whenever such a second connection was alive (the
+/// startup-sync crash loop on iOS) and failed with errno 32 on Windows, where
+/// SQLite opens files without FILE_SHARE_DELETE.
+///
+/// Copies in a single backup step: WAL readers on other connections keep their
+/// snapshot; writers briefly queue on their busy_timeout. The copied file may
+/// carry an older (or foreign) schema — re-running migrations and rebuilding
+/// in-memory caches afterwards is the caller's job.
+Future<void> overwriteDatabaseContent(
+  CommonDatabase target,
+  String sourcePath,
+) async {
+  final wasWal =
+      target.select('PRAGMA journal_mode;').first.values.first.toString() ==
+      'wal';
+  final source = sqlite3.open(sourcePath);
+  try {
+    await source.backup(target as Database, nPage: -1).drain();
+  } finally {
+    source.dispose();
+  }
+  // A page-level copy brings the source's journal-mode header along; re-assert
+  // WAL (only where it was already in use — local.db deliberately isn't) so a
+  // backup exported from a rollback-journal database can't silently downgrade
+  // this store's journaling. Best-effort: switching modes needs a brief
+  // exclusive lock and may be denied while another connection reads.
+  if (wasWal) {
+    try {
+      target.execute('PRAGMA journal_mode = WAL;');
+    } catch (_) {}
+  }
+}
+
+/// Renames a database and its WAL sidecars aside (`.invalid-<timestamp>`) so a
+/// fresh one can be created at [path]. For open failures that survive restarts
+/// (e.g. a crash left sidecars the next open cannot recover) — trades that
+/// store's content for a working app instead of failing every launch.
+void backupAsideCorruptDatabase(String path) {
+  final timestamp = DateTime.now().millisecondsSinceEpoch;
+  for (final suffix in ['', '-wal', '-shm']) {
+    final file = File('$path$suffix');
+    if (!file.existsSync()) continue;
+    var backupPath = '$path$suffix.invalid-$timestamp';
+    var index = 1;
+    while (File(backupPath).existsSync()) {
+      backupPath = '$path$suffix.invalid-$timestamp-$index';
+      index++;
+    }
+    try {
+      file.renameSync(backupPath);
+    } catch (_) {
+      // Rename can fail if another handle still pins the file (Windows); the
+      // caller's reopen will then surface the original error.
+    }
+  }
+}
 
 Future<void> flushSqliteDatabases() async {}
 

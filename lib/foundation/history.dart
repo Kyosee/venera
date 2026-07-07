@@ -247,7 +247,17 @@ class HistoryManager with ChangeNotifier {
     _clearCache();
     _dbPath = "${App.dataPath}/history.db";
     _db = openSqliteDatabase(_dbPath);
+    _ensureSchema();
 
+    isInitialized = true;
+    notifyListeners();
+    ImageFavoriteManager().init();
+  }
+
+  /// Creates the history table when missing and upgrades older layouts.
+  /// Idempotent; also run after [restoreFrom], whose page-level copy may bring
+  /// in a backup created by an older app version.
+  void _ensureSchema() {
     _db.execute("""
         create table if not exists history  (
           id text,
@@ -273,10 +283,27 @@ class HistoryManager with ChangeNotifier {
     if (!columns.any((element) => element["name"] == "chapter_group")) {
       _db.execute("alter table history add column chapter_group int;");
     }
+  }
 
-    isInitialized = true;
-    notifyListeners();
+  /// Replaces this store's content with the database at [sourcePath] without
+  /// closing or swapping the underlying file — see [overwriteDatabaseContent].
+  /// The old close→replace→reopen swap crashed natively when a second
+  /// connection (image-favorites compute isolate, async readers) still held
+  /// the old file, and a mid-way failure left this manager closed for the
+  /// rest of the session.
+  Future<void> restoreFrom(String sourcePath) async {
+    if (!isInitialized) {
+      throw StateError("HistoryManager is not initialized; cannot restore");
+    }
+    await overwriteDatabaseContent(_db, sourcePath);
+    _ensureSchema();
+    _isCorrupted = false;
+    // image_favorites lives in this same database file: re-ensure its table
+    // exists and rerun its cache-key fix against the imported rows.
     ImageFavoriteManager().init();
+    _clearCache();
+    updateCache();
+    notifyListeners();
   }
 
   static const _insertHistorySql = """

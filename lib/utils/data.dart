@@ -349,45 +349,18 @@ Future<File> exportAppData([bool sync = true]) async {
   return cacheFile;
 }
 
-/// Deletes a file, retrying briefly to ride out the window where the OS has
-/// not yet released the handle. On Windows, after an sqlite3 connection is
-/// disposed, closing a WAL database may trigger a final checkpoint and the
-/// `history.db` (and its `-wal`/`-shm` sidecars) can stay locked for a few
-/// milliseconds, causing `deleteSync` to fail with errno 32 ("another process
-/// is using this file"). A short retry loop resolves this race deterministically.
-///
-/// Synchronous on purpose: it runs inside the atomic close→replace→reopen
-/// section of [importAppData], which must not yield the event loop. An awaited
-/// gap there would let a UI query touch the just-disposed database handle and
-/// crash the process natively (this was the iOS startup WebDAV-sync crash). On
-/// iOS/Android/Linux/macOS `deleteSync` never blocks; the retry only ever trips
-/// on Windows, where the synchronous `sleep` rides out the handle-release race
-/// while keeping the swap a single uninterruptible step.
-void _deleteFileWithRetry(String path) {
-  final file = File(path);
-  if (!file.existsSync()) return;
-  for (var attempt = 0; ; attempt++) {
-    try {
-      file.deleteSync();
-      return;
-    } on FileSystemException {
-      if (attempt >= 10) rethrow;
-      sleep(const Duration(milliseconds: 50));
-    }
-  }
-}
-
-/// Replaces a live sqlite database file with [newFile], handling the WAL
-/// sidecars and the Windows handle-release race. The owning manager must be
-/// closed immediately before calling this and re-initialized immediately
-/// afterwards with NO `await` in between — the whole close→replace→reopen
-/// sequence must stay synchronous so no UI query can hit the disposed handle.
-void _replaceDatabaseFile(File newFile, String targetPath) {
-  _deleteFileWithRetry(targetPath);
-  _deleteFileWithRetry('$targetPath-wal');
-  _deleteFileWithRetry('$targetPath-shm');
-  newFile.renameSync(targetPath);
-}
+/// Whether every SQLite-backed store the import path restores into is alive.
+/// The deferred-init completer only says init *finished attempting* — after a
+/// mid-init failure it still completes (so gates don't hang), which used to
+/// let a startup download apply a backup over uninitialized stores (LateError
+/// storms, half-applied data). Ground truth about the stores lives here.
+bool get coreDataStoresReady =>
+    HistoryManager().isInitialized &&
+    LocalFavoritesManager().isInitialized &&
+    App.readLater.isInitialized &&
+    LocalManager().isInitialized &&
+    App.domain.isInitialized &&
+    SingleInstanceCookieJar.instance != null;
 
 /// Returns true if [config] is a complete native WebDAV configuration:
 /// a 3-element list of non-empty strings ([url, user, password]).
@@ -508,40 +481,23 @@ Future<void> _importAppDataLocked(
     }
     if (await historyFile.exists()) {
       report(ImportPhase.applying, 'Importing history');
-      HistoryManager().close();
-      _replaceDatabaseFile(
-        historyFile,
-        FilePath.join(App.dataPath, "history.db"),
-      );
-      HistoryManager().init();
+      await HistoryManager().restoreFrom(historyFile.path);
     }
     if (await localFavoriteFile.exists()) {
       report(ImportPhase.applying, 'Importing favorites');
-      // The swap below replaces the favorites DB wholesale, but follow-update
+      // The restore replaces the favorites DB wholesale, but follow-update
       // bookkeeping (has_new_update / last_update_time / last_check_time) is
       // written by THIS device's update checks and may be missing or stale in
       // the incoming backup — a startup or catch-up sync download used to
       // silently erase every unread update mark while the follow-update task
       // history kept counting them (#106). Snapshot it and merge it back in.
       var updateInfo = LocalFavoritesManager().snapshotUpdateInfo();
-      LocalFavoritesManager().close();
-      _replaceDatabaseFile(
-        localFavoriteFile,
-        FilePath.join(App.dataPath, "local_favorite.db"),
-      );
-      await LocalFavoritesManager().init();
+      await LocalFavoritesManager().restoreFrom(localFavoriteFile.path);
       LocalFavoritesManager().mergeUpdateInfo(updateInfo);
     }
     if (await domainFile.exists()) {
       report(ImportPhase.applying, 'Importing library');
-      App.domain.close();
-      final domainDir = Directory(
-        FilePath.join(App.dataPath, DomainDatabase.dataDirectoryName),
-      );
-      domainDir.createSync(recursive: true);
-      final target = DomainDatabase.databasePathFor(App.dataPath);
-      _replaceDatabaseFile(domainFile, target);
-      await App.domain.init(App.dataPath);
+      await App.domain.restoreFrom(domainFile.path);
     }
     if (await appdataFile.exists()) {
       report(ImportPhase.applying, 'Importing settings');
@@ -590,34 +546,20 @@ Future<void> _importAppDataLocked(
     }
     if (await cookieFile.exists()) {
       report(ImportPhase.applying, 'Importing settings');
-      SingleInstanceCookieJar.instance?.dispose();
-      _replaceDatabaseFile(
-        cookieFile,
-        FilePath.join(App.dataPath, "cookie.db"),
-      );
-      SingleInstanceCookieJar.instance = SingleInstanceCookieJar(
-        FilePath.join(App.dataPath, "cookie.db"),
-      )..init();
+      var jar =
+          SingleInstanceCookieJar.instance ??
+          await SingleInstanceCookieJar.createInstance();
+      await jar.restoreFrom(cookieFile.path);
     }
     var readLaterFile = cacheDir.joinFile("read_later.db");
     if (await readLaterFile.exists()) {
       report(ImportPhase.applying, 'Importing read later');
-      App.readLater.close();
-      _replaceDatabaseFile(
-        readLaterFile,
-        FilePath.join(App.dataPath, "read_later.db"),
-      );
-      await App.readLater.init();
+      await App.readLater.restoreFrom(readLaterFile.path);
     }
     var localDbFile = cacheDir.joinFile("local.db");
     if (await localDbFile.exists()) {
       report(ImportPhase.applying, 'Importing local library');
-      LocalManager().close();
-      _replaceDatabaseFile(
-        localDbFile,
-        FilePath.join(App.dataPath, "local.db"),
-      );
-      await LocalManager().init();
+      await LocalManager().restoreFrom(localDbFile.path);
     }
     var comicSourceDir = FilePath.join(cacheDirPath, "comic_source");
     if (Directory(comicSourceDir).existsSync()) {

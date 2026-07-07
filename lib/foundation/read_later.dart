@@ -131,6 +131,19 @@ class ReadLaterManager with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Replaces this store's content with the database at [sourcePath] without
+  /// closing or swapping the underlying file — see [overwriteDatabaseContent].
+  Future<void> restoreFrom(String sourcePath) async {
+    if (!isInitialized) {
+      throw StateError("ReadLaterManager is not initialized; cannot restore");
+    }
+    await overwriteDatabaseContent(_db, sourcePath);
+    _db.execute(_createTableSql);
+    _migrateSchema();
+    _loadIds();
+    notifyListeners();
+  }
+
   /// Canonical table schema. Kept as a constant so [init] and the rebuild path
   /// in [_migrateSchema] cannot drift apart.
   static const String _createTableSql = """

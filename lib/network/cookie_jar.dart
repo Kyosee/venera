@@ -54,7 +54,22 @@ class CookieJarSql {
   }
 
   void init() {
-    _db = openSqliteDatabase(path);
+    try {
+      _db = openSqliteDatabase(path);
+    } on SqliteException catch (e, s) {
+      // A crash mid-WAL-write can leave sidecars the next open cannot recover
+      // (seen live: SQLITE_IOERR_TRUNCATE from `PRAGMA journal_mode = WAL` at
+      // startup), and this open failing used to take the whole deferred init
+      // down with it. Cookies only cost a re-login: move the broken files
+      // aside and start fresh instead of failing every launch.
+      Log.error("Cookie Jar", "Failed to open cookie.db, recreating: $e", s);
+      backupAsideCorruptDatabase(path);
+      _db = openSqliteDatabase(path);
+    }
+    _ensureTable();
+  }
+
+  void _ensureTable() {
     _db.execute('''
       CREATE TABLE IF NOT EXISTS cookies (
         name TEXT NOT NULL,
@@ -67,6 +82,13 @@ class CookieJarSql {
         PRIMARY KEY (name, domain, path)
       );
     ''');
+  }
+
+  /// Replaces cookie content with the database at [sourcePath] without
+  /// closing or swapping the underlying file — see [overwriteDatabaseContent].
+  Future<void> restoreFrom(String sourcePath) async {
+    await overwriteDatabaseContent(_db, sourcePath);
+    _ensureTable();
   }
 
   void saveFromResponse(Uri uri, List<Cookie> cookies) {

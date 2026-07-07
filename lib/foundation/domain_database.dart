@@ -151,6 +151,20 @@ class DomainDatabase {
     }
   }
 
+  /// Replaces this store's content with the database at [sourcePath] without
+  /// closing or swapping the underlying file — see [overwriteDatabaseContent].
+  Future<void> restoreFrom(String sourcePath) async {
+    final database = _db;
+    if (database == null) {
+      throw StateError('DomainDatabase is not initialized; cannot restore');
+    }
+    await overwriteDatabaseContent(database, sourcePath);
+    // The imported file may carry an older schema; the open-time pipeline is
+    // idempotent, so re-run it (pragmas, missing tables/columns, seeds).
+    configure(database);
+    createSchema(database);
+  }
+
   static void _backupDatabaseFiles(String dbPath) {
     final timestamp = DateTime.now().millisecondsSinceEpoch;
     for (final path in [dbPath, '$dbPath-wal', '$dbPath-shm']) {

@@ -8,7 +8,9 @@ import 'package:venera/pages/comic_source_page.dart';
 import 'package:venera/init.dart';
 import 'package:venera/foundation/follow_updates.dart';
 import 'package:venera/foundation/appdata.dart';
+import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/favorites.dart';
+import 'package:venera/network/cookie_jar.dart';
 
 void cliPrint(Map<String, dynamic> data) {
   print('[CLI PRINT] ${jsonEncode(data)}');
@@ -31,6 +33,12 @@ Future<void> runHeadlessMode(List<String> args) async {
 
   // Need to initialize the app for some features to work
   await init();
+  // The import path restores backups into LIVE stores (in-place, via the
+  // SQLite backup API) instead of swapping files, so every store must be open
+  // before a `webdav down` applies data — this also satisfies
+  // coreDataStoresReady, which gates applying backups.
+  await SingleInstanceCookieJar.createInstance();
+  await App.initComponents();
   // Headless never runs initDeferred(); complete the gate so DataSync's
   // download entry (which waits for deferred init before applying backups)
   // proceeds immediately instead of stalling on its 60s safety timeout.
