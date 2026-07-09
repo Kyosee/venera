@@ -430,13 +430,6 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
       var translatedTags = tags.map((e) => e.translateTagsToCN).toList();
 
       if (isLiked()) {
-        if (page == firstPage) {
-          showToast(
-            message: "The cover cannot be uncollected here".tl,
-            context: context,
-          );
-          return;
-        }
         ImageFavoriteManager().deleteImageFavorite([
           ImageFavorite(page, imageKey, null, eid, id, ep, sourceKey, epName),
         ]);
