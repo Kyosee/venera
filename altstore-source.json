@@ -15,6 +15,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "2.1.6",
+          "buildVersion": "221",
+          "date": "2026-07-09",
+          "localizedDescription": "## What's Changed\n\n### Changed\n- Cover images can now be un-favorited directly by swiping or tapping\n- WebDAV now keeps up to 10 backups per platform\n- Updated the disclaimer text\n\n### Fixed\n- Fixed an issue that could cause the app to crash\n- Fixed cramped UI layout at some screen resolutions\n\n**Full Changelog**: https://github.com/Kyosee/venera/compare/v2.1.5...v2.1.6",
+          "downloadURL": "https://github.com/Kyosee/venera/releases/download/v2.1.6/venera-ios-2.1.6%2B221.ipa",
+          "size": 23093975,
+          "minOSVersion": "14.0"
+        },
+        {
           "version": "2.1.5",
           "buildVersion": "220",
           "date": "2026-07-06",
@@ -87,11 +96,11 @@
           "minOSVersion": "14.0"
         }
       ],
-      "version": "2.1.5",
-      "versionDate": "2026-07-06",
-      "versionDescription": "## What's Changed\n\n### Added\n- WebDAV backups now keep the 3 most recent per platform and automatically clean up older ones\n\n### Changed\n- Smoother experience when dragging the list scrollbar\n\n### Fixed\n- Fix dropped frames when turning pages quickly and stutter when the keyboard pops up in the reader (#107)\n- Fix swipe-to-favorite triggering too easily (edge back gestures and diagonal scrolling no longer set it off)\n- Fix notification cards sometimes not disappearing after a background task finishes (#84)\n- Fix an occasional crash when a cloud backup was applied before startup finished\n- Fix settings possibly being fully reset when the process is killed by the system\n- Fix key data files getting corrupted on abnormal interruption, with fault-tolerant loading when data is damaged\n- Fix download resume failing outright when its state file was corrupted, instead of re-downloading\n- Fix the follow-updates list not refreshing during a check, and unread update marks being lost after a data restore (#106)\n- Fix timestamps in task records not shown in the local format\n\n**Full Changelog**: https://github.com/Kyosee/venera/compare/v2.1.4...v2.1.5",
-      "downloadURL": "https://github.com/Kyosee/venera/releases/download/v2.1.5/venera-ios-2.1.5%2B220.ipa",
-      "size": 23085425
+      "version": "2.1.6",
+      "versionDate": "2026-07-09",
+      "versionDescription": "## What's Changed\n\n### Changed\n- Cover images can now be un-favorited directly by swiping or tapping\n- WebDAV now keeps up to 10 backups per platform\n- Updated the disclaimer text\n\n### Fixed\n- Fixed an issue that could cause the app to crash\n- Fixed cramped UI layout at some screen resolutions\n\n**Full Changelog**: https://github.com/Kyosee/venera/compare/v2.1.5...v2.1.6",
+      "downloadURL": "https://github.com/Kyosee/venera/releases/download/v2.1.6/venera-ios-2.1.6%2B221.ipa",
+      "size": 23093975
     }
   ],
   "news": []
