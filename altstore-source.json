@@ -15,6 +15,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "2.1.7",
+          "buildVersion": "222",
+          "date": "2026-07-10",
+          "localizedDescription": "## What's Changed\n\n### Added\n- App lock now supports PIN, password, and pattern unlock, so devices without biometric hardware can still protect the app.\n- Reading display settings now include a comment font size option.\n- When a chapter fails to load, you can now tap to retry.\n\n### Fixed\n- Fixed a translucent/white bar appearing at the bottom of the screen on some devices.\n- Fixed an occasional crash on restart after syncing.\n\n**Full Changelog**: https://github.com/Kyosee/venera/compare/v2.1.6...v2.1.7",
+          "downloadURL": "https://github.com/Kyosee/venera/releases/download/v2.1.7/venera-ios-2.1.7%2B222.ipa",
+          "size": 23106998,
+          "minOSVersion": "14.0"
+        },
+        {
           "version": "2.1.6",
           "buildVersion": "221",
           "date": "2026-07-09",
@@ -96,11 +105,11 @@
           "minOSVersion": "14.0"
         }
       ],
-      "version": "2.1.6",
-      "versionDate": "2026-07-09",
-      "versionDescription": "## What's Changed\n\n### Changed\n- Cover images can now be un-favorited directly by swiping or tapping\n- WebDAV now keeps up to 10 backups per platform\n- Updated the disclaimer text\n\n### Fixed\n- Fixed an issue that could cause the app to crash\n- Fixed cramped UI layout at some screen resolutions\n\n**Full Changelog**: https://github.com/Kyosee/venera/compare/v2.1.5...v2.1.6",
-      "downloadURL": "https://github.com/Kyosee/venera/releases/download/v2.1.6/venera-ios-2.1.6%2B221.ipa",
-      "size": 23093975
+      "version": "2.1.7",
+      "versionDate": "2026-07-10",
+      "versionDescription": "## What's Changed\n\n### Added\n- App lock now supports PIN, password, and pattern unlock, so devices without biometric hardware can still protect the app.\n- Reading display settings now include a comment font size option.\n- When a chapter fails to load, you can now tap to retry.\n\n### Fixed\n- Fixed a translucent/white bar appearing at the bottom of the screen on some devices.\n- Fixed an occasional crash on restart after syncing.\n\n**Full Changelog**: https://github.com/Kyosee/venera/compare/v2.1.6...v2.1.7",
+      "downloadURL": "https://github.com/Kyosee/venera/releases/download/v2.1.7/venera-ios-2.1.7%2B222.ipa",
+      "size": 23106998
     }
   ],
   "news": []
