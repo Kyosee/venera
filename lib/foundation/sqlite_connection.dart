@@ -100,8 +100,27 @@ void restoreDatabaseFiles(Map<String, String> swaps) {
     }
   }
   const suffixes = ['', '-wal', '-shm'];
+  // Stage phase: copy every source next to its target BEFORE any original is
+  // touched. The vulnerable window per target during the swap phase below is
+  // then two directory-entry renames, not a multi-megabyte copy — a process
+  // death mid-restore can leave the old or the new file in place, never
+  // neither.
+  final staged = <String, String>{};
   final setAside = <String, String>{};
+  // Targets whose staged copy was renamed into place; rollback may only delete
+  // these — a target the swap never reached still holds its ORIGINAL file.
+  final swappedIn = <String>[];
   try {
+    for (final entry in swaps.entries) {
+      final stagedPath = '${entry.key}.restore-incoming';
+      final stagedFile = File(stagedPath);
+      if (stagedFile.existsSync()) {
+        stagedFile.deleteSync();
+      }
+      File(entry.value).copySync(stagedPath);
+      staged[entry.key] = stagedPath;
+    }
+    // Swap phase: set the originals aside, move the staged copies into place.
     for (final entry in swaps.entries) {
       final targetPath = entry.key;
       for (final suffix in suffixes) {
@@ -115,26 +134,38 @@ void restoreDatabaseFiles(Map<String, String> swaps) {
         file.renameSync(asidePath);
         setAside['$targetPath$suffix'] = asidePath;
       }
-      File(entry.value).copySync(targetPath);
+      File(staged.remove(targetPath)!).renameSync(targetPath);
+      swappedIn.add(targetPath);
     }
   } catch (e) {
-    // Roll back: remove whatever was copied, put the originals back.
-    for (final targetPath in swaps.keys) {
-      for (final suffix in suffixes) {
-        final path = '$targetPath$suffix';
-        try {
-          final current = File(path);
-          if (current.existsSync()) {
-            current.deleteSync();
-          }
-          final asidePath = setAside[path];
-          if (asidePath != null) {
-            File(asidePath).renameSync(path);
-          }
-        } catch (_) {}
-      }
+    // Roll back: remove only the files this run put in place, then restore the
+    // set-aside originals. Never delete a path that was not swapped — for an
+    // entry the failure preceded, the file at the target path IS the original.
+    for (final targetPath in swappedIn) {
+      try {
+        final current = File(targetPath);
+        if (current.existsSync()) {
+          current.deleteSync();
+        }
+      } catch (_) {}
+    }
+    for (final entry in setAside.entries) {
+      try {
+        if (!File(entry.key).existsSync()) {
+          File(entry.value).renameSync(entry.key);
+        }
+      } catch (_) {}
     }
     rethrow;
+  } finally {
+    for (final stagedPath in staged.values) {
+      try {
+        final file = File(stagedPath);
+        if (file.existsSync()) {
+          file.deleteSync();
+        }
+      } catch (_) {}
+    }
   }
   for (final asidePath in setAside.values) {
     try {

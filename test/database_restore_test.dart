@@ -118,7 +118,8 @@ void main() {
     expect(reopened.select('SELECT v FROM t').first['v'], 'keep');
   });
 
-  test('rolls back every completed swap when a later one fails', () async {
+  test('aborts before touching any target when a source file is missing',
+      () async {
     final dir = tempDir();
     final sep = Platform.pathSeparator;
     final targetA = '${dir.path}${sep}a.db';
@@ -148,6 +149,78 @@ void main() {
       expect(db.select('SELECT v FROM t').first['v'], entry.value);
       db.dispose();
     }
+  });
+
+  test('rolls back a completed swap when a later swap fails', () async {
+    final dir = tempDir();
+    final sep = Platform.pathSeparator;
+    final targetA = '${dir.path}${sep}a.db';
+    final targetB = '${dir.path}${sep}b.db';
+    final sourceA = '${dir.path}${sep}src_a.db';
+    final sourceB = '${dir.path}${sep}src_b.db';
+
+    for (final entry in {
+      targetA: 'old_a',
+      targetB: 'old_b',
+      sourceA: 'new_a',
+      sourceB: 'new_b',
+    }.entries) {
+      final db = openSqliteDatabase(entry.key);
+      db.execute('CREATE TABLE t (v TEXT);');
+      db.execute("INSERT INTO t VALUES ('${entry.value}');");
+      db.dispose();
+    }
+    // Block target B's set-aside rename by squatting on the aside path with a
+    // directory: sources validate and stage fine, target A swaps, then the
+    // swap phase fails on B — the rollback path with one completed swap.
+    Directory('$targetB.restore-aside').createSync();
+
+    expect(
+      () => restoreDatabaseFiles({targetA: sourceA, targetB: sourceB}),
+      throwsA(anything),
+    );
+
+    // A's completed swap was rolled back; B was never modified.
+    for (final entry in {targetA: 'old_a', targetB: 'old_b'}.entries) {
+      final db = openSqliteDatabase(entry.key);
+      expect(db.select('SELECT v FROM t').first['v'], entry.value);
+      db.dispose();
+    }
+    // No staged copies were left behind.
+    expect(File('$targetA.restore-incoming').existsSync(), isFalse);
+    expect(File('$targetB.restore-incoming').existsSync(), isFalse);
+  });
+
+  test('a staging failure leaves every original untouched', () async {
+    final dir = tempDir();
+    final sep = Platform.pathSeparator;
+    final targetA = '${dir.path}${sep}a.db';
+    // Target B lives in a directory that does not exist, so staging its copy
+    // fails after A's copy was already staged — before ANY original is touched.
+    final targetB = '${dir.path}${sep}no_such_dir${sep}b.db';
+    final sourceA = '${dir.path}${sep}src_a.db';
+    final sourceB = '${dir.path}${sep}src_b.db';
+
+    for (final entry in {
+      targetA: 'old_a',
+      sourceA: 'new_a',
+      sourceB: 'new_b',
+    }.entries) {
+      final db = openSqliteDatabase(entry.key);
+      db.execute('CREATE TABLE t (v TEXT);');
+      db.execute("INSERT INTO t VALUES ('${entry.value}');");
+      db.dispose();
+    }
+
+    expect(
+      () => restoreDatabaseFiles({targetA: sourceA, targetB: sourceB}),
+      throwsA(anything),
+    );
+
+    final db = openSqliteDatabase(targetA);
+    expect(db.select('SELECT v FROM t').first['v'], 'old_a');
+    db.dispose();
+    expect(File('$targetA.restore-incoming').existsSync(), isFalse);
   });
 
   test('runExclusive drains in-flight reads and blocks new ones', () async {
