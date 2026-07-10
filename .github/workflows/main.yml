@@ -281,7 +281,11 @@ jobs:
   Update_AltStore_Source:
     runs-on: ubuntu-22.04
     needs: [Release]
-    if: github.event_name == 'release'
+    # Pre-releases are for internal testing only: they must never be pushed to
+    # AltStore users. (The in-app updater is safe by itself — GitHub's
+    # releases/latest API never returns pre-releases — but this job would
+    # otherwise overwrite the manifest with the beta.)
+    if: github.event_name == 'release' && !github.event.release.prerelease
     permissions:
       contents: write
     steps:
