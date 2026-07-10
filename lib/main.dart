@@ -358,12 +358,14 @@ class _SystemUiProvider extends StatelessWidget {
         statusBarColor: Colors.transparent,
         systemNavigationBarColor: Colors.transparent,
         systemNavigationBarIconBrightness: Brightness.dark,
+        systemNavigationBarContrastEnforced: false,
       );
     } else {
       systemUiStyle = SystemUiOverlayStyle.light.copyWith(
         statusBarColor: Colors.transparent,
         systemNavigationBarColor: Colors.transparent,
         systemNavigationBarIconBrightness: Brightness.light,
+        systemNavigationBarContrastEnforced: false,
       );
     }
     return AnnotatedRegion<SystemUiOverlayStyle>(
