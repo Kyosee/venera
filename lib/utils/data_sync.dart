@@ -625,8 +625,9 @@ class DataSync with ChangeNotifier {
   Future<Res<bool>> downloadData() async {
     // Never apply a backup while heavy init is still bringing up the very
     // stores importAppData restores into — that race was the iOS startup
-    // crash loop back when the import swapped database files. The restore is
-    // in-place now, but it still requires initialized stores.
+    // crash loop back when the import swapped files under live handles. The
+    // restore now closes, swaps and reopens the files inside an exclusive
+    // window, but it still requires initialized stores.
     // _runStartupDownload already waits, but downloads can also be reached
     // early via the #86 catch-up path (auto upload converted to download);
     // gate ALL of them here. Headless completes the completer right after its
