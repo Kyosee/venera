@@ -15,6 +15,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "2.1.8",
+          "buildVersion": "224",
+          "date": "2026-07-11",
+          "localizedDescription": "## What's Changed\n\n### Added\n- WebDAV sync frequency now offers three modes: real-time, data-saving, and manual-only\n- The number of WebDAV backups to keep is now configurable\n\n### Changed\n- More reliable cross-device sync of read / unread marks for followed updates: the more recent side wins, so marking as read on one device clears the unread mark on others\n\n### Fixed\n- Fixed a crash after importing data or syncing via WebDAV\n- Fixed backups not being created after enabling automatic sync\n- Fixed the \"finished\" mark not showing in the top-left corner after reading all chapters in continuous scroll mode\n- Fixed Traditional/Simplified Chinese conversion not working in some cases\n\n**Full Changelog**: https://github.com/Kyosee/venera/compare/v2.1.7...v2.1.8",
+          "downloadURL": "https://github.com/Kyosee/venera/releases/download/v2.1.8/venera-ios-2.1.8%2B224.ipa",
+          "size": 23122552,
+          "minOSVersion": "14.0"
+        },
+        {
           "version": "2.1.7",
           "buildVersion": "222",
           "date": "2026-07-10",
@@ -105,11 +114,11 @@
           "minOSVersion": "14.0"
         }
       ],
-      "version": "2.1.7",
-      "versionDate": "2026-07-10",
-      "versionDescription": "## What's Changed\n\n### Added\n- App lock now supports PIN, password, and pattern unlock, so devices without biometric hardware can still protect the app.\n- Reading display settings now include a comment font size option.\n- When a chapter fails to load, you can now tap to retry.\n\n### Fixed\n- Fixed a translucent/white bar appearing at the bottom of the screen on some devices.\n- Fixed an occasional crash on restart after syncing.\n\n**Full Changelog**: https://github.com/Kyosee/venera/compare/v2.1.6...v2.1.7",
-      "downloadURL": "https://github.com/Kyosee/venera/releases/download/v2.1.7/venera-ios-2.1.7%2B222.ipa",
-      "size": 23106998
+      "version": "2.1.8",
+      "versionDate": "2026-07-11",
+      "versionDescription": "## What's Changed\n\n### Added\n- WebDAV sync frequency now offers three modes: real-time, data-saving, and manual-only\n- The number of WebDAV backups to keep is now configurable\n\n### Changed\n- More reliable cross-device sync of read / unread marks for followed updates: the more recent side wins, so marking as read on one device clears the unread mark on others\n\n### Fixed\n- Fixed a crash after importing data or syncing via WebDAV\n- Fixed backups not being created after enabling automatic sync\n- Fixed the \"finished\" mark not showing in the top-left corner after reading all chapters in continuous scroll mode\n- Fixed Traditional/Simplified Chinese conversion not working in some cases\n\n**Full Changelog**: https://github.com/Kyosee/venera/compare/v2.1.7...v2.1.8",
+      "downloadURL": "https://github.com/Kyosee/venera/releases/download/v2.1.8/venera-ios-2.1.8%2B224.ipa",
+      "size": 23122552
     }
   ],
   "news": []
