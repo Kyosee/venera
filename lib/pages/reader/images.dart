@@ -1154,6 +1154,14 @@ class _ContinuousModeState extends State<_ContinuousMode>
     final vertical = reader.mode == ReaderMode.continuousTopToBottom;
 
     _ContinuousReaderEntry? current;
+    // Last image whose box lies entirely at/above the leading edge. When the
+    // edge falls on a chapter separator (a mid-chapter join page or the final
+    // "no next chapter" page) no image straddles it, and the next image begins
+    // below it. Snapping to that next image would jump the indicator to the
+    // following chapter's P1 (or, at the tail, back to the very first image);
+    // instead we keep the finished chapter's last page so the read-complete
+    // mark can appear (issue #115, seamless case).
+    _ContinuousReaderEntry? lastAbove;
     // Find the image entry whose box straddles the viewport's leading edge.
     for (final entry in _entries) {
       if (!entry.isImage) continue;
@@ -1172,11 +1180,28 @@ class _ContinuousModeState extends State<_ContinuousMode>
         current = entry;
         break;
       }
-      // First entry that begins after the leading edge: use it if none yet.
-      if (start > 1) {
-        current ??= entry;
-        break;
+      if (start <= 1) {
+        // Wholly above the edge; remember as the running "last above".
+        lastAbove = entry;
+        continue;
       }
+      // start > 1: first image beginning below the edge. If an earlier image
+      // sits above it, a separator holds the edge between them — stay on that
+      // finished page rather than advancing into the page below.
+      current = lastAbove ?? entry;
+      break;
+    }
+    current ??= lastAbove;
+    // Scrolled to the very bottom: a final image shorter than the viewport
+    // sits fully below the leading edge (its top never reaches it), so the
+    // straddle search stops one image early and the indicator sticks at e.g.
+    // 29/30 — never equalling maxPage, so the read-complete mark never shows
+    // (issue #115, non-seamless case). Snap to the last laid-out image.
+    final pos = _scrollController.position;
+    if (pos.hasContentDimensions &&
+        pos.maxScrollExtent > pos.minScrollExtent &&
+        pos.pixels >= pos.maxScrollExtent - 1) {
+      current = _lastLaidOutImageEntry() ?? current;
     }
     current ??= _entries.firstWhere(
       (e) => e.isImage,
@@ -1804,6 +1829,21 @@ class _ContinuousModeState extends State<_ContinuousMode>
   /// The first image entry that currently has an attached render box.
   _ContinuousReaderEntry? _firstLaidOutEntry() {
     for (final entry in _entries) {
+      if (!entry.isImage) continue;
+      final ctx = _itemKeys['${entry.chapter}:${entry.page}']?.currentContext;
+      final box = ctx?.findRenderObject();
+      if (box is RenderBox && box.attached) return entry;
+    }
+    return null;
+  }
+
+  /// The last image entry that currently has an attached render box — the
+  /// trailing edge of laid-out content. Used to resolve the reading position
+  /// when scrolled to the very bottom, where a short final image sits below the
+  /// viewport's leading edge and the straddle search misses it (issue #115).
+  _ContinuousReaderEntry? _lastLaidOutImageEntry() {
+    for (var i = _entries.length - 1; i >= 0; i--) {
+      final entry = _entries[i];
       if (!entry.isImage) continue;
       final ctx = _itemKeys['${entry.chapter}:${entry.page}']?.currentContext;
       final box = ctx?.findRenderObject();
