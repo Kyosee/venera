@@ -354,10 +354,11 @@ class _SyncButtonState extends State<_SyncButton> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
-      // Honor the auto-sync toggle: this observer stays registered even when
-      // the sync button is hidden, so without the check a resume pulled (and
-      // applied!) remote data on a device whose auto-sync the user disabled.
-      if (!DataSync().isEnabled) return;
+      // Download-side freshness check. Runs in every sync tier — the probe is
+      // a cheap readDir and only pulls when the server holds newer data; the
+      // per-device tier governs uploads only (those settle points live inside
+      // DataSync's own lifecycle observer).
+      if (!DataSync().isConfigured) return;
       if (DateTime.now().difference(lastCheck) > const Duration(minutes: 10)) {
         lastCheck = DateTime.now();
         DataSync().downloadData();
@@ -367,12 +368,15 @@ class _SyncButtonState extends State<_SyncButton> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    if (!DataSync().isEnabled) {
+    if (!DataSync().isConfigured) {
       return const SizedBox.shrink();
     }
 
     var syncing = DataSync().isUploading || DataSync().isDownloading;
     var hasError = DataSync().lastError != null;
+    // Deferred-tier account still open — surface it so "did my changes reach
+    // the cloud yet" is answerable at a glance (#114).
+    var pending = DataSync().hasPendingChanges;
 
     Widget icon;
     if (syncing) {
@@ -386,10 +390,21 @@ class _SyncButtonState extends State<_SyncButton> with WidgetsBindingObserver {
     } else {
       icon = const Icon(Icons.sync);
     }
+    if (!syncing && pending) {
+      icon = Badge(
+        smallSize: 8,
+        backgroundColor: context.colorScheme.primary,
+        child: icon,
+      );
+    }
 
     var tooltip = syncing
         ? 'Syncing Data'.tl
-        : (hasError ? 'Error'.tl : 'Sync Data'.tl);
+        : hasError
+            ? 'Error'.tl
+            : pending
+                ? 'Changes pending upload'.tl
+                : 'Sync Data'.tl;
 
     return Padding(
       padding: const EdgeInsets.only(left: 8),

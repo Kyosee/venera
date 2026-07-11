@@ -534,6 +534,12 @@ Future<void> _importAppDataLocked(
           // device's task counts and could resume its interrupted check here.
           const deviceLocalKeys = [
             'webdavAutoSync',
+            // The sync tier and the open pending-changes account are as
+            // device-local as the toggle they replaced (#114): a restored
+            // backup must not flip this device's cadence or forge/erase
+            // its "owes an upload" state.
+            'webdavSyncMode',
+            'webdavPendingChanges',
             'hasCompletedInitialSync',
             'sync_logs',
             'data_sync_tasks',

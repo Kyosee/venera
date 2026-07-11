@@ -319,6 +319,10 @@ class Settings with ChangeNotifier {
     'limitImageWidth': true,
     'webdav': [], // empty means not configured
     'webdavUseProxy': true, // whether WebDAV sync goes through the app proxy
+    // Per-platform backup retention on the server (#114). Synced (not in
+    // _disableSync) on purpose: devices with different counts would prune
+    // each other's history on every upload.
+    'webdavBackupRetention': 10,
     "disableSyncFields": "", // "field1, field2, ..."
     'dataVersion': 0,
     'quickFavorite': null,

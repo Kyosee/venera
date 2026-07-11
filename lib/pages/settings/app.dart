@@ -597,7 +597,14 @@ class _WebdavSettingState extends State<_WebdavSetting> {
   String pass = "";
   String disableSync = "";
 
-  bool autoSync = true;
+  WebdavSyncMode syncMode = WebdavSyncMode.realtime;
+
+  int backupRetention = backupRetentionPerPlatform;
+
+  /// The retention choices offered in the UI. Foreign synced values outside
+  /// this list still work (sanitized on use); the selector then shows the
+  /// sanitized number as-is.
+  static const _retentionChoices = [3, 5, 10, 20];
 
   bool useProxy = true;
 
@@ -620,16 +627,43 @@ class _WebdavSettingState extends State<_WebdavSetting> {
       user = configs[1];
       pass = configs[2];
     }
-    autoSync = appdata.implicitData['webdavAutoSync'] ?? true;
+    // Reads through the legacy-webdavAutoSync migration in DataSync.syncMode.
+    syncMode = DataSync().syncMode;
+    backupRetention = sanitizedBackupRetention(
+      appdata.settings['webdavBackupRetention'],
+    );
     useProxy = appdata.settings['webdavUseProxy'] != false;
     syncLocalComicImages = appdata.settings['syncLocalComicImages'] ?? false;
   }
 
-  void onAutoSyncChanged(bool value) {
+  String _syncModeLabel(WebdavSyncMode mode) => switch (mode) {
+        WebdavSyncMode.realtime => "Realtime".tl,
+        WebdavSyncMode.dataSaver => "Data Saver".tl,
+        WebdavSyncMode.manual => "Manual Only".tl,
+      };
+
+  String _syncModeDescription(WebdavSyncMode mode) => switch (mode) {
+        WebdavSyncMode.realtime => "Upload shortly after every change".tl,
+        WebdavSyncMode.dataSaver =>
+          "Batch changes; upload on app switch / resume, at most every 30 minutes"
+              .tl,
+        WebdavSyncMode.manual => "Upload only when triggered manually".tl,
+      };
+
+  void onSyncModeChanged(WebdavSyncMode mode) {
     setState(() {
-      autoSync = value;
-      appdata.implicitData['webdavAutoSync'] = value;
-      appdata.writeImplicitData();
+      syncMode = mode;
+      // Persists immediately (like the old auto-sync switch) so the choice
+      // survives even if the user leaves without tapping Save.
+      DataSync().setSyncMode(mode);
+    });
+  }
+
+  void onBackupRetentionChanged(int value) {
+    setState(() {
+      backupRetention = value;
+      appdata.settings['webdavBackupRetention'] = value;
+      appdata.saveData();
     });
   }
 
@@ -656,7 +690,9 @@ class _WebdavSettingState extends State<_WebdavSetting> {
         url: url.trim(),
         user: user.trim(),
         pass: pass,
-        autoSync: autoSync,
+        // The payload keeps its legacy boolean shape so older installs can
+        // scan it; the three-way tier collapses to "any automation vs none".
+        autoSync: syncMode != WebdavSyncMode.manual,
         disableSyncFields: disableSync,
       ),
     );
@@ -672,7 +708,11 @@ class _WebdavSettingState extends State<_WebdavSetting> {
       url = payload.url;
       user = payload.user;
       pass = payload.pass;
-      autoSync = payload.autoSync;
+      // Legacy boolean → tier: false was "nothing automatic". Applied on
+      // Save, like the rest of the scanned form.
+      syncMode = payload.autoSync
+          ? WebdavSyncMode.realtime
+          : WebdavSyncMode.manual;
       disableSync = payload.disableSyncFields;
     });
     context.showMessage(
@@ -884,10 +924,48 @@ class _WebdavSettingState extends State<_WebdavSetting> {
             ),
             const SizedBox(height: 12),
             ListTile(
-              leading: Icon(Icons.sync),
-              title: Text("Auto Sync Data".tl),
+              leading: const Icon(Icons.sync),
+              title: Text("Sync Mode".tl),
+              subtitle: Text(
+                _syncModeDescription(syncMode),
+                style: const TextStyle(fontSize: 12),
+              ),
               contentPadding: EdgeInsets.zero,
-              trailing: Switch(value: autoSync, onChanged: onAutoSyncChanged),
+              trailing: Select(
+                current: _syncModeLabel(syncMode),
+                values: WebdavSyncMode.values.map(_syncModeLabel).toList(),
+                minWidth: 84,
+                onTap: (index) =>
+                    onSyncModeChanged(WebdavSyncMode.values[index]),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.history),
+              title: Text("Backups to keep per platform".tl),
+              subtitle: Text(
+                "Older backups on the server are removed after each upload".tl,
+                style: const TextStyle(fontSize: 12),
+              ),
+              contentPadding: EdgeInsets.zero,
+              trailing: Select(
+                current: backupRetention.toString(),
+                values: [
+                  // A synced value outside the offered list stays selectable
+                  // instead of rendering an empty selector.
+                  if (!_retentionChoices.contains(backupRetention))
+                    backupRetention.toString(),
+                  ..._retentionChoices.map((e) => e.toString()),
+                ],
+                minWidth: 64,
+                onTap: (index) {
+                  var values = [
+                    if (!_retentionChoices.contains(backupRetention))
+                      backupRetention,
+                    ..._retentionChoices,
+                  ];
+                  onBackupRetentionChanged(values[index]);
+                },
+              ),
             ),
             ListTile(
               leading: Icon(Icons.lan_outlined),
@@ -988,14 +1066,11 @@ class _WebdavSettingState extends State<_WebdavSetting> {
                       user.trim().isEmpty &&
                       pass.trim().isEmpty) {
                     appdata.settings['webdav'] = [];
-                    // Keep the user's auto-sync choice instead of forcing it
-                    // off: the toggle persists immediately via
-                    // onAutoSyncChanged, so hard-coding false here silently
-                    // reverted a switch the user had just turned on (#67).
-                    // With no config auto-sync stays inert (isEnabled requires
-                    // a non-empty config) and activates once a config is added.
-                    appdata.implicitData['webdavAutoSync'] = autoSync;
-                    appdata.writeImplicitData();
+                    // Persist the tier the form holds (it may come from a QR
+                    // scan that is only applied on Save). With no config the
+                    // tier stays inert — everything gates on isConfigured —
+                    // and activates once a config is added (#67 semantics).
+                    DataSync().setSyncMode(syncMode);
                     appdata.saveData();
                     context.showMessage(message: "Saved".tl);
                     App.rootPop();
@@ -1005,15 +1080,16 @@ class _WebdavSettingState extends State<_WebdavSetting> {
                   final config = [url.trim(), user.trim(), pass];
                   appdata.settings['webdav'] = config;
                   appdata.settings['disableSyncFields'] = disableSync;
-                  appdata.implicitData['webdavAutoSync'] = autoSync;
-                  appdata.writeImplicitData();
+                  DataSync().setSyncMode(syncMode);
 
                   // Persisting the configuration always succeeds at this
                   // point. The initial sync below is best-effort: its result
                   // is only surfaced as a hint and never rolls the config back.
                   appdata.saveData();
 
-                  if (!autoSync) {
+                  if (syncMode == WebdavSyncMode.manual) {
+                    // No automatic uploads wanted; skip the immediate test
+                    // sync too — the user triggers everything by hand.
                     context.showMessage(message: "Saved".tl);
                     App.rootPop();
                     return;

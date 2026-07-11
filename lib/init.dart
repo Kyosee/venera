@@ -20,6 +20,7 @@ import 'package:venera/pages/settings/settings_page.dart';
 import 'package:venera/utils/app_links.dart';
 import 'package:venera/utils/handle_text_share.dart';
 import 'package:venera/utils/opencc.dart';
+import 'package:venera/utils/sync_protocol.dart';
 import 'package:venera/utils/tags_translation.dart';
 import 'package:venera/utils/translations.dart';
 import 'foundation/appdata.dart';
@@ -111,6 +112,24 @@ void _checkOldConfigs() {
     } else {
       appdata.implicitData['webdavAutoSync'] = false;
     }
+    appdata.writeImplicitData();
+  }
+
+  // One-time stamp of the sync tier (#114). The legacy-boolean fallback in
+  // DataSync.syncMode cannot tell a user's explicit "auto-sync off" apart
+  // from the shim above writing `false` on an unconfigured fresh install —
+  // only here, with the config at hand, can that be decided: an explicit
+  // opt-out (false + configured) keeps its "nothing automatic" intent as
+  // manual; everything else gets the historical default, realtime.
+  if (appdata.implicitData['webdavSyncMode'] == null) {
+    var webdavConfig = appdata.settings['webdav'];
+    var configured = webdavConfig is List &&
+        webdavConfig.length == 3 &&
+        webdavConfig.whereType<String>().length == 3;
+    appdata.implicitData['webdavSyncMode'] =
+        (appdata.implicitData['webdavAutoSync'] == false && configured)
+            ? WebdavSyncMode.manual.name
+            : WebdavSyncMode.realtime.name;
     appdata.writeImplicitData();
   }
 }

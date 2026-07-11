@@ -370,4 +370,70 @@ void main() {
     });
   });
 
+  group('syncModeFromName (#114)', () {
+    test('parses explicit tier names', () {
+      expect(syncModeFromName('realtime'), WebdavSyncMode.realtime);
+      expect(syncModeFromName('dataSaver'), WebdavSyncMode.dataSaver);
+      expect(syncModeFromName('manual'), WebdavSyncMode.manual);
+    });
+
+    test('explicit name wins over the legacy boolean', () {
+      expect(
+        syncModeFromName('dataSaver', legacyAutoSync: false),
+        WebdavSyncMode.dataSaver,
+      );
+    });
+
+    test('legacy autoSync=false migrates to manual', () {
+      // Pre-tier devices that explicitly disabled auto-sync meant "no
+      // automatic upload at all" — manual preserves that.
+      expect(syncModeFromName(null, legacyAutoSync: false),
+          WebdavSyncMode.manual);
+    });
+
+    test('legacy autoSync=true / absent keeps the historical default', () {
+      expect(syncModeFromName(null, legacyAutoSync: true),
+          WebdavSyncMode.realtime);
+      expect(syncModeFromName(null), WebdavSyncMode.realtime);
+    });
+
+    test('unknown name falls through to the legacy rule', () {
+      expect(syncModeFromName('garbage'), WebdavSyncMode.realtime);
+      expect(syncModeFromName('garbage', legacyAutoSync: false),
+          WebdavSyncMode.manual);
+    });
+  });
+
+  group('sanitizedBackupRetention (#114)', () {
+    test('passes offered values through', () {
+      expect(sanitizedBackupRetention(3), 3);
+      expect(sanitizedBackupRetention(5), 5);
+      expect(sanitizedBackupRetention(10), 10);
+      expect(sanitizedBackupRetention(20), 20);
+    });
+
+    test('floors low values: retention must keep a rollback margin', () {
+      // The setting syncs fleet-wide; a foreign 0/1 must never be able to
+      // rotate away every backup on the server.
+      expect(sanitizedBackupRetention(0), 3);
+      expect(sanitizedBackupRetention(1), 3);
+      expect(sanitizedBackupRetention(-7), 3);
+    });
+
+    test('caps absurd highs', () {
+      expect(sanitizedBackupRetention(1000000), 100);
+    });
+
+    test('non-numeric falls back to the default', () {
+      expect(sanitizedBackupRetention(null), backupRetentionPerPlatform);
+      expect(sanitizedBackupRetention('abc'), backupRetentionPerPlatform);
+      expect(sanitizedBackupRetention(true), backupRetentionPerPlatform);
+    });
+
+    test('numeric strings are accepted (JSON round-trip tolerance)', () {
+      expect(sanitizedBackupRetention('20'), 20);
+      expect(sanitizedBackupRetention(5.0), 5);
+    });
+  });
+
 }

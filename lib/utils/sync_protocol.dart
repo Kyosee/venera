@@ -95,6 +95,40 @@ int maxBackupVersion(Iterable<String?> fileNames) {
   return max;
 }
 
+/// Automation tier for WebDAV data sync (#114). Stored PER DEVICE (in
+/// implicitData, never synced): cadence is a property of the device and its
+/// connection — a phone on a metered plan and a desktop on wifi legitimately
+/// want different tiers.
+enum WebdavSyncMode {
+  /// Upload shortly (2s debounce) after every data change — the historical
+  /// behavior and the default.
+  realtime,
+
+  /// Changes only mark a persistent "pending changes" account; one merged
+  /// upload settles it at the session boundaries (background/screen-off on
+  /// Android, resume, startup, window close on desktop), at the latest a
+  /// fixed age after the first unsynced change, or manually.
+  dataSaver,
+
+  /// Never upload automatically. Downloads (startup/resume checks) still run
+  /// so the device keeps up with the fleet; uploads happen only through the
+  /// home sync button or the settings page.
+  manual,
+}
+
+/// Resolves a persisted sync-mode name, falling back to the legacy
+/// `webdavAutoSync` boolean for devices configured before the tiers existed:
+/// `false` meant "no automatic upload at all" → [WebdavSyncMode.manual];
+/// anything else keeps the historical always-on behavior → realtime.
+/// Pure function, easy to unit-test.
+WebdavSyncMode syncModeFromName(String? name, {bool? legacyAutoSync}) {
+  for (final mode in WebdavSyncMode.values) {
+    if (mode.name == name) return mode;
+  }
+  if (legacyAutoSync == false) return WebdavSyncMode.manual;
+  return WebdavSyncMode.realtime;
+}
+
 /// How many backups each platform keeps on the WebDAV server.
 ///
 /// Retention is per platform tag (android / ios / win / …) so that one very
@@ -103,6 +137,20 @@ int maxBackupVersion(Iterable<String?> fileNames) {
 /// misbehaving device publishes bad data as the newest version, the previous
 /// good snapshots are still on the server for a manual restore.
 const int backupRetentionPerPlatform = 10;
+
+/// Clamps the user-configurable per-platform retention count (#114) to a safe
+/// range. The setting syncs fleet-wide through settings, so a foreign or
+/// corrupt value must not be able to rotate away the rollback margin the
+/// retention exists for (floor 3) or hoard unbounded junk (cap 100). Anything
+/// non-numeric falls back to [backupRetentionPerPlatform]. Pure function.
+int sanitizedBackupRetention(dynamic value) {
+  final v = value is num
+      ? value.toInt()
+      : int.tryParse(value?.toString() ?? '') ?? backupRetentionPerPlatform;
+  if (v < 3) return 3;
+  if (v > 100) return 100;
+  return v;
+}
 
 /// Backups to delete so every platform keeps at most [keepPerPlatform] of its
 /// newest versions. The just-uploaded [newFileName] counts toward its
