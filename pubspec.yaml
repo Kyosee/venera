@@ -102,9 +102,23 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^5.0.0
   flutter_to_arch: ^1.0.1
-  flutter_to_debian: 
+  flutter_to_debian:
     git:
       url: https://github.com/venera-app/flutter_to_debian.git
+  flutter_launcher_icons: ^0.14.4
+
+flutter_launcher_icons:
+  image_path: "assets/new_logo.png"
+  android: "ic_launcher"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/new_logo.png"
+  ios: true
+  remove_alpha_ios: true
+  windows:
+    generate: true
+    icon_size: 256
+  macos:
+    generate: true
 
 flutter:
   uses-material-design: true
@@ -125,7 +139,7 @@ flutter_to_arch:
   icon: debian/gui/venera.png
   categories: Utility
   keywords: Flutter;comic;images;
-  url: https://github.com/Kyosee/venera
+  url: https://github.com/Kyosee/VeneraX
   depends:
     - gtk3
     - webkit2gtk-4.1

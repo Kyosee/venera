@@ -380,7 +380,7 @@ class NaviPaneState extends State<NaviPane>
                             buildAppLogo(),
                             const SizedBox(width: 10),
                             const Text(
-                              'Venera',
+                              'VeneraX',
                               style: TextStyle(
                                 fontSize: 22,
                                 fontWeight: FontWeight.w800,

@@ -859,7 +859,7 @@ class _WebdavSettingState extends State<_WebdavSetting> {
                                     icon: const Icon(Icons.open_in_new),
                                     onPressed: () {
                                       launchUrlString(
-                                        "https://github.com/Kyosee/venera/blob/master/lib/foundation/appdata.dart",
+                                        "https://github.com/Kyosee/VeneraX/blob/master/lib/foundation/appdata.dart",
                                       );
                                     },
                                   ),

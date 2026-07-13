@@ -11,7 +11,7 @@ class _AboutSettingsState extends State<AboutSettings> {
   bool isCheckingUpdate = false;
 
   static const _repoOwner = 'Kyosee';
-  static const _repoName = 'venera';
+  static const _repoName = 'VeneraX';
 
   @override
   Widget build(BuildContext context) {
@@ -38,7 +38,7 @@ class _AboutSettingsState extends State<AboutSettings> {
           children: [
             const SizedBox(height: 8),
             Text("V${App.version}", style: const TextStyle(fontSize: 16)),
-            Text("Venera is a free and open-source app for comic reading.".tl),
+            Text("VeneraX is a free and open-source, multi-platform comic reader forked from Venera and maintained with enhancements over the original.".tl),
             const SizedBox(height: 8),
           ],
         ).toSliver(),
@@ -135,7 +135,7 @@ class _UpdateCheckResult {
 _GithubUpdateConfig _readGithubUpdateConfig() {
   return const _GithubUpdateConfig(
     owner: 'Kyosee',
-    repo: 'venera',
+    repo: 'VeneraX',
   );
 }
 

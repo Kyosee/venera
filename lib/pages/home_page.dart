@@ -1037,7 +1037,7 @@ class _ImportComicsWidgetState extends State<ImportComicsWidget> {
           ),
           onPressed: () {
             launchUrlString(
-              "https://github.com/Kyosee/venera/blob/master/doc/import_comic.md",
+              "https://github.com/Kyosee/VeneraX/blob/master/doc/import_comic.md",
             );
           },
         ).fixWidth(90).paddingRight(8),

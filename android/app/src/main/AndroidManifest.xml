@@ -13,7 +13,7 @@
     <!-- 后台任务保活：请求系统免除电池优化，避免进入后台后进程被冻结 -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <application
-        android:label="venera"
+        android:label="VeneraX"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

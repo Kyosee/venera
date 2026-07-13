@@ -90,7 +90,7 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "io.github.kyosee" "\0"
-            VALUE "FileDescription", "venera" "\0"
+            VALUE "FileDescription", "VeneraX" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "venera" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2024 io.github.kyosee. All rights reserved." "\0"

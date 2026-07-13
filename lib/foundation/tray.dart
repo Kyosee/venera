@@ -47,7 +47,7 @@ class TrayController with TrayListener, WindowListener {
       // 否则窗口可能在托盘尚未建好时就被隐藏，出现“窗口消失却没有托盘图标”
       // 的情况，只能重启恢复。
       await trayManager.setIcon('assets/app_icon.ico');
-      await trayManager.setToolTip('Venera');
+      await trayManager.setToolTip('VeneraX');
       await trayManager.setContextMenu(_buildMenu());
       await windowManager.setPreventClose(true);
       _enabled = true;
@@ -69,7 +69,7 @@ class TrayController with TrayListener, WindowListener {
 
   Menu _buildMenu() => Menu(
         items: [
-          MenuItem(key: _menuShow, label: 'Show Venera'.tl),
+          MenuItem(key: _menuShow, label: 'Show VeneraX'.tl),
           MenuItem.separator(),
           MenuItem(key: _menuQuit, label: 'Exit'.tl),
         ],
