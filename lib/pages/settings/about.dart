@@ -71,7 +71,7 @@ class _AboutSettingsState extends State<AboutSettings> {
           },
         ).toSliver(),
         ListTile(
-          title: Text("Disclaimer".tl),
+          title: Text("User Agreement & Disclaimer".tl),
           trailing: const Icon(Icons.info_outline),
           onTap: () => showDisclaimerDialog(context),
         ).toSliver(),

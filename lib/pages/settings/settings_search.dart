@@ -175,7 +175,7 @@ final _settingsSearchIndex = <_SettingsSearchEntry>[
   ),
   _SettingsSearchEntry("Check for updates on startup", 6, keywords: ["update"]),
   _SettingsSearchEntry("Repository", 6, keywords: ["github", "source"]),
-  _SettingsSearchEntry("Disclaimer", 6),
+  _SettingsSearchEntry("User Agreement & Disclaimer", 6),
 
   // --- 7: Debug ---
   _SettingsSearchEntry("Reload Configs", 7),

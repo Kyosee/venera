@@ -111,7 +111,7 @@ void showDisclaimerDialog(BuildContext context) {
     context: context,
     builder: (context) {
       return ContentDialog(
-        title: "Disclaimer".tl,
+        title: "User Agreement & Disclaimer".tl,
         content: ConstrainedBox(
           constraints: const BoxConstraints(maxHeight: 420),
           child: SingleChildScrollView(
@@ -159,7 +159,7 @@ class _DisclaimerConsentPageState extends State<DisclaimerConsentPage> {
             children: [
               const SizedBox(height: 8),
               Text(
-                "Disclaimer".tl,
+                "User Agreement & Disclaimer".tl,
                 style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 16),
