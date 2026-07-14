@@ -121,6 +121,9 @@ class Appdata with Init {
     "deviceId",
     "followUpdatesFolder",
     "syncLocalComicImages",
+    // Launcher icon is a per-device choice: the alias enabled on this device's
+    // system must not propagate to (or be overwritten by) another device.
+    "appLauncherIcon",
     // Per-source origin/offering provenance is device-local: originId reflects
     // where THIS device installed each source, and libraryIds/updateLibraryId
     // are rebuilt from the library list on every update check. Syncing it
@@ -341,6 +344,7 @@ class Settings with ChangeNotifier {
     'appLockType': 'biometric', // biometric, pin, password, pattern
     'appLockCredential': null, // {salt, hash} for non-biometric methods
     'batteryOptimizationPrompted': false, // 是否已提示过忽略电池优化（每设备一次，#84）
+    'appLauncherIcon': 'default', // launcher icon preset: default, orig, flat (device-local)
     'requireDisclaimerConsent': false,
     'disclaimerConsented': false,
     'onClickFavorite': 'viewDetail', // viewDetail, read

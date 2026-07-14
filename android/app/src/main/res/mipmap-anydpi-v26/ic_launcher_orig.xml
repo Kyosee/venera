@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The source art centers a small subject in a large solid-blue field. Under
+     the launcher's circular mask the blue edge is cropped, so the subject fills
+     too much of the visible area. Inset shrinks the whole image toward center;
+     the background color (same blue) fills the revealed edges seamlessly. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+  <background android:drawable="@color/ic_launcher_orig_background"/>
+  <foreground>
+      <inset
+          android:drawable="@mipmap/ic_launcher_orig_foreground"
+          android:inset="12%" />
+  </foreground>
+</adaptive-icon>

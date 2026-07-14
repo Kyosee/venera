@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#FFFFFF</color>
+    <!-- Corner colors of the full-bleed alternate icons; used as the adaptive
+         background fallback where the mask reveals edges. -->
+    <color name="ic_launcher_orig_background">#2143F3</color>
+    <color name="ic_launcher_flat_background">#7C40ED</color>
 </resources>

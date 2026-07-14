@@ -96,6 +96,7 @@ dependencies:
   flutter_slidable: ^4.0.0
   qr_flutter: ^4.1.0
   mobile_scanner: ^5.2.3
+  flutter_dynamic_icon_plus: ^1.4.1
 
 dev_dependencies:
   flutter_test:
@@ -130,6 +131,9 @@ flutter:
     - assets/tags.json
     - assets/tags_tw.json
     - assets/opencc.txt
+    - assets/new_logo.png
+    - assets/user_logo.png
+    - assets/venera_original.png
   shaders:
     - shaders/image_enhance.frag
 # fonts:

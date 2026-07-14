@@ -16,6 +16,10 @@
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		C0086D072CDEFE6E004596D9 /* DirectoryPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0086D062CDEFE64004596D9 /* DirectoryPicker.swift */; };
+		4A3329C4638F708E593B7539 /* AltIconOrig@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 22439B104C57C8F39914614E /* AltIconOrig@2x.png */; };
+		574A223A52D6CD23ACA68714 /* AltIconOrig@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = 15FC3510D9F9476E472C5305 /* AltIconOrig@3x.png */; };
+		F3D36C8C92B8F46AB2B1E0D7 /* AltIconFlat@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 85E5230C09DB38567FFD6498 /* AltIconFlat@2x.png */; };
+		5FD69E328A7A5A737A6434C5 /* AltIconFlat@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = BA74232D83DFF248713C279F /* AltIconFlat@3x.png */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -62,6 +66,10 @@
 		97C147021CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		C0086D062CDEFE64004596D9 /* DirectoryPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectoryPicker.swift; sourceTree = "<group>"; };
 		C22B8A9F3177D4A68EB8F66B /* Pods-Runner.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.debug.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"; sourceTree = "<group>"; };
+		22439B104C57C8F39914614E /* AltIconOrig@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIconOrig@2x.png"; sourceTree = "<group>"; };
+		15FC3510D9F9476E472C5305 /* AltIconOrig@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIconOrig@3x.png"; sourceTree = "<group>"; };
+		85E5230C09DB38567FFD6498 /* AltIconFlat@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIconFlat@2x.png"; sourceTree = "<group>"; };
+		BA74232D83DFF248713C279F /* AltIconFlat@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIconFlat@3x.png"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -136,6 +144,10 @@
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
 				C0086D062CDEFE64004596D9 /* DirectoryPicker.swift */,
+				22439B104C57C8F39914614E /* AltIconOrig@2x.png */,
+				15FC3510D9F9476E472C5305 /* AltIconOrig@3x.png */,
+				85E5230C09DB38567FFD6498 /* AltIconFlat@2x.png */,
+				BA74232D83DFF248713C279F /* AltIconFlat@3x.png */,
 			);
 			path = Runner;
 			sourceTree = "<group>";
@@ -247,6 +259,10 @@
 				3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */,
 				97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */,
 				97C146FC1CF9000F007C117D /* Main.storyboard in Resources */,
+				4A3329C4638F708E593B7539 /* AltIconOrig@2x.png in Resources */,
+				574A223A52D6CD23ACA68714 /* AltIconOrig@3x.png in Resources */,
+				F3D36C8C92B8F46AB2B1E0D7 /* AltIconFlat@2x.png in Resources */,
+				5FD69E328A7A5A737A6434C5 /* AltIconFlat@3x.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

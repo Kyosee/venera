@@ -57,5 +57,58 @@
   <string>Ensure that the operation is being performed by the user themselves.</string>
   <key>LSApplicationCategoryType</key>
   <string>public.app-category.books</string>
+	<!-- Alternate launcher icons (switched at runtime via flutter_dynamic_icon_plus).
+	     Keys (IconOrig / IconFlat) are the names passed to setAlternateIconName;
+	     CFBundleIconFiles point to the loose PNG base names (AltIcon*@2x/@3x.png),
+	     which must live outside Assets.xcassets. The primary icon stays in the
+	     asset catalog. Both iPhone and iPad blocks are required. -->
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundleAlternateIcons</key>
+		<dict>
+			<key>IconOrig</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>AltIconOrig</string>
+				</array>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+			<key>IconFlat</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>AltIconFlat</string>
+				</array>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+		</dict>
+	</dict>
+	<key>CFBundleIcons~ipad</key>
+	<dict>
+		<key>CFBundleAlternateIcons</key>
+		<dict>
+			<key>IconOrig</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>AltIconOrig</string>
+				</array>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+			<key>IconFlat</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>AltIconFlat</string>
+				</array>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+		</dict>
+	</dict>
 </dict>
 </plist>
