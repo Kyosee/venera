@@ -85,255 +85,276 @@ class _AppSettingsState extends State<AppSettings> {
     return SmoothCustomScrollView(
       slivers: [
         SliverAppbar(title: Text("App".tl)),
-        _SettingPartTitle(title: "Data".tl, icon: Icons.storage),
-        ListTile(
-          title: Text("Storage Path for local comics".tl),
-            subtitle: Text(LocalManager().path, softWrap: false),
-            trailing: IconButton(
-              icon: const Icon(Icons.copy),
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: LocalManager().path));
-                context.showMessage(message: "Path copied to clipboard".tl);
+        _SettingsExpansionTile(
+          expansionKey: const PageStorageKey('appDataGroup'),
+          initiallyExpanded: true,
+          icon: Icons.storage,
+          title: "Data".tl,
+          children: [
+            ListTile(
+              title: Text("Storage Path for local comics".tl),
+              subtitle: Text(LocalManager().path, softWrap: false),
+              trailing: IconButton(
+                icon: const Icon(Icons.copy),
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: LocalManager().path));
+                  context.showMessage(message: "Path copied to clipboard".tl);
+                },
+              ),
+            ),
+            _CallbackSetting(
+              title: "Set New Storage Path".tl,
+              actionTitle: "Set".tl,
+              callback: () async {
+                String? result;
+                if (App.isAndroid) {
+                  var picker = DirectoryPicker();
+                  result = (await picker.pickDirectory())?.path;
+                } else if (App.isIOS) {
+                  result = await selectDirectoryIOS();
+                } else {
+                  result = await selectDirectory();
+                }
+                if (result == null) return;
+                Future<void> apply({bool allowNonEmpty = false}) async {
+                  var loadingDialog = showLoadingDialog(
+                    App.rootContext,
+                    barrierDismissible: false,
+                    allowCancel: false,
+                  );
+                  var res = await LocalManager()
+                      .setNewPath(result!, allowNonEmpty: allowNonEmpty);
+                  loadingDialog.close();
+                  if (res == LocalManager.dirNotEmptySignal) {
+                    showConfirmDialog(
+                      context: App.rootContext,
+                      title: "Directory is not empty".tl,
+                      content:
+                          "The selected directory is not empty. Continue to merge local comics into it?"
+                              .tl,
+                      confirmText: "Continue".tl,
+                      onConfirm: () => apply(allowNonEmpty: true),
+                    );
+                  } else if (res != null) {
+                    context.showMessage(message: res);
+                  } else {
+                    context.showMessage(message: "Path set successfully".tl);
+                    setState(() {});
+                  }
+                }
+
+                await apply();
               },
             ),
-          ).toSliver(),
-          _CallbackSetting(
-            title: "Set New Storage Path".tl,
-            actionTitle: "Set".tl,
-            callback: () async {
-              String? result;
-              if (App.isAndroid) {
-                var picker = DirectoryPicker();
-                result = (await picker.pickDirectory())?.path;
-              } else if (App.isIOS) {
-                result = await selectDirectoryIOS();
-              } else {
-                result = await selectDirectory();
-              }
-              if (result == null) return;
-              Future<void> apply({bool allowNonEmpty = false}) async {
+            ListTile(
+              title: Text("Cache Size".tl),
+              subtitle: Text(bytesToReadableString(CacheManager().currentSize)),
+            ),
+            _CallbackSetting(
+              title: "Clear Cache".tl,
+              actionTitle: "Clear".tl,
+              callback: () async {
                 var loadingDialog = showLoadingDialog(
                   App.rootContext,
                   barrierDismissible: false,
                   allowCancel: false,
                 );
-                var res = await LocalManager()
-                    .setNewPath(result!, allowNonEmpty: allowNonEmpty);
+                await CacheManager().clear();
                 loadingDialog.close();
-                if (res == LocalManager.dirNotEmptySignal) {
-                  showConfirmDialog(
-                    context: App.rootContext,
-                    title: "Directory is not empty".tl,
-                    content:
-                        "The selected directory is not empty. Continue to merge local comics into it?"
-                            .tl,
-                    confirmText: "Continue".tl,
-                    onConfirm: () => apply(allowNonEmpty: true),
-                  );
-                } else if (res != null) {
-                  context.showMessage(message: res);
-                } else {
-                  context.showMessage(message: "Path set successfully".tl);
-                  setState(() {});
-                }
-              }
-
-              await apply();
-            },
-          ).toSliver(),
-          ListTile(
-            title: Text("Cache Size".tl),
-            subtitle: Text(bytesToReadableString(CacheManager().currentSize)),
-          ).toSliver(),
-          _CallbackSetting(
-            title: "Clear Cache".tl,
-            actionTitle: "Clear".tl,
-            callback: () async {
-              var loadingDialog = showLoadingDialog(
-                App.rootContext,
-                barrierDismissible: false,
-                allowCancel: false,
-              );
-              await CacheManager().clear();
-              loadingDialog.close();
-              context.showMessage(message: "Cache cleared".tl);
-              setState(() {});
-            },
-          ).toSliver(),
-          _CallbackSetting(
-            title: "Cache Limit".tl,
-            subtitle: "${appdata.settings['cacheSize']} MB",
-            callback: () {
-              showInputDialog(
-                context: context,
-                title: "Set Cache Limit".tl,
-                hintText: "Size in MB".tl,
-                inputValidator: RegExp(r"^\d+$"),
-                onConfirm: (value) {
-                  appdata.settings['cacheSize'] = int.parse(value);
-                  appdata.saveData();
-                  setState(() {});
-                  CacheManager().setLimitSize(appdata.settings['cacheSize']);
-                  return null;
-                },
-              );
-            },
-            actionTitle: 'Set'.tl,
-          ).toSliver(),
-        SelectSetting(
-          title: "Auto clean reading history".tl,
-          settingKey: "autoCleanHistoryDays",
-          help: "Automatically delete reading history older than the selected period when the app starts.".tl,
-          optionTranslation: {
-            "0": "Never".tl,
-            "7": "7 days".tl,
-            "30": "30 days".tl,
-            "90": "90 days".tl,
-            "180": "180 days".tl,
-            "365": "365 days".tl,
-          },
-        ).toSliver(),
-        _CallbackSetting(
-          title: "Export App Data".tl,
-          callback: () async {
-            var controller = showLoadingDialog(context);
-            var file = await exportAppData(false);
-            await saveFile(filename: "data.venera", file: file);
-            controller.close();
-          },
-          actionTitle: 'Export'.tl,
-        ).toSliver(),
-        _CallbackSetting(
-          title: "Import App Data".tl,
-          callback: () async {
-            var file = await selectFile(ext: ['venera', 'picadata']);
-            if (file == null) return;
-            var manager = ImportTaskManager.instance;
-            var task = manager.startImport(
-              filePath: file.path,
-              fileName: file.name,
-              isPica: file.name.endsWith('picadata'),
-            );
-            if (task == null) {
-              context.showMessage(
-                message: "An import task is already running".tl,
-              );
-              return;
-            }
-            var controller = showLoadingDialog(
-              context,
-              withProgress: true,
-              barrierDismissible: false,
-              message: _importTaskMessage(task),
-              secondaryButtonText: "Background",
-              onSecondary: () {},
-              cancelButtonText: "Cancel",
-              onCancel: () => manager.cancel(task.id),
-            );
-            void listener() {
-              if (controller.closed) {
-                manager.removeListener(listener);
-                return;
-              }
-              controller.setProgress(task.indicatorValue);
-              controller.setMessage(_importTaskMessage(task));
-              if (!task.isRunning) {
-                manager.removeListener(listener);
+                context.showMessage(message: "Cache cleared".tl);
+                setState(() {});
+              },
+            ),
+            _CallbackSetting(
+              title: "Cache Limit".tl,
+              subtitle: "${appdata.settings['cacheSize']} MB",
+              callback: () {
+                showInputDialog(
+                  context: context,
+                  title: "Set Cache Limit".tl,
+                  hintText: "Size in MB".tl,
+                  inputValidator: RegExp(r"^\d+$"),
+                  onConfirm: (value) {
+                    appdata.settings['cacheSize'] = int.parse(value);
+                    appdata.saveData();
+                    setState(() {});
+                    CacheManager().setLimitSize(appdata.settings['cacheSize']);
+                    return null;
+                  },
+                );
+              },
+              actionTitle: 'Set'.tl,
+            ),
+            SelectSetting(
+              title: "Auto clean reading history".tl,
+              settingKey: "autoCleanHistoryDays",
+              help: "Automatically delete reading history older than the selected period when the app starts.".tl,
+              optionTranslation: {
+                "0": "Never".tl,
+                "7": "7 days".tl,
+                "30": "30 days".tl,
+                "90": "90 days".tl,
+                "180": "180 days".tl,
+                "365": "365 days".tl,
+              },
+            ),
+            _CallbackSetting(
+              title: "Export App Data".tl,
+              callback: () async {
+                var controller = showLoadingDialog(context);
+                var file = await exportAppData(false);
+                await saveFile(filename: "data.venera", file: file);
                 controller.close();
-                if (task.status == ImportTaskStatus.completed) {
-                  App.rootContext.showMessage(message: "Import completed".tl);
-                } else if (task.status == ImportTaskStatus.failed) {
-                  App.rootContext.showMessage(
-                    message: (task.error ?? "Import failed").tl,
+              },
+              actionTitle: 'Export'.tl,
+            ),
+            _CallbackSetting(
+              title: "Import App Data".tl,
+              callback: () async {
+                var file = await selectFile(ext: ['venera', 'picadata']);
+                if (file == null) return;
+                var manager = ImportTaskManager.instance;
+                var task = manager.startImport(
+                  filePath: file.path,
+                  fileName: file.name,
+                  isPica: file.name.endsWith('picadata'),
+                );
+                if (task == null) {
+                  context.showMessage(
+                    message: "An import task is already running".tl,
                   );
-                }
-              }
-            }
-
-            manager.addListener(listener);
-            listener();
-          },
-          actionTitle: 'Import'.tl,
-        ).toSliver(),
-        _CallbackSetting(
-          title: "Data Sync".tl,
-          callback: () async {
-            showPopUpWidget(context, const _WebdavSetting());
-          },
-          actionTitle: 'Set'.tl,
-        ).toSliver(),
-        _CallbackSetting(
-          title: "Sync Logs".tl,
-          callback: () async {
-            _showSyncLogsDialog(context);
-          },
-          actionTitle: 'View'.tl,
-        ).toSliver(),
-        if (App.isAndroid) ...[
-          _SettingPartTitle(
-            title: "Background".tl,
-            icon: Icons.battery_saver,
-          ),
-          const _BatteryOptimizationSetting().toSliver(),
-        ],
-        _SettingPartTitle(title: "User".tl, icon: Icons.person_outline),
-        SelectSetting(
-          title: "Language".tl,
-          settingKey: "language",
-          optionTranslation: const {
-            "system": "System",
-            "zh-CN": "简体中文",
-            "zh-TW": "繁體中文",
-            "en-US": "English",
-          },
-          onChanged: () {
-            App.forceRebuild();
-          },
-        ).toSliver(),
-        if (!App.isLinux) ...[
-          _SwitchSetting(
-            title: "Authorization Required".tl,
-            settingKey: "authorizationRequired",
-            onChanged: () async {
-              var enabled = appdata.settings['authorizationRequired'];
-              if (enabled) {
-                // Just switched on: pick an unlock method and record its
-                // credential. Revert if the user backs out or setup fails.
-                var ok = await showAppLockSetup(context);
-                if (!ok) {
-                  setState(() {
-                    appdata.settings['authorizationRequired'] = false;
-                  });
-                  appdata.saveData();
                   return;
                 }
-              }
-              setState(() {});
-            },
-          ).toSliver(),
-          if (appdata.settings['authorizationRequired'] == true)
-            _CallbackSetting(
-              title: "Unlock method".tl,
-              subtitle: _appLockTypeName(AppLock.type),
-              actionTitle: "Change".tl,
-              callback: () async {
-                var ok = await showAppLockSetup(context);
-                if (ok) setState(() {});
+                var controller = showLoadingDialog(
+                  context,
+                  withProgress: true,
+                  barrierDismissible: false,
+                  message: _importTaskMessage(task),
+                  secondaryButtonText: "Background",
+                  onSecondary: () {},
+                  cancelButtonText: "Cancel",
+                  onCancel: () => manager.cancel(task.id),
+                );
+                void listener() {
+                  if (controller.closed) {
+                    manager.removeListener(listener);
+                    return;
+                  }
+                  controller.setProgress(task.indicatorValue);
+                  controller.setMessage(_importTaskMessage(task));
+                  if (!task.isRunning) {
+                    manager.removeListener(listener);
+                    controller.close();
+                    if (task.status == ImportTaskStatus.completed) {
+                      App.rootContext.showMessage(message: "Import completed".tl);
+                    } else if (task.status == ImportTaskStatus.failed) {
+                      App.rootContext.showMessage(
+                        message: (task.error ?? "Import failed").tl,
+                      );
+                    }
+                  }
+                }
+
+                manager.addListener(listener);
+                listener();
               },
-            ).toSliver(),
-        ],
-        if (App.isWindows) ...[
-          _SettingPartTitle(title: "Window".tl, icon: Icons.web_asset),
-          _SwitchSetting(
-            title: "Minimize to tray".tl,
-            settingKey: "minimizeToTray",
-            onChanged: () {
-              TrayController.instance.setEnabled(
-                appdata.settings["minimizeToTray"] == true,
-              );
-            },
+              actionTitle: 'Import'.tl,
+            ),
+            _CallbackSetting(
+              title: "Data Sync".tl,
+              callback: () async {
+                showPopUpWidget(context, const _WebdavSetting());
+              },
+              actionTitle: 'Set'.tl,
+            ),
+            _CallbackSetting(
+              title: "Sync Logs".tl,
+              callback: () async {
+                _showSyncLogsDialog(context);
+              },
+              actionTitle: 'View'.tl,
+            ),
+          ],
+        ).toSliver(),
+        if (App.isAndroid)
+          _SettingsExpansionTile(
+            expansionKey: const PageStorageKey('appBackgroundGroup'),
+            initiallyExpanded: true,
+            icon: Icons.battery_saver,
+            title: "Background".tl,
+            children: const [_BatteryOptimizationSetting()],
           ).toSliver(),
-        ],
+        _SettingsExpansionTile(
+          expansionKey: const PageStorageKey('appUserGroup'),
+          initiallyExpanded: true,
+          icon: Icons.person_outline,
+          title: "User".tl,
+          children: [
+            SelectSetting(
+              title: "Language".tl,
+              settingKey: "language",
+              optionTranslation: const {
+                "system": "System",
+                "zh-CN": "简体中文",
+                "zh-TW": "繁體中文",
+                "en-US": "English",
+              },
+              onChanged: () {
+                App.forceRebuild();
+              },
+            ),
+            if (!App.isLinux) ...[
+              _SwitchSetting(
+                title: "Authorization Required".tl,
+                settingKey: "authorizationRequired",
+                onChanged: () async {
+                  var enabled = appdata.settings['authorizationRequired'];
+                  if (enabled) {
+                    // Just switched on: pick an unlock method and record its
+                    // credential. Revert if the user backs out or setup fails.
+                    var ok = await showAppLockSetup(context);
+                    if (!ok) {
+                      setState(() {
+                        appdata.settings['authorizationRequired'] = false;
+                      });
+                      appdata.saveData();
+                      return;
+                    }
+                  }
+                  setState(() {});
+                },
+              ),
+              if (appdata.settings['authorizationRequired'] == true)
+                _CallbackSetting(
+                  title: "Unlock method".tl,
+                  subtitle: _appLockTypeName(AppLock.type),
+                  actionTitle: "Change".tl,
+                  callback: () async {
+                    var ok = await showAppLockSetup(context);
+                    if (ok) setState(() {});
+                  },
+                ),
+            ],
+          ],
+        ).toSliver(),
+        if (App.isWindows)
+          _SettingsExpansionTile(
+            expansionKey: const PageStorageKey('appWindowGroup'),
+            initiallyExpanded: true,
+            icon: Icons.web_asset,
+            title: "Window".tl,
+            children: [
+              _SwitchSetting(
+                title: "Minimize to tray".tl,
+                settingKey: "minimizeToTray",
+                onChanged: () {
+                  TrayController.instance.setEnabled(
+                    appdata.settings["minimizeToTray"] == true,
+                  );
+                },
+              ),
+            ],
+          ).toSliver(),
       ],
     );
   }

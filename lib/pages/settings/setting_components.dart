@@ -840,33 +840,37 @@ class _CallbackSetting extends StatelessWidget {
   }
 }
 
-class _SettingPartTitle extends StatelessWidget {
-  const _SettingPartTitle({required this.title, required this.icon});
+/// Collapsible settings group with a leading icon. Shared by every settings
+/// page so the header font ([ts.bold.s18]) and padding stay consistent.
+class _SettingsExpansionTile extends StatelessWidget {
+  const _SettingsExpansionTile({
+    this.expansionKey,
+    required this.title,
+    required this.icon,
+    required this.children,
+    this.initiallyExpanded = false,
+  });
+
+  final Key? expansionKey;
 
   final String title;
 
   final IconData icon;
 
+  final List<Widget> children;
+
+  final bool initiallyExpanded;
+
   @override
   Widget build(BuildContext context) {
-    return SliverToBoxAdapter(
-      child: Container(
-        padding: const EdgeInsets.only(left: 16, top: 16, bottom: 8),
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(
-              color: context.colorScheme.onSurface.withValues(alpha: 0.1),
-            ),
-          ),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 24),
-            const SizedBox(width: 8),
-            Text(title, style: ts.s18),
-          ],
-        ),
-      ),
+    return ExpansionTile(
+      key: expansionKey,
+      initiallyExpanded: initiallyExpanded,
+      tilePadding: const EdgeInsets.symmetric(horizontal: 16),
+      childrenPadding: const EdgeInsets.only(bottom: 8),
+      leading: Icon(icon),
+      title: Text(title, style: ts.bold.s18),
+      children: children,
     );
   }
 }

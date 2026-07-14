@@ -161,12 +161,11 @@ class _ReaderSettingsState extends State<ReaderSettings> {
               Divider().toSliver(),
             ],
           ),
-        ExpansionTile(
-          key: const PageStorageKey('readerReadingGroup'),
+        _SettingsExpansionTile(
+          expansionKey: const PageStorageKey('readerReadingGroup'),
           initiallyExpanded: true,
-          tilePadding: const EdgeInsets.symmetric(horizontal: 16),
-          childrenPadding: const EdgeInsets.only(bottom: 8),
-          title: Text("Reading settings".tl, style: ts.bold.s18),
+          icon: Icons.menu_book,
+          title: "Reading settings".tl,
           children: [
             _PageTurnModeSetting(
               onChanged: widget.onChanged,
@@ -437,11 +436,10 @@ class _ReaderSettingsState extends State<ReaderSettings> {
             ),
           ],
         ).toSliver(),
-        ExpansionTile(
-          key: const PageStorageKey('readerGestureGroup'),
-          tilePadding: const EdgeInsets.symmetric(horizontal: 16),
-          childrenPadding: const EdgeInsets.only(bottom: 8),
-          title: Text("Gesture settings".tl, style: ts.bold.s18),
+        _SettingsExpansionTile(
+          expansionKey: const PageStorageKey('readerGestureGroup'),
+          icon: Icons.touch_app,
+          title: "Gesture settings".tl,
           children: [
             _SwitchSetting(
               title: 'Double tap to zoom'.tl,
@@ -534,11 +532,10 @@ class _ReaderSettingsState extends State<ReaderSettings> {
               ),
           ],
         ).toSliver(),
-        ExpansionTile(
-          key: const PageStorageKey('readerFavoritesGroup'),
-          tilePadding: const EdgeInsets.symmetric(horizontal: 16),
-          childrenPadding: const EdgeInsets.only(bottom: 8),
-          title: Text("Favorites settings".tl, style: ts.bold.s18),
+        _SettingsExpansionTile(
+          expansionKey: const PageStorageKey('readerFavoritesGroup'),
+          icon: Icons.favorite_border,
+          title: "Favorites settings".tl,
           children: [
             _SwitchSetting(
               title: "Also collect chapter cover when collecting image".tl,
@@ -572,11 +569,10 @@ class _ReaderSettingsState extends State<ReaderSettings> {
             ),
           ],
         ).toSliver(),
-        ExpansionTile(
-          key: const PageStorageKey('readerImageProcessingGroup'),
-          tilePadding: const EdgeInsets.symmetric(horizontal: 16),
-          childrenPadding: const EdgeInsets.only(bottom: 8),
-          title: Text("Image processing / enhancement".tl, style: ts.bold.s18),
+        _SettingsExpansionTile(
+          expansionKey: const PageStorageKey('readerImageProcessingGroup'),
+          icon: Icons.auto_fix_high,
+          title: "Image processing / enhancement".tl,
           children: [
             _SwitchSetting(
               title: 'Limit image width'.tl,
@@ -650,11 +646,10 @@ class _ReaderSettingsState extends State<ReaderSettings> {
             ],
           ],
         ).toSliver(),
-        ExpansionTile(
-          key: const PageStorageKey('readerDisplayGroup'),
-          tilePadding: const EdgeInsets.symmetric(horizontal: 16),
-          childrenPadding: const EdgeInsets.only(bottom: 8),
-          title: Text("Display settings".tl, style: ts.bold.s18),
+        _SettingsExpansionTile(
+          expansionKey: const PageStorageKey('readerDisplayGroup'),
+          icon: Icons.tv,
+          title: "Display settings".tl,
           children: [
             _SwitchSetting(
               title: "Display time & battery info in reader".tl,
