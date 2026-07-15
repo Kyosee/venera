@@ -203,6 +203,7 @@ mixin _ChapterSelectionMixin<T extends StatefulWidget> on State<T> {
     return _ComicSectionHeader(
       icon: Icons.view_list_rounded,
       title: "Chapters".tl,
+      horizontalPadding: 0,
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -375,7 +376,7 @@ class _NormalComicChaptersState extends State<_NormalComicChapters>
                 maxCrossAxisExtent: 220,
                 itemHeight: 44,
               ),
-            ).sliverPadding(const EdgeInsets.symmetric(horizontal: 8)),
+            ).sliverPadding(EdgeInsets.zero),
             if (!canShowAll)
               SliverToBoxAdapter(
                 child: Align(
@@ -667,7 +668,7 @@ class _GroupedComicChaptersState extends State<_GroupedComicChapters>
                 maxCrossAxisExtent: 220,
                 itemHeight: 44,
               ),
-            ).sliverPadding(const EdgeInsets.symmetric(horizontal: 8)),
+            ).sliverPadding(EdgeInsets.zero),
             if (!canShowAll)
               SliverToBoxAdapter(
                 child: Align(

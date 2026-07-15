@@ -543,7 +543,6 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
                 ? 96.0
                 : 112.0;
             final coverHeight = coverWidth / 0.72;
-            final surfacePadding = isWide ? 24.0 : 16.0;
             final cover = _buildDetailsCover(coverWidth);
             final summary = _buildComicSummary(isWide);
             // 宽屏时把阅读按钮的高度对齐封面高度，多按钮竖排时均分该高度。
@@ -552,39 +551,32 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
               maxHeight: coverHeight,
             );
 
-            return Container(
-              padding: EdgeInsets.all(surfacePadding),
-              decoration: BoxDecoration(
-                color: context.colorScheme.surfaceContainerLow,
-                borderRadius: BorderRadius.circular(isWide ? 24 : 20),
-              ),
-              child: isWide
-                  ? Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        cover,
-                        const SizedBox(width: 24),
-                        Expanded(child: summary),
-                        const SizedBox(width: 24),
-                        SizedBox(width: 220, child: readingActions),
-                      ],
-                    )
-                  : Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            cover,
-                            const SizedBox(width: 16),
-                            Expanded(child: summary),
-                          ],
-                        ),
-                        const SizedBox(height: 18),
-                        readingActions,
-                      ],
-                    ),
-            );
+            return isWide
+                ? Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      cover,
+                      const SizedBox(width: 24),
+                      Expanded(child: summary),
+                      const SizedBox(width: 24),
+                      SizedBox(width: 220, child: readingActions),
+                    ],
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          cover,
+                          const SizedBox(width: 16),
+                          Expanded(child: summary),
+                        ],
+                      ),
+                      const SizedBox(height: 18),
+                      readingActions,
+                    ],
+                  );
           },
         ),
       ),
@@ -626,9 +618,9 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
     );
     final titleStyle =
         (isWide
-                ? Theme.of(context).textTheme.headlineSmall
-                : Theme.of(context).textTheme.titleLarge)
-            ?.copyWith(fontWeight: FontWeight.w700, height: 1.2);
+                ? Theme.of(context).textTheme.titleLarge
+                : Theme.of(context).textTheme.titleMedium)
+            ?.copyWith(height: 1.2);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -745,7 +737,7 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
     final source = ComicSource.find(comic.sourceKey);
     return SliverLazyToBoxAdapter(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(4, 12, 4, 8),
+        padding: const EdgeInsets.fromLTRB(0, 12, 0, 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -856,14 +848,10 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
     );
     // Horizontal padding around the description text (see the Padding below);
     // subtracted from the card width when measuring whether it overflows.
-    const textHPadding = 20.0 * 2;
+    const textHPadding = 0.0;
     return SliverLazyToBoxAdapter(
       child: Container(
-        margin: const EdgeInsets.only(top: 16, bottom: 8),
-        decoration: BoxDecoration(
-          color: context.colorScheme.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(20),
-        ),
+        margin: const EdgeInsets.only(bottom: 8),
         child: LayoutBuilder(
           builder: (context, constraints) {
             // Only surface the expand/collapse toggle when the text actually
@@ -885,6 +873,7 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
                 _ComicSectionHeader(
                   icon: Icons.notes_rounded,
                   title: "Description".tl,
+                  horizontalPadding: 0,
                   trailing: overflows
                       ? TextButton.icon(
                           onPressed: () {
@@ -904,7 +893,7 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
                       : null,
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+                  padding: const EdgeInsets.fromLTRB(0, 2, 0, 12),
                   child: AnimatedSize(
                     duration: const Duration(milliseconds: 180),
                     alignment: Alignment.topCenter,
@@ -1300,16 +1289,26 @@ class _ComicSectionHeader extends StatelessWidget {
     required this.icon,
     required this.title,
     this.trailing,
+    this.horizontalPadding,
   });
 
   final IconData icon;
   final String title;
   final Widget? trailing;
 
+  /// Overrides the header's left/right padding when provided. Defaults keep the
+  /// original asymmetric inset (12 / 8) used by the thumbnail & comment panels.
+  final double? horizontalPadding;
+
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 14, 8, 10),
+      padding: EdgeInsets.fromLTRB(
+        horizontalPadding ?? 12,
+        10,
+        horizontalPadding ?? 8,
+        6,
+      ),
       child: Row(
         children: [
           Container(
