@@ -991,7 +991,8 @@
     "Nothing here": "这里什么都没有",
     "Fill in the URL first": "请先填写 URL",
     "Archives": "压缩包",
-    "Using data-sync WebDAV credentials. Save to set a library-specific config.": "已沿用数据同步的 WebDAV 账号，保存后可为漫画库单独设置"
+    "Using data-sync WebDAV credentials. Save to set a library-specific config.": "已沿用数据同步的 WebDAV 账号，保存后可为漫画库单独设置",
+    "WebDAV Sync": "WebDAV 同步"
   },
   "zh_TW": {
     "Classic": "經典版",
@@ -1985,6 +1986,7 @@
     "Nothing here": "這裡什麼都沒有",
     "Fill in the URL first": "請先填寫 URL",
     "Archives": "壓縮檔",
-    "Using data-sync WebDAV credentials. Save to set a library-specific config.": "已沿用資料同步的 WebDAV 帳號，儲存後可為漫畫庫單獨設定"
+    "Using data-sync WebDAV credentials. Save to set a library-specific config.": "已沿用資料同步的 WebDAV 帳號，儲存後可為漫畫庫單獨設定",
+    "WebDAV Sync": "WebDAV 同步"
   }
 }

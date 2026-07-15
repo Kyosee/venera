@@ -260,6 +260,14 @@ class _AppSettingsState extends State<AppSettings> {
               },
               actionTitle: 'Import'.tl,
             ),
+          ],
+        ).toSliver(),
+        _SettingsExpansionTile(
+          expansionKey: const PageStorageKey('appWebdavGroup'),
+          initiallyExpanded: true,
+          icon: Icons.cloud_sync_outlined,
+          title: "WebDAV Sync".tl,
+          children: [
             _CallbackSetting(
               title: "Data Sync".tl,
               callback: () async {
