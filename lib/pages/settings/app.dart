@@ -1282,16 +1282,22 @@ class _WebdavLibrarySettingState extends State<WebdavLibrarySetting> {
 
   bool isTesting = false;
 
+  /// True when the form was prefilled from the data-sync WebDAV credentials
+  /// because the library has no config of its own yet. Saving then "adopts"
+  /// those credentials as a library-specific config.
+  bool inheritedFromSync = false;
+
   @override
   void initState() {
     super.initState();
-    final c = appdata.settings['webdavComicLibrary'];
-    if (c is List && c.whereType<String>().length >= 3) {
-      url = c[0] as String;
-      user = c[1] as String;
-      pass = c[2] as String;
-      root = (c.length > 3 && c[3] is String) ? c[3] as String : '';
-    }
+    // Prefill from the effective config: the library's own if set, otherwise
+    // the inherited data-sync WebDAV credentials so sync users don't re-type.
+    final e = WebdavLibrary.effective;
+    url = e.url;
+    user = e.user;
+    pass = e.pass;
+    root = e.root;
+    inheritedFromSync = WebdavLibrary.isUsingSyncFallback;
   }
 
   void _test() async {
@@ -1343,6 +1349,33 @@ class _WebdavLibrarySettingState extends State<WebdavLibrarySetting> {
                   .tl,
               style: TextStyle(color: context.colorScheme.outline),
             ),
+            if (inheritedFromSync) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: context.colorScheme.primaryContainer.toOpacity(0.4),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      size: 18,
+                      color: context.colorScheme.primary,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Using your data-sync WebDAV credentials. Save to customize."
+                            .tl,
+                        style: ts.s12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             TextField(
               decoration: InputDecoration(

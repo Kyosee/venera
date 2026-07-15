@@ -47,10 +47,31 @@ class WebdavLibrary {
   /// online comics (the app already imports these locally).
   static const archiveExts = {'cbz', 'zip', '7z', 'cb7', 'cbr', 'rar'};
 
-  /// Raw `[url, user, pass, rootPath]` config, or an empty list when unset.
-  static List get _rawConfig {
+  /// Raw `[url, user, pass, rootPath]` config the user set specifically for the
+  /// library, or an empty list when they never did.
+  static List get _ownConfig {
     final v = appdata.settings[_configKey];
     return v is List ? v : const [];
+  }
+
+  static bool _hasOwnConfig(List c) =>
+      c.length >= 3 && c[0] is String && (c[0] as String).trim().isNotEmpty;
+
+  /// The data-sync WebDAV config (`[url, user, pass]`), used as a fallback so a
+  /// user who already configured sync can browse a library on the same server
+  /// without re-entering credentials.
+  static List get _syncConfig {
+    final v = appdata.settings['webdav'];
+    return v is List ? v : const [];
+  }
+
+  /// Effective config: the library's own if set, otherwise the sync config.
+  /// This is what makes the library "auto-load" for sync users (the library
+  /// still has no root of its own in that case, so it browses the server root).
+  static List get _rawConfig {
+    final own = _ownConfig;
+    if (_hasOwnConfig(own)) return own;
+    return _syncConfig;
   }
 
   static bool get isConfigured {
@@ -60,9 +81,26 @@ class WebdavLibrary {
         (c[0] as String).trim().isNotEmpty;
   }
 
+  /// Whether the library is only usable via the inherited data-sync config
+  /// (the user never set a library-specific config). Lets the UI show a hint
+  /// and prefill the form from the sync credentials.
+  static bool get isUsingSyncFallback =>
+      !_hasOwnConfig(_ownConfig) && isConfigured;
+
   static String get _url => (_rawConfig.elementAtOrNull(0) as String?) ?? '';
   static String get _user => (_rawConfig.elementAtOrNull(1) as String?) ?? '';
   static String get _pass => (_rawConfig.elementAtOrNull(2) as String?) ?? '';
+
+  /// Effective credentials for prefilling the settings form (own config if set,
+  /// otherwise the inherited sync config). The root is only ever the library's
+  /// own — the sync config carries none.
+  static ({String url, String user, String pass, String root}) get effective =>
+      (
+        url: _url,
+        user: _user,
+        pass: _pass,
+        root: (_ownConfig.elementAtOrNull(3) as String?)?.trim() ?? '',
+      );
 
   /// Root directory inside the server to treat as the library. Defaults to the
   /// server root the config URL already points at.
