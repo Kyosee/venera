@@ -1041,6 +1041,36 @@ class DataSync with ChangeNotifier, WidgetsBindingObserver {
     }
   }
 
+  /// Probes reachability + authentication of a WebDAV config without touching
+  /// any local state. Takes the credentials explicitly so the settings form can
+  /// verify values the user just typed but has not yet saved. A directory
+  /// listing doubles as the probe: it needs a live connection AND valid
+  /// credentials (401/403 surface as an error), which is exactly what we want to
+  /// confirm before the user commits the config.
+  Future<Res<bool>> testConnection({
+    required String url,
+    required String user,
+    required String pass,
+  }) async {
+    url = url.trim();
+    user = user.trim();
+    if (url.isEmpty || user.isEmpty || pass.isEmpty) {
+      return const Res.error('Invalid WebDAV configuration');
+    }
+    try {
+      var client = newClient(
+        url,
+        user: user,
+        password: pass,
+        adapter: _syncAdapter(_syncRequestTimeout),
+      );
+      await client.readDir('/');
+      return const Res(true);
+    } catch (e) {
+      return Res.error(e.toString());
+    }
+  }
+
   Future<Res<bool>> downloadSpecificBackup(String fileName) async {
     if (_haveWaitingTask) return const Res(true);
     // Waits for image sync too — the apply below swaps the very SQLite files

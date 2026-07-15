@@ -633,6 +633,8 @@ class _WebdavSettingState extends State<_WebdavSetting> {
 
   bool isTesting = false;
 
+  bool isTestingConnection = false;
+
   @override
   void initState() {
     super.initState();
@@ -717,6 +719,38 @@ class _WebdavSettingState extends State<_WebdavSetting> {
         disableSyncFields: disableSync,
       ),
     );
+  }
+
+  /// Probes the WebDAV credentials the form currently holds (which may include
+  /// unsaved edits or a fresh QR scan) and reports whether the server is
+  /// reachable and the login is accepted, without saving or syncing anything.
+  void _testConnection() async {
+    if (url.trim().isEmpty || user.trim().isEmpty || pass.isEmpty) {
+      context.showMessage(
+        message: "Fill in URL, username and password first".tl,
+      );
+      return;
+    }
+    setState(() {
+      isTestingConnection = true;
+    });
+    var result = await DataSync().testConnection(
+      url: url,
+      user: user,
+      pass: pass,
+    );
+    if (!mounted) return;
+    setState(() {
+      isTestingConnection = false;
+    });
+    if (result.error) {
+      context.showMessage(
+        message: "Connection failed: @error"
+            .tlParams({"error": result.errorMessage ?? ""}),
+      );
+    } else {
+      context.showMessage(message: "Connection successful".tl);
+    }
   }
 
   /// Scans another device's QR code and fills the form with the recovered
@@ -942,6 +976,28 @@ class _WebdavSettingState extends State<_WebdavSetting> {
                   ),
                 ],
               ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: Button.outlined(
+                isLoading: isTestingConnection,
+                onPressed: _testConnection,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.wifi_tethering, size: 18),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        "Test Connection".tl,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
             const SizedBox(height: 12),
             ListTile(
