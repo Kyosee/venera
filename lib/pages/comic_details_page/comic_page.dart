@@ -670,6 +670,10 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
   }
 
   Widget _buildReadingActions({bool isWide = false, double? maxHeight}) {
+    // 按钮拉高后 M3 默认 StadiumBorder 会变成椭圆/胶囊，统一用矩形圆角。
+    final buttonShape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(14),
+    );
     final hasHistory =
         history != null && (history!.ep > 1 || history!.page > 1);
     if (!hasHistory) {
@@ -678,6 +682,7 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
         height: 52,
         child: FilledButton.icon(
           onPressed: read,
+          style: FilledButton.styleFrom(shape: buttonShape),
           icon: const Icon(Icons.play_arrow_rounded),
           label: Text("Read".tl),
         ),
@@ -688,11 +693,13 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
     // emphasis despite being the lower button.
     final startButton = OutlinedButton.icon(
       onPressed: read,
+      style: OutlinedButton.styleFrom(shape: buttonShape),
       icon: const Icon(Icons.restart_alt_rounded),
       label: Text("Start".tl),
     );
     final continueButton = FilledButton.icon(
       onPressed: continueRead,
+      style: FilledButton.styleFrom(shape: buttonShape),
       icon: const Icon(Icons.menu_book_rounded),
       label: Text("Continue".tl),
     );
