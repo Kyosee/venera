@@ -1193,7 +1193,6 @@ class _WebdavSyncOptionsState extends State<_WebdavSyncOptions> {
       mainAxisSize: MainAxisSize.min,
       children: [
         ListTile(
-          leading: const Icon(Icons.sync),
           title: Text("Sync Mode".tl),
           subtitle: Text(
             _syncModeDescription(syncMode),
@@ -1207,7 +1206,6 @@ class _WebdavSyncOptionsState extends State<_WebdavSyncOptions> {
           ),
         ),
         ListTile(
-          leading: const Icon(Icons.history),
           title: Text("Backups to keep per platform".tl),
           subtitle: Text(
             "Older backups on the server are removed after each upload".tl,
@@ -1234,7 +1232,6 @@ class _WebdavSyncOptionsState extends State<_WebdavSyncOptions> {
           ),
         ),
         ListTile(
-          leading: const Icon(Icons.lan_outlined),
           title: Text("Use Proxy for Sync".tl),
           subtitle: Text(
             "Route WebDAV sync through the app proxy. Turn off if an unstable proxy makes sync fail."
