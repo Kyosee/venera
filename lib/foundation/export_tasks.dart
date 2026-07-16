@@ -279,6 +279,21 @@ class ExportTaskManager with ChangeNotifier {
     // Remember the last per-comic failure so a task where every comic failed can
     // report the real cause instead of masquerading as a success (#130).
     String? lastError;
+    // Lazily resolved once per run: a real filesystem directory to fall back to
+    // when a SAF write fails (#130). Guarded by a flag so all-files access is
+    // requested at most once even if many comics fail to write.
+    Directory? fallbackDir;
+    var fallbackResolved = false;
+    Future<Directory?> resolveFallbackDir() async {
+      if (fallbackResolved) return fallbackDir;
+      fallbackResolved = true;
+      final real = await _mapSafToRealDir(task.folderPath);
+      if (real != null && await StoragePermission.ensureGranted(real.path)) {
+        fallbackDir = real;
+      }
+      return fallbackDir;
+    }
+
     try {
       if (!cacheDir.existsSync()) {
         cacheDir.createSync(recursive: true);
@@ -346,12 +361,12 @@ class ExportTaskManager with ChangeNotifier {
             continue;
           }
 
+          File? produced;
           try {
             task.phase = ExportPhase.processing;
             task.writeProgress = null;
             notifyListeners();
-            final produced =
-                await _buildToCache(comic, task.format, cacheDir.path);
+            produced = await _buildToCache(comic, task.format, cacheDir.path);
             // Stream the built file into the destination instead of loading it
             // whole into memory, so a large comic can't OOM the export (#93).
             // The destination write (SAF on Android) is the slow step, so show
@@ -367,9 +382,34 @@ class ExportTaskManager with ChangeNotifier {
             task.writeProgress = null;
             produced.deleteIgnoreError();
           } catch (e, s) {
-            Log.error('Export Comics', e.toString(), s);
-            task.failedCount++;
-            lastError = e.toString();
+            // A SAF write failure (some Android providers reject file creation
+            // on shared trees like Download) can often be recovered by writing
+            // to the same folder's real filesystem path with all-files access
+            // (#130). Retry there once before giving up on this comic.
+            var recovered = false;
+            if (produced != null && _looksLikeCreateFailure(e.toString())) {
+              try {
+                final dir = await resolveFallbackDir();
+                if (dir != null) {
+                  await copyFileStreaming(
+                    produced,
+                    dir.joinFile(outName),
+                    onProgress: _writeProgress(task),
+                  );
+                  task.writeProgress = null;
+                  produced.deleteIgnoreError();
+                  recovered = true;
+                }
+              } catch (e2, s2) {
+                Log.error('Export Comics', e2.toString(), s2);
+              }
+            }
+            if (!recovered) {
+              Log.error('Export Comics', e.toString(), s);
+              task.failedCount++;
+              lastError = e.toString();
+              produced?.deleteIgnoreError();
+            }
           }
           task.doneKeys.add(ref.key);
           notifyListeners();
@@ -456,6 +496,35 @@ class ExportTaskManager with ChangeNotifier {
     return error.contains('Cannot create file');
   }
 
+  /// Maps a SAF folder path (`android://primary:Download`) to the equivalent
+  /// real filesystem directory (`/storage/emulated/0/Download`) so a failed SAF
+  /// write can be retried with all-files access (#130).
+  ///
+  /// Only the primary shared volume can be mapped reliably: its root is derived
+  /// from [App.externalStoragePath] (`…/Android/data/<pkg>/files`, whose prefix
+  /// before `/Android/` is the volume root). Secondary volumes (SD cards, whose
+  /// tree id is a UUID) have no dependable real path, so those return null and
+  /// the caller keeps the "choose another folder" behaviour.
+  Future<Directory?> _mapSafToRealDir(String folderPath) async {
+    const prefix = 'android://';
+    if (!App.isAndroid || !folderPath.startsWith(prefix)) return null;
+    final treeId = folderPath.substring(prefix.length);
+    final colon = treeId.indexOf(':');
+    if (colon < 0) return null;
+    final volume = treeId.substring(0, colon);
+    if (volume != 'primary') return null;
+    // Relative path within the volume, e.g. "Download" or "Comics/Export".
+    final relative = treeId.substring(colon + 1);
+    final ext = App.externalStoragePath;
+    if (ext == null) return null;
+    final marker = ext.indexOf('/Android/');
+    final root = marker > 0 ? ext.substring(0, marker) : ext;
+    final dir = Directory(
+      relative.isEmpty ? root : FilePath.join(root, relative),
+    );
+    return dir;
+  }
+
   void _refreshKeepAlive(ExportTask task) {
     BackgroundKeepAlive.instance.update(
       BackgroundKeepAlive.tagExport,
@@ -524,17 +593,42 @@ class ExportTaskManager with ChangeNotifier {
     task.writeProgress = 0;
     notifyListeners();
     _refreshKeepAlive(task);
-    await copyFileStreaming(
-      produced,
-      target,
-      onProgress: _writeProgress(task),
-    );
+    // Track the file actually written, which may be the fallback path rather
+    // than [target]; a cancellation cleanup below must delete the right one.
+    var written = target;
+    try {
+      await copyFileStreaming(
+        produced,
+        target,
+        onProgress: _writeProgress(task),
+      );
+    } catch (e, s) {
+      // The SAF destination refused the write (#130). Fall back to a real
+      // filesystem path under all-files access, if the chosen folder maps to
+      // one, before giving up on the whole (rebuilt-from-scratch) bundle.
+      if (!_looksLikeCreateFailure(e.toString())) rethrow;
+      final fallbackDir = await _mapSafToRealDir(task.folderPath);
+      if (fallbackDir == null ||
+          !await StoragePermission.ensureGranted(fallbackDir.path)) {
+        rethrow;
+      }
+      Log.error('Export Comics', 'SAF write failed, retrying on '
+          '${fallbackDir.path}: $e', s);
+      written = fallbackDir.joinFile(_mergedFileName(task.createdAt));
+      task.writeProgress = 0;
+      notifyListeners();
+      await copyFileStreaming(
+        produced,
+        written,
+        onProgress: _writeProgress(task),
+      );
+    }
     task.writeProgress = null;
     produced.deleteIgnoreError();
     if (_canceledIds.contains(task.id)) {
       // Cancellation requested during the (uninterruptible) build: drop the
       // just-written bundle so a canceled export leaves nothing behind.
-      target.deleteIgnoreError();
+      written.deleteIgnoreError();
       task.status = ExportTaskStatus.canceled;
       return;
     }
