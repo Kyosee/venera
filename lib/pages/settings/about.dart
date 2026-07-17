@@ -27,8 +27,8 @@ class _AboutSettingsState extends State<AboutSettings> {
               height: 112,
               decoration: BoxDecoration(borderRadius: BorderRadius.circular(136)),
               clipBehavior: Clip.antiAlias,
-              child: const Image(
-                image: AssetImage("assets/app_icon.png"),
+              child: Image(
+                image: AssetImage(LauncherIconService.current.inAppLogoAsset),
                 filterQuality: FilterQuality.medium,
               ),
             ),

@@ -331,7 +331,7 @@ class NaviPaneState extends State<NaviPane>
   Widget buildAppLogo({double size = 32}) {
     return ClipOval(
       child: Image.asset(
-        'assets/app_icon.png',
+        LauncherIconService.current.inAppLogoAsset,
         width: size,
         height: size,
         fit: BoxFit.cover,

@@ -39,12 +39,16 @@ class _LauncherIconSettingsState extends State<LauncherIconSettings> {
       context.showMessage(message: "This device does not support this".tl);
       return;
     }
-    // The switch is not instant: iOS pops its own system alert, and Android
-    // only repaints the icon after the app leaves recents. Tell the user.
+    // The in-app logo (sidebar / About) follows the chosen preset, so repaint
+    // the whole tree once the switch succeeds.
+    App.forceRebuild();
+    // Android now switches the launcher alias immediately (see
+    // LauncherIconService.apply); the home-screen icon may still take a moment
+    // for the launcher to repaint. iOS pops its own system alert.
     context.showMessage(
       message: App.isIOS
           ? "Icon changed".tl
-          : "Icon will change after you close the app".tl,
+          : "Icon updated".tl,
     );
   }
 

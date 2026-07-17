@@ -2,6 +2,7 @@ package io.github.kyosee.venera
 
 import android.Manifest
 import android.app.Activity
+import android.content.ComponentName
 import android.content.ContentResolver
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -161,6 +162,23 @@ class MainActivity : FlutterFragmentActivity() {
                     } catch (e: Exception) {
                         res.error("INSTALL_FAILED", e.message, null)
                     }
+                }
+
+                // 桌面图标切换：立即启用目标 activity-alias、停用其余，用
+                // DONT_KILL_APP 保证不重启进程。所有 alias 都指向同一个
+                // MainActivity，运行中的组件不受影响，故可安全即时生效——
+                // 无需依赖第三方插件把切换推迟到进程销毁时，那条路径在被系统
+                // 强行停止时根本不会执行，图标便永远换不掉。
+                "setLauncherIcon" -> {
+                    val target = call.argument<String>("alias")
+                    if (target.isNullOrEmpty()) {
+                        res.error("INVALID_ARGUMENT", "alias is required", null)
+                        return@setMethodCallHandler
+                    }
+                    val ok = runCatching { applyLauncherIcon(target) }
+                        .onFailure { Log.w("Venera", "set launcher icon failed: ${it.message}") }
+                        .getOrDefault(false)
+                    res.success(ok)
                 }
 
                 else -> res.notImplemented()
@@ -363,6 +381,31 @@ class MainActivity : FlutterFragmentActivity() {
         } else {
             "No Proxy"
         }
+    }
+
+    // 与 AndroidManifest 中声明的三个 activity-alias 一一对应。切换时启用目标、
+    // 停用其余，任何时刻只有一个入口处于启用态（launcher 里就不会出现重复图标）。
+    private val launcherAliases = listOf("IconDefault", "IconOrig", "IconFlat")
+
+    private fun applyLauncherIcon(alias: String): Boolean {
+        if (alias !in launcherAliases) return false
+        val pm = packageManager
+        fun setState(name: String, enabled: Boolean) {
+            pm.setComponentEnabledSetting(
+                android.content.ComponentName(this, "$packageName.$name"),
+                if (enabled) PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                else PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                PackageManager.DONT_KILL_APP,
+            )
+        }
+        // Enable the target first, then disable the rest, so there is never a
+        // moment with zero enabled launcher entries (which could drop the app
+        // from the home screen on some launchers).
+        setState(alias, true)
+        for (name in launcherAliases) {
+            if (name != alias) setState(name, false)
+        }
+        return true
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
