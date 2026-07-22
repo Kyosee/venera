@@ -60,6 +60,13 @@ add_subdirectory("runner")
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+# flutter_onnxruntime's sources contain UTF-8 characters; on a system whose
+# ANSI code page is not UTF-8 (e.g. 936) MSVC raises C4819, which the plugin
+# template promotes to an error. Force UTF-8 source interpretation.
+if(TARGET flutter_onnxruntime_plugin)
+  target_compile_options(flutter_onnxruntime_plugin PRIVATE "/utf-8")
+endif()
+
 
 # === Installation ===
 # Support files are copied into place next to the executable, so that it can
