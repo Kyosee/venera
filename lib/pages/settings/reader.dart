@@ -903,6 +903,12 @@ class _ReaderSettingsState extends State<ReaderSettings> {
                 "zh": "Simplified Chinese".tl,
                 "zh-TW": "Traditional Chinese".tl,
                 "en": "English".tl,
+                "ja": "Japanese".tl,
+                "ko": "Korean".tl,
+                "fr": "French".tl,
+                "de": "German".tl,
+                "es": "Spanish".tl,
+                "ru": "Russian".tl,
               },
               onChanged: () {
                 setState(() {});

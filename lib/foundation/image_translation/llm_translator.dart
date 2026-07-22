@@ -128,6 +128,12 @@ abstract class LlmTranslator {
       'zh' => '简体中文',
       'zh-TW' => '繁体中文（台湾用语习惯）',
       'en' => 'English',
+      'ja' => '日本語',
+      'ko' => '한국어',
+      'fr' => 'Français',
+      'de' => 'Deutsch',
+      'es' => 'Español',
+      'ru' => 'Русский',
       _ => targetLang,
     };
   }
