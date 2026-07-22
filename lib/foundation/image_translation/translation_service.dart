@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
@@ -12,32 +13,42 @@ import 'package:venera/foundation/log.dart';
 import 'package:venera/utils/io.dart';
 
 class _TranslationTask {
-  _TranslationTask(this.cacheKey, this.imageBytes);
+  _TranslationTask(this.cacheKey, this.comicKey, this.imageBytes);
 
   final String cacheKey;
+
+  /// Identifies the comic ('cid@sourceKey') for the per-comic language lock.
+  final String comicKey;
   final Uint8List imageBytes;
   final listeners = <VoidCallback>[];
 }
 
-/// Schedules page translations, caches results on disk and notifies the
-/// reader when a page is ready so it can swap the displayed image.
+/// Schedules page translations, caches results and notifies the reader when
+/// a page is ready so it can swap the displayed image.
 ///
-/// Pages run strictly one at a time — the models are heavy and parallel runs
-/// would multiply peak memory, not throughput.
+/// Two cache levels keep repeat reads free:
+/// - the rendered page image (30 days, large, may be LRU-evicted), and
+/// - the text-level result (regions + translations, ~KB, 90 days): when only
+///   the image was evicted the page is re-rendered locally without paying
+///   for OCR or another translation request.
 class ImageTranslationService with ChangeNotifier {
   ImageTranslationService._();
 
   static final instance = ImageTranslationService._();
 
-  static const _cacheDuration = 30 * 24 * 60 * 60 * 1000;
+  static const _imageCacheDuration = 30 * 24 * 60 * 60 * 1000;
+  static const _textCacheDuration = 90 * 24 * 60 * 60 * 1000;
   static const _maxQueueLength = 16;
   static const _failureRetryDelay = Duration(minutes: 5);
   static const _idleReleaseDelay = Duration(seconds: 90);
 
   final _queue = <_TranslationTask>[];
+  final _active = <_TranslationTask>{};
   final _failures = <String, DateTime>{};
   final _completed = <String>{};
-  bool _running = false;
+
+  /// Pages known (via the text cache) to contain nothing translatable.
+  final _noContent = <String>{};
   PageTranslationPipeline? _pipeline;
   Timer? _releaseTimer;
 
@@ -57,6 +68,10 @@ class ImageTranslationService with ChangeNotifier {
   /// 'llm' (user-configured endpoint) or 'local' (experimental offline).
   static String get engine =>
       appdata.settings['imageTranslationEngine'] as String? ?? 'llm';
+
+  /// LLM translation is network-bound, so a second page's OCR can run in the
+  /// worker while the first waits for its response.
+  int get _maxConcurrent => engine == 'llm' ? 2 : 1;
 
   /// Whether detection/OCR models AND the selected translation engine are
   /// usable right now.
@@ -97,6 +112,8 @@ class ImageTranslationService with ChangeNotifier {
     return '$_cachePrefix$imageKey@$sourceKey@$cid@$eid';
   }
 
+  static String _textKeyOf(String cacheKey) => 'text:$cacheKey';
+
   Future<File?> findTranslated(String cacheKey) {
     return CacheManager().findCache(cacheKey);
   }
@@ -106,9 +123,13 @@ class ImageTranslationService with ChangeNotifier {
   /// notified — providers use it to evict their stale image cache entry.
   void schedule(
     String cacheKey,
+    String comicKey,
     Uint8List imageBytes,
     VoidCallback onTranslated,
   ) {
+    if (_noContent.contains(cacheKey)) {
+      return;
+    }
     var failedAt = _failures[cacheKey];
     if (failedAt != null) {
       if (DateTime.now().difference(failedAt) < _failureRetryDelay) {
@@ -123,61 +144,152 @@ class ImageTranslationService with ChangeNotifier {
     }
     if (_queue.length >= _maxQueueLength) {
       // Prefer recent requests: the reader schedules pages in reading order,
-      // so the oldest queued page is the one furthest behind.
-      _queue.removeAt(_running ? 1 : 0);
+      // so the oldest not-yet-started page is the one furthest behind.
+      var oldest = _queue.where((t) => !_active.contains(t)).firstOrNull;
+      if (oldest == null) {
+        return;
+      }
+      _queue.remove(oldest);
     }
-    _queue.add(_TranslationTask(cacheKey, imageBytes)..listeners.add(onTranslated));
+    _queue.add(
+      _TranslationTask(cacheKey, comicKey, imageBytes)
+        ..listeners.add(onTranslated),
+    );
     _releaseTimer?.cancel();
-    unawaited(_drain());
+    _pump();
   }
 
-  Future<void> _drain() async {
-    if (_running) return;
-    _running = true;
-    try {
-      while (_queue.isNotEmpty) {
-        var task = _queue.first;
-        try {
-          // The settings may have changed while queued; skip stale entries.
-          if (!task.cacheKey.startsWith(_cachePrefix)) {
-            continue;
-          }
-          if (await CacheManager().findCache(task.cacheKey) != null) {
-            _notifyDone(task);
-            continue;
-          }
-          var pipeline = _pipeline ??= PageTranslationPipeline();
-          var rendered = await pipeline.translatePage(
-            task.imageBytes,
-            sourceLang: sourceLang,
-            targetLang: targetLang,
-            engine: engine,
-          );
-          if (rendered == null) {
-            // No translatable text: remember so the page is not re-analyzed
-            // on every view, but nothing to swap in.
-            _failures[task.cacheKey] = DateTime.now();
-            continue;
-          }
-          await CacheManager().writeCache(
-            task.cacheKey,
-            rendered,
-            _cacheDuration,
-          );
-          _notifyDone(task);
-        } on PipelineCanceled {
-          // ignore
-        } catch (e, s) {
-          _failures[task.cacheKey] = DateTime.now();
-          Log.error('Image Translation', 'Failed to translate page: $e', s);
-        } finally {
-          _queue.remove(task);
-        }
-      }
-    } finally {
-      _running = false;
-      _scheduleRelease();
+  void _pump() {
+    while (_active.length < _maxConcurrent) {
+      var next = _queue.where((t) => !_active.contains(t)).firstOrNull;
+      if (next == null) break;
+      _active.add(next);
+      unawaited(_process(next));
     }
+  }
+
+  Future<void> _process(_TranslationTask task) async {
+    try {
+      // The settings may have changed while queued; skip stale entries.
+      if (!task.cacheKey.startsWith(_cachePrefix)) {
+        return;
+      }
+      if (await CacheManager().findCache(task.cacheKey) != null) {
+        _notifyDone(task);
+        return;
+      }
+      var pipeline = _pipeline ??= PageTranslationPipeline();
+
+      var regions = await _loadTextCache(task.cacheKey);
+      if (regions == null) {
+        var analysis = await pipeline.analyzePage(
+          task.imageBytes,
+          sourceLang: _effectiveSourceFor(task.comicKey),
+          targetLang: targetLang,
+          engine: engine,
+        );
+        _updateLanguageLock(task.comicKey, analysis.languageVotes);
+        regions = analysis.regions;
+        await CacheManager().writeCache(
+          _textKeyOf(task.cacheKey),
+          utf8.encode(jsonEncode([for (var r in regions) r.toJson()])),
+          _textCacheDuration,
+        );
+      }
+      if (regions.isEmpty) {
+        // Nothing translatable; the cached empty result keeps this page from
+        // being re-analyzed, even across restarts.
+        _noContent.add(task.cacheKey);
+        return;
+      }
+      var rendered = await pipeline.renderPage(task.imageBytes, regions);
+      await CacheManager().writeCache(
+        task.cacheKey,
+        rendered,
+        _imageCacheDuration,
+      );
+      _notifyDone(task);
+    } on PipelineCanceled {
+      // ignore
+    } catch (e, s) {
+      _failures[task.cacheKey] = DateTime.now();
+      Log.error('Image Translation', 'Failed to translate page: $e', s);
+    } finally {
+      _queue.remove(task);
+      _active.remove(task);
+      if (_queue.isEmpty && _active.isEmpty) {
+        _scheduleRelease();
+      } else {
+        _pump();
+      }
+    }
+  }
+
+  Future<List<TranslatedRegion>?> _loadTextCache(String cacheKey) async {
+    try {
+      var file = await CacheManager().findCache(_textKeyOf(cacheKey));
+      if (file == null) return null;
+      var data = jsonDecode(await file.readAsString());
+      if (data is! List) return null;
+      return [
+        for (var item in data)
+          TranslatedRegion.fromJson(Map<String, dynamic>.from(item)),
+      ];
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Per-comic language lock
+  // ---------------------------------------------------------------------
+
+  /// A comic is almost always written in a single language. Once enough
+  /// blocks agree, the detected language is remembered for the comic so
+  /// later pages skip the multi-engine fallback chain entirely.
+  static const _comicLangsKey = 'imageTranslationComicLangs';
+  Map<String, String>? _comicLangs;
+
+  Map<String, String> get _langLocks {
+    if (_comicLangs == null) {
+      var stored = appdata.implicitData[_comicLangsKey];
+      _comicLangs = stored is Map
+          ? stored.map((k, v) => MapEntry(k.toString(), v.toString()))
+          : <String, String>{};
+    }
+    return _comicLangs!;
+  }
+
+  String _effectiveSourceFor(String comicKey) {
+    if (sourceLang != 'auto') {
+      return sourceLang;
+    }
+    return _langLocks[comicKey] ?? 'auto';
+  }
+
+  void _updateLanguageLock(String comicKey, Map<String, int> votes) {
+    if (sourceLang != 'auto' || _langLocks.containsKey(comicKey)) {
+      return;
+    }
+    var total = votes.values.fold(0, (a, b) => a + b);
+    if (total < 4) return;
+    var dominant = votes.entries.reduce(
+      (a, b) => a.value >= b.value ? a : b,
+    );
+    if (dominant.value / total < 0.75) return;
+    var locks = _langLocks;
+    locks[comicKey] = dominant.key;
+    // Bound the persisted map; entries are tiny but unbounded growth in
+    // implicitData is never OK.
+    while (locks.length > 300) {
+      locks.remove(locks.keys.first);
+    }
+    appdata.implicitData[_comicLangsKey] = locks;
+    appdata.writeImplicitData();
+    Log.info(
+      'Image Translation',
+      'Locked language "${dominant.key}" for $comicKey',
+    );
   }
 
   void _notifyDone(_TranslationTask task) {
@@ -194,7 +306,7 @@ class ImageTranslationService with ChangeNotifier {
   void _scheduleRelease() {
     _releaseTimer?.cancel();
     _releaseTimer = Timer(_idleReleaseDelay, () {
-      if (_running || _queue.isNotEmpty) return;
+      if (_active.isNotEmpty || _queue.isNotEmpty) return;
       var pipeline = _pipeline;
       _pipeline = null;
       unawaited(pipeline?.release());
@@ -203,9 +315,10 @@ class ImageTranslationService with ChangeNotifier {
 
   /// Drops queued-but-not-started work (e.g. when leaving the reader).
   void clearQueue() {
-    if (_queue.isEmpty) return;
-    _queue.removeRange(_running ? 1 : 0, _queue.length);
-    _scheduleRelease();
+    _queue.removeWhere((task) => !_active.contains(task));
+    if (_queue.isEmpty && _active.isEmpty) {
+      _scheduleRelease();
+    }
   }
 
   /// Evicts a provider's stale image-cache entry so the next resolve loads

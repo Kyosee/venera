@@ -90,9 +90,14 @@ class ReaderImageProvider
       // Show the original for now; when the background translation lands the
       // reader is notified, this provider's cache entry is evicted and the
       // next resolve picks up the translated file above.
-      ImageTranslationService.instance.schedule(translationKey!, imageBytes, () {
-        ImageTranslationService.evictImage(this);
-      });
+      ImageTranslationService.instance.schedule(
+        translationKey!,
+        '$cid@$sourceKey',
+        imageBytes,
+        () {
+          ImageTranslationService.evictImage(this);
+        },
+      );
     }
     if (appdata.settings['enableCustomImageProcessing']) {
       var script = appdata.settings['customImageProcessing'].toString();

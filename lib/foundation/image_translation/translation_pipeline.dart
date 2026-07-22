@@ -10,6 +10,17 @@ import 'package:venera/foundation/image_translation/translation_worker.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/utils/opencc.dart';
 
+/// Result of the analysis stage: render-ready regions plus the language
+/// distribution of ALL translatable blocks (including ones skipped for
+/// already being in the target language) — the service uses the votes to
+/// lock a comic's dominant language.
+class PageAnalysis {
+  PageAnalysis(this.regions, this.languageVotes);
+
+  final List<TranslatedRegion> regions;
+  final Map<String, int> languageVotes;
+}
+
 /// Per-page translation orchestrator. Runs on the main isolate but does no
 /// heavy work itself: image decoding goes through the engine, detection/OCR
 /// run inside the worker isolate, and translation is either one LLM request
@@ -17,9 +28,9 @@ import 'package:venera/utils/opencc.dart';
 class PageTranslationPipeline {
   PageTranslationPipeline();
 
-  /// Translates [imageBytes]; returns re-rendered PNG bytes, or null when the
-  /// page contains no translatable text.
-  Future<Uint8List?> translatePage(
+  /// OCR + translation. Returns render-ready regions; an empty list means
+  /// the page has no text worth translating.
+  Future<PageAnalysis> analyzePage(
     Uint8List imageBytes, {
     required String sourceLang,
     required String targetLang,
@@ -33,8 +44,12 @@ class PageTranslationPipeline {
       paths: paths,
     );
     blocks = blocks.where((b) => _isTranslatable(b.text)).toList();
+    var votes = <String, int>{};
+    for (var block in blocks) {
+      votes[block.language] = (votes[block.language] ?? 0) + 1;
+    }
     if (blocks.isEmpty) {
-      return null;
+      return PageAnalysis(const [], votes);
     }
 
     var targetBase = targetLang == 'zh-TW' ? 'zh' : targetLang;
@@ -81,10 +96,17 @@ class PageTranslationPipeline {
         regions.add(_region(pending[i], text));
       }
     }
+    return PageAnalysis(regions, votes);
+  }
 
-    if (regions.isEmpty) {
-      return null;
-    }
+  /// Renders [regions] over the page. Split from [analyzePage] so a page
+  /// whose rendered image was evicted can be rebuilt from the cached text
+  /// results alone.
+  Future<Uint8List> renderPage(
+    Uint8List imageBytes,
+    List<TranslatedRegion> regions,
+  ) async {
+    var image = await _decode(imageBytes);
     return await renderTranslatedPage(imageBytes, image, regions);
   }
 

@@ -71,6 +71,28 @@ class TranslatedRegion {
   final String text;
   final int backgroundColor;
   final int textColor;
+
+  /// Compact JSON for the text-level result cache: lets a page be re-rendered
+  /// after the rendered image was evicted, without re-running OCR or paying
+  /// for another translation request.
+  Map<String, dynamic> toJson() => {
+    'l': rect.left,
+    't': rect.top,
+    'r': rect.right,
+    'b': rect.bottom,
+    'text': text,
+    'bg': backgroundColor,
+    'fg': textColor,
+  };
+
+  factory TranslatedRegion.fromJson(Map<String, dynamic> json) {
+    return TranslatedRegion(
+      rect: IntRect(json['l'], json['t'], json['r'], json['b']),
+      text: json['text'],
+      backgroundColor: json['bg'],
+      textColor: json['fg'],
+    );
+  }
 }
 
 class PipelineCanceled implements Exception {

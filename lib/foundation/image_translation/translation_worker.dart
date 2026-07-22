@@ -453,8 +453,38 @@ class _WorkerState {
       }, decoder.outputNames.first);
       if (next == eosToken) break;
       ids.add(next);
+      // Greedy decoding can fall into repetition loops on hard crops
+      // (stylized fonts, screentone backgrounds), which came out as garbage
+      // strings. Cut the sequence when the tail starts repeating.
+      if (_hasRepetitionLoop(ids)) {
+        ids.removeRange(ids.length - 3, ids.length);
+        break;
+      }
     }
     return _jaVocab!.decode(ids.sublist(1));
+  }
+
+  /// True when the tail of [ids] repeats: the same trigram twice in a row,
+  /// or four identical tokens.
+  bool _hasRepetitionLoop(List<int> ids) {
+    var n = ids.length;
+    if (n >= 4 &&
+        ids[n - 1] == ids[n - 2] &&
+        ids[n - 2] == ids[n - 3] &&
+        ids[n - 3] == ids[n - 4]) {
+      return true;
+    }
+    if (n >= 6) {
+      var repeated = true;
+      for (var i = 0; i < 3; i++) {
+        if (ids[n - 1 - i] != ids[n - 4 - i]) {
+          repeated = false;
+          break;
+        }
+      }
+      if (repeated) return true;
+    }
+    return false;
   }
 
   // ----- Line OCR (PP-OCR CTC) -----
@@ -479,7 +509,7 @@ class _WorkerState {
       if (rect.width < 8 || rect.height < 8) continue;
       var outW = (rect.width * height / math.max(1, rect.height))
           .round()
-          .clamp(16, 640);
+          .clamp(16, 960);
       outW = (outW / 8).ceil() * 8;
       var tensor = _cropNormalized(image, rect, outW, height);
       var output = session
@@ -629,10 +659,11 @@ Uint8List _resizeRegion(RgbaImage src, IntRect region, int outW, int outH) {
   return out;
 }
 
-/// PP-OCR DBNet preprocessing: long side <= 960, multiple of 32, ImageNet
+/// PP-OCR DBNet preprocessing: long side <= 1280 (small/stylized lettering
+/// survives better than at the stock 960), multiple of 32, ImageNet
 /// normalization.
 _DetInput _detPreprocess(RgbaImage tile) {
-  const maxSide = 960.0;
+  const maxSide = 1280.0;
   var scale = math.min(1.0, maxSide / math.max(tile.width, tile.height));
   int round32(double v) => math.max(32, (v / 32).round() * 32);
   var inW = round32(tile.width * scale);
@@ -735,9 +766,14 @@ List<List<IntRect>> _clusterBoxes(List<IntRect> boxes, int width, int height) {
 
   var inflated = [
     for (var box in boxes)
+      // Inflation controls when neighbouring lines merge into one block.
+      // Too generous and two adjacent speech bubbles fuse — the combined
+      // crop then squashes both into one OCR input and recognition degrades
+      // badly. 0.55 of the short side still bridges the gaps between lines
+      // and vertical columns inside one bubble.
       box.inflated(
-        (math.min(box.width, box.height) * 0.7).round().clamp(4, 40),
-        (math.min(box.width, box.height) * 0.7).round().clamp(4, 40),
+        (math.min(box.width, box.height) * 0.55).round().clamp(3, 32),
+        (math.min(box.width, box.height) * 0.55).round().clamp(3, 32),
         width,
         height,
       ),
