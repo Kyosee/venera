@@ -805,12 +805,14 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
                               ? 'Translating'.tl
                               : '${'Translating'.tl} $pct%',
                           onPressed: preTranslate,
+                          onLongPressed: showTranslationMenu,
                         );
                       }
                       return _ActionButton(
                         icon: const Icon(Icons.translate_rounded),
                         text: 'Pre-translate'.tl,
                         onPressed: preTranslate,
+                        onLongPressed: showTranslationMenu,
                       );
                     },
                   ),

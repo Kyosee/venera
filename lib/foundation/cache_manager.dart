@@ -312,6 +312,48 @@ class CacheManager {
     }
   }
 
+  /// Deletes every cache entry whose key starts with [prefix], returning the
+  /// number removed. Used to invalidate a scope of derived cache (e.g. all
+  /// translated pages of one comic) without touching unrelated entries.
+  Future<int> deleteByPrefix(String prefix) async {
+    var rows = _db.select(
+      '''
+      SELECT key, dir, name FROM cache
+      WHERE key LIKE ? ESCAPE '\\'
+    ''',
+      ['${_escapeLike(prefix)}%'],
+    );
+    var removed = 0;
+    for (var row in rows) {
+      var dir = row[1] as String;
+      var name = row[2] as String;
+      var file = File('$cachePath/$dir/$name');
+      if (await file.exists()) {
+        if (_currentSize != null) {
+          _currentSize = _currentSize! - await file.length();
+        }
+        await file.delete();
+      }
+      removed++;
+    }
+    _db.execute(
+      '''
+      DELETE FROM cache
+      WHERE key LIKE ? ESCAPE '\\'
+    ''',
+      ['${_escapeLike(prefix)}%'],
+    );
+    return removed;
+  }
+
+  /// Escapes LIKE wildcards so a prefix containing '%' or '_' matches literally.
+  static String _escapeLike(String value) {
+    return value
+        .replaceAll('\\', '\\\\')
+        .replaceAll('%', '\\%')
+        .replaceAll('_', '\\_');
+  }
+
   /// Delete all cache.
   Future<void> clear() async {
     await Directory(cachePath).delete(recursive: true);

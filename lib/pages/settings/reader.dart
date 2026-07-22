@@ -920,6 +920,24 @@ class _ReaderSettingsState extends State<ReaderSettings> {
               actionTitle: "Manage".tl,
               callback: () => context.to(() => const TranslationModelsPage()),
             ),
+            _CallbackSetting(
+              title: "Clear translation cache".tl,
+              subtitle:
+                  "Removes all cached translated pages. Language and glossary learned per comic are kept."
+                      .tl,
+              actionTitle: "Clear".tl,
+              callback: () async {
+                var removed = await ImageTranslationService.instance
+                    .clearAllTranslationCache();
+                if (context.mounted) {
+                  context.showMessage(
+                    message: "Translation cache cleared".tl,
+                  );
+                }
+                Log.info('Image Translation',
+                    'Cleared $removed translated pages by user');
+              },
+            ),
           ],
         ).toSliver(),
       ],

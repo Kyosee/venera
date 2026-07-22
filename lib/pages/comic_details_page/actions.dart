@@ -183,6 +183,32 @@ abstract mixin class _ComicPageActions {
     );
   }
 
+  /// Clears every cached translation (both levels) and the learned glossary for
+  /// this comic, so subsequent reading / pre-translation is produced fresh.
+  /// Reached by long-pressing the pre-translate button; used when translations
+  /// came out wrong and need to be redone.
+  void reTranslate() {
+    showConfirmDialog(
+      context: App.rootContext,
+      title: "Re-translate this comic?".tl,
+      content:
+          "This clears all cached translations and the learned glossary for this comic, then translates again."
+              .tl,
+      onConfirm: () async {
+        await ImageTranslationService.instance.retranslate(
+          comic.id,
+          comic.sourceKey,
+        );
+        App.rootContext.showMessage(message: "Translation cache cleared".tl);
+        // Offer to pre-translate again right away; the user can also just
+        // reopen the reader, which translates on demand.
+        if (ImageTranslationService.isReady) {
+          preTranslate();
+        }
+      },
+    );
+  }
+
   /// read the comic
   ///
   /// [ep] the episode number, start from 1
@@ -493,6 +519,25 @@ abstract mixin class _ComicPageActions {
         onClick: () {
           showSourceMigrationDialog(context, _toFavoriteItem());
         },
+      ),
+    ]);
+  }
+
+  /// Long-press menu on the translate button: the fast path (tap) starts a
+  /// pre-translation, while this exposes the less-common "re-translate" action
+  /// for when cached translations came out wrong.
+  void showTranslationMenu() {
+    var context = App.rootContext;
+    showMenuX(context, Offset(context.width - 16, context.padding.top), [
+      MenuEntry(
+        icon: Icons.translate_rounded,
+        text: "Pre-translate".tl,
+        onClick: preTranslate,
+      ),
+      MenuEntry(
+        icon: Icons.refresh_rounded,
+        text: "Re-translate".tl,
+        onClick: reTranslate,
       ),
     ]);
   }

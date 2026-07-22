@@ -93,19 +93,71 @@ class ImageTranslationService with ChangeNotifier {
   static String get _cachePrefix =>
       'pageTranslation@$sourceLang>$targetLang@';
 
+  /// Prefix covering every cached page of one comic, for the current language
+  /// pair. The comic/chapter identity comes BEFORE the per-image part so a
+  /// whole comic — or a single chapter — can be invalidated with one prefix
+  /// delete (see [CacheManager.deleteByPrefix]).
+  static String comicScopePrefix(String? sourceKey, String cid) {
+    return '$_cachePrefix$sourceKey@$cid@';
+  }
+
+  /// Prefix covering every cached page of one chapter.
+  static String chapterScopePrefix(String? sourceKey, String cid, String eid) {
+    return '${comicScopePrefix(sourceKey, cid)}$eid@';
+  }
+
   /// Cache key of the translated variant of one page. It embeds the
   /// language pair so changing settings re-translates instead of serving
-  /// stale pages.
+  /// stale pages. Scope (source/comic/chapter) comes first, image key last,
+  /// so a comic or chapter forms a deletable key prefix.
   static String cacheKeyFor(
     String imageKey,
     String? sourceKey,
     String cid,
     String eid,
   ) {
-    return '$_cachePrefix$imageKey@$sourceKey@$cid@$eid';
+    return '${chapterScopePrefix(sourceKey, cid, eid)}$imageKey';
   }
 
   static String _textKeyOf(String cacheKey) => 'text:$cacheKey';
+
+  /// Removes both cache levels (rendered image + text result) for every page
+  /// under [scopePrefix], so the next view/pre-translate re-runs from scratch.
+  /// Also clears the in-memory "done/empty/failed" markers for those keys.
+  Future<int> invalidateScope(String scopePrefix) async {
+    var removed = await CacheManager().deleteByPrefix(scopePrefix);
+    await CacheManager().deleteByPrefix('text:$scopePrefix');
+    _completed.removeWhere((k) => k.startsWith(scopePrefix));
+    _noContent.removeWhere((k) => k.startsWith(scopePrefix));
+    _failures.removeWhere((k, _) => k.startsWith(scopePrefix));
+    return removed;
+  }
+
+  /// Re-translates a whole comic: drops every cached page (both levels) for
+  /// the current language pair AND the comic's learned glossary, so the next
+  /// read / pre-translate starts clean. [eid] limits it to one chapter, in
+  /// which case the glossary is kept (other chapters still rely on it).
+  Future<void> retranslate(String cid, String sourceKey, {String? eid}) async {
+    if (eid != null) {
+      await invalidateScope(chapterScopePrefix(sourceKey, cid, eid));
+    } else {
+      await invalidateScope(comicScopePrefix(sourceKey, cid));
+      _clearGlossary('$cid@$sourceKey');
+    }
+    notifyListeners();
+  }
+
+  /// Clears every translated page across all comics (both cache levels). The
+  /// learned per-comic language locks and glossaries are left intact.
+  Future<int> clearAllTranslationCache() async {
+    var removed = await CacheManager().deleteByPrefix('pageTranslation@');
+    await CacheManager().deleteByPrefix('text:pageTranslation@');
+    _completed.clear();
+    _noContent.clear();
+    _failures.clear();
+    notifyListeners();
+    return removed;
+  }
 
   Future<File?> findTranslated(String cacheKey) {
     return CacheManager().findCache(cacheKey);
@@ -407,6 +459,16 @@ class ImageTranslationService with ChangeNotifier {
     while (glossary.length > _maxGlossaryEntries) {
       glossary.remove(glossary.keys.first);
     }
+    appdata.implicitData[_comicGlossaryKey] = all;
+    appdata.writeImplicitData();
+  }
+
+  /// Drops a comic's learned glossary. Called on re-translate so a wrong name
+  /// established on an earlier run does not get re-fed to the model and
+  /// perpetuated.
+  void _clearGlossary(String comicKey) {
+    var all = _allGlossaries;
+    if (all.remove(comicKey) == null) return;
     appdata.implicitData[_comicGlossaryKey] = all;
     appdata.writeImplicitData();
   }
