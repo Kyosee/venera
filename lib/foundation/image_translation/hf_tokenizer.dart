@@ -213,6 +213,11 @@ class WordPieceVocab {
     return WordPieceVocab._(lines);
   }
 
+  /// Synchronous variant for use inside worker isolates.
+  static WordPieceVocab fromFileSync(String path) {
+    return WordPieceVocab._(File(path).readAsLinesSync());
+  }
+
   String decode(List<int> ids) {
     var buffer = StringBuffer();
     for (var id in ids) {

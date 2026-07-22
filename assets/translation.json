@@ -1,5 +1,14 @@
 {
   "zh_CN": {
+    "Translation engine": "翻译引擎",
+    "Custom LLM endpoint": "自定义 LLM 端点",
+    "Offline models (experimental)": "离线模型（实验性）",
+    "LLM API URL": "LLM API 地址",
+    "LLM API Key": "LLM API 密钥",
+    "LLM Model": "LLM 模型",
+    "Not configured": "未配置",
+    "Auto detect": "自动检测",
+    "Translation model": "翻译模型下载",
     "AI Translation": "AI 翻译",
     "Translate pages while reading": "阅读时翻译页面",
     "Fully offline. The original shows until a page finishes translating.": "完全离线运行。页面翻译完成前先显示原图。",
@@ -1033,6 +1042,15 @@
     "WebDAV Sync": "WebDAV 同步"
   },
   "zh_TW": {
+    "Translation engine": "翻譯引擎",
+    "Custom LLM endpoint": "自訂 LLM 端點",
+    "Offline models (experimental)": "離線模型（實驗性）",
+    "LLM API URL": "LLM API 位址",
+    "LLM API Key": "LLM API 金鑰",
+    "LLM Model": "LLM 模型",
+    "Not configured": "未設定",
+    "Auto detect": "自動偵測",
+    "Translation model": "翻譯模型下載",
     "AI Translation": "AI 翻譯",
     "Translate pages while reading": "閱讀時翻譯頁面",
     "Fully offline. The original shows until a page finishes translating.": "完全離線運行。頁面翻譯完成前先顯示原圖。",

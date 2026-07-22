@@ -51,7 +51,8 @@ class _TranslationModelsPageState extends State<TranslationModelsPage> {
   @override
   Widget build(BuildContext context) {
     var requiredIds = TranslationModels.requiredFor(
-      appdata.settings['imageTranslationSource'] as String? ?? 'ja',
+      appdata.settings['imageTranslationSource'] as String? ?? 'auto',
+      engine: appdata.settings['imageTranslationEngine'] as String? ?? 'llm',
     ).map((c) => c.id).toSet();
     return Scaffold(
       body: SmoothCustomScrollView(

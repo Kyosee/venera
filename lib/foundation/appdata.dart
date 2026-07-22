@@ -137,6 +137,11 @@ class Appdata with Init {
     // into night mode with no way out but toggling the switch. The follow-
     // system toggle and the color/intensity preferences still sync.
     "readerNightMode",
+    // The user's own LLM endpoint credentials are device-local secrets, same
+    // policy as the WebDAV account above.
+    "imageTranslationLlmUrl",
+    "imageTranslationLlmKey",
+    "imageTranslationLlmModel",
   ];
 
   /// Sync data from another device.
@@ -406,10 +411,15 @@ class Settings with ChangeNotifier {
     // 本地离线漫画翻译（模型按需下载，见 foundation/image_translation/）。
     // enableImageTranslation 走阅读器设置通道，支持按漫画覆盖。
     'enableImageTranslation': false,
-    'imageTranslationSource': 'ja', // ja, zh, en, ko
+    'imageTranslationEngine': 'llm', // llm(用户自配端点), local(实验性离线)
+    'imageTranslationSource': 'auto', // auto, ja, zh, en, ko
     'imageTranslationTarget': 'zh', // zh, zh-TW, en
     'imageTranslationHfEndpoint':
         'https://huggingface.co', // model download endpoint (mirrorable)
+    // 用户自己的 OpenAI 兼容端点；App 不预置任何站点或密钥。
+    'imageTranslationLlmUrl': '',
+    'imageTranslationLlmKey': '',
+    'imageTranslationLlmModel': '',
   };
 
   operator [](String key) {

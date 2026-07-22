@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
+import 'package:venera/foundation/image_translation/translation_worker.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/utils/io.dart';
 
@@ -168,17 +169,77 @@ abstract class TranslationModels {
     };
   }
 
-  /// Components required for the current source-language setting.
-  static List<ModelComponent> requiredFor(String sourceLang) {
-    return [detector, ocrFor(sourceLang), translator];
+  static const _recLangs = ['zh', 'en', 'ko'];
+
+  /// Rec input heights: 48 for the v3/v4 models, 32 for the older Korean one.
+  static int recHeightFor(String lang) => lang == 'ko' ? 32 : 48;
+
+  /// Model file paths for the worker isolate, containing only what is
+  /// actually installed.
+  static WorkerModelPaths workerPaths() {
+    var recModels = <String, String>{};
+    var recDicts = <String, String>{};
+    var recHeights = <String, int>{};
+    for (var lang in _recLangs) {
+      var component = ocrFor(lang);
+      if (component.isInstalled) {
+        recModels[lang] = component.filePath('rec.onnx');
+        recDicts[lang] = component.filePath('dict.txt');
+        recHeights[lang] = recHeightFor(lang);
+      }
+    }
+    var hasJa = ocrJa.isInstalled;
+    var hasTranslator = translator.isInstalled;
+    return WorkerModelPaths(
+      detector: detector.filePath('det.onnx'),
+      jaEncoder: hasJa ? ocrJa.filePath('encoder.onnx') : null,
+      jaDecoder: hasJa ? ocrJa.filePath('decoder.onnx') : null,
+      jaVocab: hasJa ? ocrJa.filePath('vocab.txt') : null,
+      recModels: recModels,
+      recDicts: recDicts,
+      recHeights: recHeights,
+      translatorEncoder: hasTranslator
+          ? translator.filePath('encoder.onnx')
+          : null,
+      translatorDecoder: hasTranslator
+          ? translator.filePath('decoder.onnx')
+          : null,
+      translatorTokenizer: hasTranslator
+          ? translator.filePath('tokenizer.json')
+          : null,
+    );
   }
 
+  /// Components required for the current settings, for the model management
+  /// UI. With 'auto' any one OCR component suffices, so only the detector
+  /// (plus the offline translator when that engine is selected) is strictly
+  /// required.
+  static List<ModelComponent> requiredFor(
+    String sourceLang, {
+    String engine = 'llm',
+  }) {
+    return [
+      detector,
+      if (sourceLang != 'auto') ocrFor(sourceLang),
+      if (engine == 'local') translator,
+    ];
+  }
+
+  /// Whether detection + OCR can run for [sourceLang]. Translation-engine
+  /// readiness (LLM configured / local model installed) is checked
+  /// separately by the service.
   static bool isReadyFor(String sourceLang) {
     // Checked on every reader image-provider construction; cache the file
     // probes and invalidate when the model store changes anything.
-    return _readyCache[sourceLang] ??= requiredFor(
-      sourceLang,
-    ).every((c) => c.isInstalled);
+    return _readyCache[sourceLang] ??= _computeReady(sourceLang);
+  }
+
+  static bool _computeReady(String sourceLang) {
+    if (!detector.isInstalled) return false;
+    if (sourceLang == 'auto') {
+      return ocrJa.isInstalled || _recLangs.any((l) => ocrFor(l).isInstalled);
+    }
+    return ocrFor(sourceLang).isInstalled;
   }
 
   static final _readyCache = <String, bool>{};

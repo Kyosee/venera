@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/painting.dart';
-import 'package:venera/foundation/image_translation/translation_pipeline.dart';
+import 'package:venera/foundation/image_translation/translation_types.dart';
 
 /// Renders the translated page: the original image with each text region
 /// covered by a rounded patch in the sampled background color and the

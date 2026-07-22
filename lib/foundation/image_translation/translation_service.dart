@@ -4,8 +4,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/cache_manager.dart';
+import 'package:venera/foundation/image_translation/llm_translator.dart';
 import 'package:venera/foundation/image_translation/translation_models.dart';
 import 'package:venera/foundation/image_translation/translation_pipeline.dart';
+import 'package:venera/foundation/image_translation/translation_types.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/utils/io.dart';
 
@@ -28,7 +30,7 @@ class ImageTranslationService with ChangeNotifier {
   static final instance = ImageTranslationService._();
 
   static const _cacheDuration = 30 * 24 * 60 * 60 * 1000;
-  static const _maxQueueLength = 8;
+  static const _maxQueueLength = 16;
   static const _failureRetryDelay = Duration(minutes: 5);
   static const _idleReleaseDelay = Duration(seconds: 90);
 
@@ -47,16 +49,29 @@ class ImageTranslationService with ChangeNotifier {
   void markTranslated(String cacheKey) => _completed.add(cacheKey);
 
   static String get sourceLang =>
-      appdata.settings['imageTranslationSource'] as String? ?? 'ja';
+      appdata.settings['imageTranslationSource'] as String? ?? 'auto';
 
   static String get targetLang =>
       appdata.settings['imageTranslationTarget'] as String? ?? 'zh';
 
-  /// Whether every model required by the current settings is installed.
-  static bool get isReady => TranslationModels.isReadyFor(sourceLang);
+  /// 'llm' (user-configured endpoint) or 'local' (experimental offline).
+  static String get engine =>
+      appdata.settings['imageTranslationEngine'] as String? ?? 'llm';
+
+  /// Whether detection/OCR models AND the selected translation engine are
+  /// usable right now.
+  static bool get isReady {
+    if (!TranslationModels.isReadyFor(sourceLang)) {
+      return false;
+    }
+    if (engine == 'local') {
+      return TranslationModels.translator.isInstalled;
+    }
+    return LlmTranslator.isConfigured;
+  }
 
   /// Whether translation should run for a comic right now (per-comic reader
-  /// setting + installed models).
+  /// setting + usable engine).
   static bool enabledFor(String cid, String sourceKey) {
     return appdata.settings.getReaderSetting(
               cid,
@@ -67,15 +82,19 @@ class ImageTranslationService with ChangeNotifier {
         isReady;
   }
 
-  /// Cache key of the translated variant of one page. It embeds the language
-  /// pair so changing settings re-translates instead of serving stale pages.
+  static String get _cachePrefix =>
+      'pageTranslation@$engine@$sourceLang>$targetLang@';
+
+  /// Cache key of the translated variant of one page. It embeds the engine
+  /// and language pair so changing settings re-translates instead of serving
+  /// stale pages.
   static String cacheKeyFor(
     String imageKey,
     String? sourceKey,
     String cid,
     String eid,
   ) {
-    return 'pageTranslation@$sourceLang>$targetLang@$imageKey@$sourceKey@$cid@$eid';
+    return '$_cachePrefix$imageKey@$sourceKey@$cid@$eid';
   }
 
   Future<File?> findTranslated(String cacheKey) {
@@ -120,8 +139,7 @@ class ImageTranslationService with ChangeNotifier {
         var task = _queue.first;
         try {
           // The settings may have changed while queued; skip stale entries.
-          var expectedPrefix = 'pageTranslation@$sourceLang>$targetLang@';
-          if (!task.cacheKey.startsWith(expectedPrefix)) {
+          if (!task.cacheKey.startsWith(_cachePrefix)) {
             continue;
           }
           if (await CacheManager().findCache(task.cacheKey) != null) {
@@ -133,6 +151,7 @@ class ImageTranslationService with ChangeNotifier {
             task.imageBytes,
             sourceLang: sourceLang,
             targetLang: targetLang,
+            engine: engine,
           );
           if (rendered == null) {
             // No translatable text: remember so the page is not re-analyzed

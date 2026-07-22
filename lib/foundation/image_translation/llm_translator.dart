@@ -1,0 +1,142 @@
+import 'dart:convert';
+
+import 'package:venera/foundation/appdata.dart';
+import 'package:venera/foundation/log.dart';
+import 'package:venera/network/app_dio.dart';
+
+/// Translates recognized bubble texts through a user-configured
+/// OpenAI-compatible chat endpoint.
+///
+/// The app ships with no endpoint, key or vendor — everything is supplied by
+/// the user in settings, so translation quality is whatever model they point
+/// it at. All bubbles of a page go out as ONE request (id + text list), which
+/// both preserves cross-bubble context and keeps latency at one round-trip
+/// per page.
+abstract class LlmTranslator {
+  static String get _rawUrl =>
+      (appdata.settings['imageTranslationLlmUrl'] as String? ?? '').trim();
+
+  static String get _apiKey =>
+      (appdata.settings['imageTranslationLlmKey'] as String? ?? '').trim();
+
+  static String get _model =>
+      (appdata.settings['imageTranslationLlmModel'] as String? ?? '').trim();
+
+  /// A key is optional on purpose: local gateways (ollama, lm-studio,
+  /// one-api instances on LAN) often run without authentication.
+  static bool get isConfigured => _rawUrl.isNotEmpty && _model.isNotEmpty;
+
+  /// Accepts either a base URL ("https://host/v1") or a full chat-completions
+  /// URL; normalizes to the latter.
+  static String get _endpoint {
+    var url = _rawUrl;
+    while (url.endsWith('/')) {
+      url = url.substring(0, url.length - 1);
+    }
+    if (url.endsWith('/chat/completions')) {
+      return url;
+    }
+    return '$url/chat/completions';
+  }
+
+  static String _targetName(String targetLang) {
+    return switch (targetLang) {
+      'zh' => '简体中文',
+      'zh-TW' => '繁体中文（台湾用语习惯）',
+      'en' => 'English',
+      _ => targetLang,
+    };
+  }
+
+  /// Translates [texts] into [targetLang]. The result list is aligned with
+  /// the input; entries the model refused/failed are empty strings.
+  static Future<List<String>> translateBatch(
+    List<String> texts,
+    String targetLang,
+  ) async {
+    if (texts.isEmpty) return const [];
+    var systemPrompt =
+        '你是专业的漫画对白翻译引擎。将用户提供的 JSON 数组中每个对象的 text '
+        '字段翻译成${_targetName(targetLang)}。要求：符合漫画口语风格，简洁自然；'
+        '拟声词按含义意译；OCR 造成的少量错字请按上下文推断原意；'
+        '人名与专有名词保持前后一致。'
+        '只输出 JSON 数组，格式为 [{"id":0,"text":"译文"}]，'
+        '每个 id 恰好出现一次，不要输出任何其他内容。';
+    var payload = jsonEncode([
+      for (var i = 0; i < texts.length; i++) {'id': i, 'text': texts[i]},
+    ]);
+
+    var dio = AppDio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 20),
+        receiveTimeout: const Duration(seconds: 120),
+        headers: {
+          'Content-Type': 'application/json',
+          if (_apiKey.isNotEmpty) 'Authorization': 'Bearer $_apiKey',
+        },
+        validateStatus: (status) => status != null && status < 500,
+      ),
+    );
+    Object? lastError;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        var response = await dio.post(
+          _endpoint,
+          data: {
+            'model': _model,
+            'temperature': 0.3,
+            'messages': [
+              {'role': 'system', 'content': systemPrompt},
+              {'role': 'user', 'content': payload},
+            ],
+          },
+        );
+        if (response.statusCode != 200) {
+          throw Exception(
+            'LLM endpoint returned ${response.statusCode}: '
+            '${_briefBody(response.data)}',
+          );
+        }
+        var content =
+            response.data['choices']?[0]?['message']?['content'] as String?;
+        if (content == null || content.isEmpty) {
+          throw Exception('LLM response has no content');
+        }
+        return _parse(content, texts.length);
+      } catch (e) {
+        lastError = e;
+        Log.warning('Image Translation', 'LLM request failed: $e');
+      }
+    }
+    throw Exception('LLM translation failed: $lastError');
+  }
+
+  /// Extracts the JSON array from the model output (tolerating code fences
+  /// and surrounding prose) and aligns it by id.
+  static List<String> _parse(String content, int count) {
+    var start = content.indexOf('[');
+    var end = content.lastIndexOf(']');
+    if (start == -1 || end <= start) {
+      throw Exception('LLM response is not a JSON array');
+    }
+    var items = jsonDecode(content.substring(start, end + 1));
+    if (items is! List) {
+      throw Exception('LLM response is not a JSON array');
+    }
+    var results = List.filled(count, '');
+    for (var item in items) {
+      if (item is! Map) continue;
+      var id = item['id'];
+      var text = item['text'];
+      if (id is int && id >= 0 && id < count && text is String) {
+        results[id] = text.trim();
+      }
+    }
+    return results;
+  }
+
+  static String _briefBody(Object? body) {
+    var text = body.toString();
+    return text.length > 200 ? text.substring(0, 200) : text;
+  }
+}

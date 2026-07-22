@@ -49,6 +49,24 @@ class _ReaderSettingsState extends State<ReaderSettings> {
         readerMode == 'galleryRightToLeft';
   }
 
+  /// Edits one of the user's own LLM endpoint fields (URL / key / model).
+  void _editLlmField(String title, String settingKey, {String? hint}) {
+    showInputDialog(
+      context: context,
+      title: title,
+      hintText: hint,
+      initialValue: appdata.settings[settingKey] as String? ?? '',
+      onConfirm: (value) {
+        setState(() {
+          appdata.settings[settingKey] = value.trim();
+        });
+        appdata.saveData();
+        widget.onChanged?.call(settingKey);
+        return null;
+      },
+    );
+  }
+
   void _onShowChapterCommentsChanged() {
     // When showChapterComments is turned off, also turn off showChapterCommentsAtEnd
     bool? showChapterComments;
@@ -738,9 +756,62 @@ class _ReaderSettingsState extends State<ReaderSettings> {
               useDeviceSettings: useDeviceSpecificSettings,
             ),
             SelectSetting(
+              title: "Translation engine".tl,
+              settingKey: "imageTranslationEngine",
+              optionTranslation: {
+                "llm": "Custom LLM endpoint".tl,
+                "local": "Offline models (experimental)".tl,
+              },
+              onChanged: () {
+                setState(() {});
+                widget.onChanged?.call("imageTranslationEngine");
+              },
+            ),
+            if (appdata.settings['imageTranslationEngine'] != 'local') ...[
+              _CallbackSetting(
+                title: "LLM API URL".tl,
+                subtitle: (appdata.settings['imageTranslationLlmUrl'] as String)
+                        .isEmpty
+                    ? "Not configured".tl
+                    : appdata.settings['imageTranslationLlmUrl'],
+                actionTitle: "Edit".tl,
+                callback: () => _editLlmField(
+                  "LLM API URL".tl,
+                  'imageTranslationLlmUrl',
+                  hint: 'https://example.com/v1',
+                ),
+              ),
+              _CallbackSetting(
+                title: "LLM API Key".tl,
+                subtitle: (appdata.settings['imageTranslationLlmKey'] as String)
+                        .isEmpty
+                    ? "Not configured".tl
+                    : '••••••',
+                actionTitle: "Edit".tl,
+                callback: () => _editLlmField(
+                  "LLM API Key".tl,
+                  'imageTranslationLlmKey',
+                ),
+              ),
+              _CallbackSetting(
+                title: "LLM Model".tl,
+                subtitle:
+                    (appdata.settings['imageTranslationLlmModel'] as String)
+                        .isEmpty
+                    ? "Not configured".tl
+                    : appdata.settings['imageTranslationLlmModel'],
+                actionTitle: "Edit".tl,
+                callback: () => _editLlmField(
+                  "LLM Model".tl,
+                  'imageTranslationLlmModel',
+                ),
+              ),
+            ],
+            SelectSetting(
               title: "Source language".tl,
               settingKey: "imageTranslationSource",
               optionTranslation: {
+                "auto": "Auto detect".tl,
                 "ja": "Japanese".tl,
                 "en": "English".tl,
                 "ko": "Korean".tl,
@@ -768,7 +839,7 @@ class _ReaderSettingsState extends State<ReaderSettings> {
               title: "Translation models".tl,
               subtitle: TranslationModels.isReadyFor(
                     appdata.settings['imageTranslationSource'] as String? ??
-                        'ja',
+                        'auto',
                   )
                   ? "Models ready".tl
                   : "Models not downloaded".tl,

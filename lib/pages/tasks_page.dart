@@ -8,6 +8,7 @@ import 'package:venera/foundation/export_tasks.dart';
 import 'package:venera/foundation/follow_update_tasks.dart';
 import 'package:venera/foundation/import_tasks.dart';
 import 'package:venera/foundation/history_tasks.dart';
+import 'package:venera/foundation/image_translation/translation_models.dart';
 import 'package:venera/foundation/related_source_tasks.dart';
 import 'package:venera/foundation/source_migration_tasks.dart';
 import 'package:venera/foundation/widget_utils.dart';
@@ -30,6 +31,7 @@ class _TasksPageState extends State<TasksPage> with SingleTickerProviderStateMix
   final importManager = ImportTaskManager.instance;
   final exportManager = ExportTaskManager.instance;
   final dataSyncManager = DataSyncTaskManager.instance;
+  final modelStore = TranslationModelStore.instance;
 
   late TabController _tabController;
 
@@ -48,6 +50,7 @@ class _TasksPageState extends State<TasksPage> with SingleTickerProviderStateMix
     importManager.addListener(update);
     exportManager.addListener(update);
     dataSyncManager.addListener(update);
+    modelStore.addListener(update);
   }
 
   @override
@@ -61,6 +64,7 @@ class _TasksPageState extends State<TasksPage> with SingleTickerProviderStateMix
     importManager.removeListener(update);
     exportManager.removeListener(update);
     dataSyncManager.removeListener(update);
+    modelStore.removeListener(update);
     super.dispose();
   }
 
@@ -227,8 +231,60 @@ class _TasksPageState extends State<TasksPage> with SingleTickerProviderStateMix
       ...exportManager.currentTasks.map(
         (task) => buildExportTaskCard(task, expanded: false),
       ),
+      for (var component in TranslationModels.all)
+        if (modelStore.stateOf(component).downloading)
+          buildModelDownloadCard(component),
     ];
     return buildTaskWidgets(widgets, "No current tasks".tl);
+  }
+
+  /// Progress card for an ongoing translation-model download. Transient (no
+  /// history entry): once finished the model simply shows as installed in the
+  /// model management page.
+  Widget buildModelDownloadCard(ModelComponent component) {
+    var state = modelStore.stateOf(component);
+    return Card(
+      elevation: 0,
+      color: context.colorScheme.surface,
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: const _RotatingIcon(icon: Icons.download),
+        title: Text(
+          "${"Translation model".tl}: ${translationModelName(component.id)}",
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "${bytesToReadableString(state.receivedBytes)} / "
+              "${bytesToReadableString(state.totalBytes ?? component.approxSizeBytes)}",
+            ),
+            const SizedBox(height: 4),
+            LinearProgressIndicator(
+              value: state.progress <= 0 ? null : state.progress,
+            ),
+          ],
+        ),
+        trailing: TextButton(
+          onPressed: () => modelStore.cancelDownload(component),
+          child: Text("Cancel".tl),
+        ),
+      ),
+    );
+  }
+
+  String translationModelName(String id) {
+    return switch (id) {
+      'text_detector' => "Text detector".tl,
+      'ocr_ja' => "Japanese OCR (manga)".tl,
+      'ocr_zh' => "Chinese / Latin OCR".tl,
+      'ocr_en' => "English OCR".tl,
+      'ocr_ko' => "Korean OCR".tl,
+      'translator' => "Offline translation model (multilingual)".tl,
+      _ => id,
+    };
   }
 
   Widget buildHistoryTasks() {
