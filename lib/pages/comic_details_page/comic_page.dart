@@ -1612,6 +1612,31 @@ class _SelectPreTranslateChapterState
     );
   }
 
+  /// Confirms before starting: pre-translation sends roughly one LLM request
+  /// per page, so a multi-chapter run against a paid endpoint can be costly.
+  /// Small selections start straight away; larger ones ask first.
+  void _confirmAndStart() {
+    selected.sort();
+    void start() {
+      widget.finishSelect(selected);
+      context.pop();
+    }
+
+    // A single chapter is cheap enough to skip the prompt.
+    if (selected.length < 2) {
+      start();
+      return;
+    }
+    showConfirmDialog(
+      context: context,
+      title: "Start pre-translation?".tl,
+      content: "About to translate @count chapters. Each page is roughly one "
+              "LLM request; on a paid endpoint this may cost money."
+          .tlParams({'count': selected.length}),
+      onConfirm: start,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1723,13 +1748,7 @@ class _SelectPreTranslateChapterState
                 const SizedBox(width: 16),
                 Expanded(
                   child: FilledButton(
-                    onPressed: selected.isEmpty
-                        ? null
-                        : () {
-                            selected.sort();
-                            widget.finishSelect(selected);
-                            context.pop();
-                          },
+                    onPressed: selected.isEmpty ? null : _confirmAndStart,
                     child: Text("Start".tl),
                   ),
                 ),
