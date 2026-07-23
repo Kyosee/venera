@@ -116,11 +116,21 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
       SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     }
     super.initState();
+    // Refresh the translation status badge as pages start/finish/fail; the
+    // top bar lives in an OverlayEntry that a parent setState won't rebuild.
+    ImageTranslationService.instance.addListener(_onTranslationStatusChanged);
     Future.delayed(const Duration(milliseconds: 200), addDragListener);
+  }
+
+  void _onTranslationStatusChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    ImageTranslationService.instance.removeListener(
+      _onTranslationStatusChanged,
+    );
     sliderFocus.dispose();
     super.dispose();
   }
