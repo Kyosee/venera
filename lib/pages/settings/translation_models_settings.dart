@@ -70,10 +70,28 @@ class _TranslationModelsPageState extends State<TranslationModelsPage> {
               _formatSize(TranslationModelStore.instance.installedSizeBytes),
             ),
           ).toSliver(),
+          _buildSectionHeader(context, "Text detection".tl).toSliver(),
           for (var component in TranslationModels.all)
-            _buildComponent(context, component, requiredIds).toSliver(),
+            if (component.id == 'text_detector')
+              _buildComponent(context, component, requiredIds).toSliver(),
+          _buildSectionHeader(context, "Text recognition".tl).toSliver(),
+          for (var component in TranslationModels.all)
+            if (component.id != 'text_detector')
+              _buildComponent(context, component, requiredIds).toSliver(),
           const SliverPadding(padding: EdgeInsets.only(bottom: 16)),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(BuildContext context, String title) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+      child: Text(
+        title,
+        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+          color: context.colorScheme.primary,
+        ),
       ),
     );
   }
