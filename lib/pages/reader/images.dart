@@ -581,6 +581,18 @@ class _GalleryModeState extends State<_GalleryMode>
   bool turnPage(bool forward) => false; // gallery 用默认按页码翻页
 
   @override
+  bool get isImageZoomed {
+    // 每页各自一个 PhotoViewController，取当前页的判断缩放；评论页等无控制器视为未缩放。
+    final controller = photoViewControllers[reader.page];
+    final scale = controller?.scale;
+    if (scale == null) return false;
+    // 与本页的初始缩放（fit/铺满屏幕时为 covered，非 1.0）比较，铺满屏幕模式下
+    // 静止态就大于 1 也不误判为放大。
+    final initial = controller!.getInitialScale?.call() ?? 1.0;
+    return scale > initial * 1.01;
+  }
+
+  @override
   void handleDoubleTap(Offset location) {
     if (appdata.settings['quickCollectImage'] == 'DoubleTap') {
       context.readerScaffold.addImageFavorite();
@@ -887,6 +899,9 @@ class _ContinuousModeState extends State<_ContinuousMode>
 
   bool isZoomedIn = false;
   bool isLongPressing = false;
+
+  @override
+  bool get isImageZoomed => (photoViewController.scale ?? 1.0) > 1.01;
 
   @override
   void initState() {

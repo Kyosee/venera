@@ -58,6 +58,7 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
         double crossAxisDistance = 0;
         double mainAxisDistance = 0;
         bool startedAtEdge = false;
+        bool startedZoomed = false;
         // 系统返回手势（iOS 滑动返回、安卓手势导航）从屏幕左右边缘起始；
         // 该区域起始的拖动不参与滑动收藏判定，否则返回手势会被误认成收藏。
         const edgeExclusion = 44.0;
@@ -68,6 +69,9 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
             var width = context.reader.size.width;
             startedAtEdge =
                 point.dx < edgeExclusion || point.dx > width - edgeExclusion;
+            // 图片放大后单指拖动是平移图片，不应被判成滑动收藏（#143）。
+            startedZoomed =
+                context.reader._imageViewController?.isImageZoomed ?? false;
           },
           onMove: (offset) {
             // 每次读取当前阅读模式：监听器只注册一次，若捕获创建时的模式，
@@ -87,8 +91,13 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
           },
           onEnd: () {
             // 除跨轴位移达标外，还要求整段手势明显以跨轴为主：长距离翻页/滚动
-            // 里的斜向漂移（主轴位移远大于跨轴）不应触发收藏。
+            // 里的斜向漂移（主轴位移远大于跨轴）不应触发收藏。放大状态下（拖动=
+            // 平移图片）整段手势不参与收藏判定。
+            final zoomedNow =
+                context.reader._imageViewController?.isImageZoomed ?? false;
             if (!startedAtEdge &&
+                !startedZoomed &&
+                !zoomedNow &&
                 crossAxisDistance.abs() > 150 &&
                 crossAxisDistance.abs() > mainAxisDistance.abs() * 2) {
               addImageFavorite();

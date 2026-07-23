@@ -915,6 +915,11 @@ abstract interface class _ImageViewController {
   /// Returns true if the event is handled.
   bool handleOnTap(Offset location);
 
+  /// Whether the current page's image is zoomed in (scale above the fit
+  /// scale). While zoomed, a single-finger drag pans the image, so the
+  /// swipe-to-favorite gesture must stand down to avoid false triggers (#143).
+  bool get isImageZoomed;
+
   Future<Uint8List?> getImageByOffset(Offset offset);
 
   String? getImageKeyByOffset(Offset offset);
