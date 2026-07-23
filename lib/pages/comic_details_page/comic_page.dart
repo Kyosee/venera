@@ -1561,9 +1561,20 @@ class _SelectDownloadChapterState extends State<_SelectDownloadChapter> {
 /// [_SelectDownloadChapter] but has no "already done" disabled rows — a
 /// chapter can always be re-queued (cached pages are skipped at run time).
 class _SelectPreTranslateChapter extends StatefulWidget {
-  const _SelectPreTranslateChapter(this.eps, this.finishSelect);
+  const _SelectPreTranslateChapter({
+    required this.cid,
+    required this.sourceKey,
+    required this.comicType,
+    required this.entries,
+    required this.finishSelect,
+  });
 
-  final List<String> eps;
+  final String cid;
+  final String sourceKey;
+  final ComicType comicType;
+
+  /// Ordered list of chapter entries (eid, display title).
+  final List<(String, String)> entries;
   final void Function(List<int>) finishSelect;
 
   @override
@@ -1574,6 +1585,32 @@ class _SelectPreTranslateChapter extends StatefulWidget {
 class _SelectPreTranslateChapterState
     extends State<_SelectPreTranslateChapter> {
   List<int> selected = [];
+
+  @override
+  void initState() {
+    super.initState();
+    PreTranslationTaskManager.instance.addListener(_onTaskUpdate);
+  }
+
+  @override
+  void dispose() {
+    PreTranslationTaskManager.instance.removeListener(_onTaskUpdate);
+    super.dispose();
+  }
+
+  void _onTaskUpdate() {
+    if (mounted) setState(() {});
+  }
+
+  PreTranslationChapter? _chapterProgress(int index) {
+    var task = PreTranslationTaskManager.instance.runningTaskFor(
+      widget.cid,
+      widget.sourceKey,
+    );
+    if (task == null) return null;
+    var eid = widget.entries[index].$1;
+    return task.chapters.where((c) => c.eid == eid).firstOrNull;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1588,10 +1625,47 @@ class _SelectPreTranslateChapterState
           Expanded(
             child: ListView.builder(
               padding: EdgeInsets.zero,
-              itemCount: widget.eps.length,
+              itemCount: widget.entries.length,
               itemBuilder: (context, i) {
+                var chapter = _chapterProgress(i);
+                var title = widget.entries[i].$2;
+                Widget? progress;
+                if (chapter != null && chapter.total > 0) {
+                  var pct = ((chapter.done + chapter.failed) / chapter.total)
+                      .clamp(0.0, 1.0);
+                  progress = SizedBox(
+                    width: 120,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '${chapter.done}/${chapter.total}',
+                          style: ts.s12.withColor(
+                            context.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        LinearProgressIndicator(value: pct),
+                      ],
+                    ),
+                  );
+                } else if (chapter != null) {
+                  progress = SizedBox(
+                    width: 120,
+                    child: LinearProgressIndicator(),
+                  );
+                }
                 return CheckboxListTile(
-                  title: Text(widget.eps[i]),
+                  title: Row(
+                    children: [
+                      Expanded(child: Text(title)),
+                      if (progress != null) ...[
+                        const SizedBox(width: 8),
+                        progress,
+                      ],
+                    ],
+                  ),
                   value: selected.contains(i),
                   onChanged: (v) {
                     setState(() {
@@ -1620,7 +1694,7 @@ class _SelectPreTranslateChapterState
                   child: TextButton(
                     onPressed: () {
                       widget.finishSelect(
-                        [for (int i = 0; i < widget.eps.length; i++) i],
+                        [for (int i = 0; i < widget.entries.length; i++) i],
                       );
                       context.pop();
                     },

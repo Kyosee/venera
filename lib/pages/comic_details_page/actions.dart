@@ -137,6 +137,18 @@ abstract mixin class _ComicPageActions {
       );
       return;
     }
+    var enabled = appdata.settings.getReaderSetting(
+          comic.id,
+          comic.sourceKey,
+          'enableImageTranslation',
+        ) ==
+        true;
+    if (!enabled) {
+      App.rootContext.showMessage(
+        message: "Enable AI translation in the reader for this comic first".tl,
+      );
+      return;
+    }
     // Ordered (id, title) list of chapters; a chapter-less comic is one job.
     final entries = <(String, String)>[];
     final chapters = comic.chapters;
@@ -177,8 +189,11 @@ abstract mixin class _ComicPageActions {
     }
     App.rootContext.to(
       () => _SelectPreTranslateChapter(
-        [for (var e in entries) e.$2],
-        startJob,
+        cid: comic.id,
+        sourceKey: comic.sourceKey,
+        comicType: comic.comicType,
+        entries: entries,
+        finishSelect: startJob,
       ),
     );
   }
@@ -528,6 +543,22 @@ abstract mixin class _ComicPageActions {
   /// for when cached translations came out wrong.
   void showTranslationMenu() {
     var context = App.rootContext;
+    if (!ImageTranslationService.isReady) {
+      context.showMessage(message: "Configure AI translation first".tl);
+      return;
+    }
+    var enabled = appdata.settings.getReaderSetting(
+          comic.id,
+          comic.sourceKey,
+          'enableImageTranslation',
+        ) ==
+        true;
+    if (!enabled) {
+      context.showMessage(
+        message: "Enable AI translation in the reader for this comic first".tl,
+      );
+      return;
+    }
     showMenuX(context, Offset(context.width - 16, context.padding.top), [
       MenuEntry(
         icon: Icons.translate_rounded,
