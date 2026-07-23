@@ -27,6 +27,7 @@ class GlossaryEditorPage extends StatefulWidget {
 
 class _GlossaryEditorPageState extends State<GlossaryEditorPage> {
   late List<MapEntry<String, String>> _entries;
+  late List<String> _blocked;
 
   @override
   void initState() {
@@ -35,10 +36,10 @@ class _GlossaryEditorPageState extends State<GlossaryEditorPage> {
   }
 
   void _reload() {
-    _entries = ImageTranslationService.instance
-        .glossaryOf(widget.cid, widget.sourceKey)
-        .entries
-        .toList();
+    var service = ImageTranslationService.instance;
+    _entries =
+        service.glossaryOf(widget.cid, widget.sourceKey).entries.toList();
+    _blocked = service.blockedTermsOf(widget.cid, widget.sourceKey);
   }
 
   Future<void> _editEntry({String? source, String? translation}) async {
@@ -102,13 +103,53 @@ class _GlossaryEditorPageState extends State<GlossaryEditorPage> {
     );
   }
 
-  void _removeEntry(String source) {
+  void _removeEntry(String source, {bool block = false}) {
     ImageTranslationService.instance.removeGlossaryEntry(
+      widget.cid,
+      widget.sourceKey,
+      source,
+      block: block,
+    );
+    setState(_reload);
+  }
+
+  void _unblock(String source) {
+    ImageTranslationService.instance.unblockTerm(
       widget.cid,
       widget.sourceKey,
       source,
     );
     setState(_reload);
+  }
+
+  /// Delete vs block: a plain delete lets the term be re-learned next time the
+  /// model reports it; blocking bans it for good. Ask which the user wants.
+  Future<void> _confirmRemove(String source) async {
+    await showDialog(
+      context: context,
+      builder: (context) => ContentDialog(
+        title: "Remove term".tl,
+        content: Text(
+          "Delete only, or block it so it's never added again?".tl,
+        ).paddingHorizontal(16),
+        actions: [
+          TextButton(
+            onPressed: () {
+              context.pop();
+              _removeEntry(source);
+            },
+            child: Text("Delete".tl),
+          ),
+          FilledButton(
+            onPressed: () {
+              context.pop();
+              _removeEntry(source, block: true);
+            },
+            child: Text("Block".tl),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -126,38 +167,60 @@ class _GlossaryEditorPageState extends State<GlossaryEditorPage> {
           ),
         ],
       ),
-      body: _entries.isEmpty
+      body: (_entries.isEmpty && _blocked.isEmpty)
           ? Center(
               child: Text(
                 "No glossary terms yet".tl,
                 style: ts.s16.withColor(context.colorScheme.outline),
               ),
             )
-          : ListView.builder(
-              itemCount: _entries.length,
-              itemBuilder: (context, i) {
-                var entry = _entries[i];
-                return ListTile(
-                  title: Text(entry.key),
-                  subtitle: Text(entry.value),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.edit_outlined),
-                        onPressed: () => _editEntry(
-                          source: entry.key,
-                          translation: entry.value,
+          : ListView(
+              children: [
+                for (var entry in _entries)
+                  ListTile(
+                    title: Text(entry.key),
+                    subtitle: Text(entry.value),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.edit_outlined),
+                          onPressed: () => _editEntry(
+                            source: entry.key,
+                            translation: entry.value,
+                          ),
                         ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline),
-                        onPressed: () => _removeEntry(entry.key),
-                      ),
-                    ],
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () => _confirmRemove(entry.key),
+                        ),
+                      ],
+                    ),
                   ),
-                );
-              },
+                if (_blocked.isNotEmpty) ...[
+                  const Divider(),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                    child: Text(
+                      "Blocked terms".tl,
+                      style: ts.s14.withColor(context.colorScheme.outline),
+                    ),
+                  ),
+                  for (var term in _blocked)
+                    ListTile(
+                      leading: Icon(
+                        Icons.block,
+                        size: 20,
+                        color: context.colorScheme.outline,
+                      ),
+                      title: Text(term),
+                      trailing: TextButton(
+                        onPressed: () => _unblock(term),
+                        child: Text("Unblock".tl),
+                      ),
+                    ),
+                ],
+              ],
             ),
     );
   }

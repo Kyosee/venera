@@ -587,20 +587,95 @@ class ImageTranslationService with ChangeNotifier {
       return false;
     }
     glossary[source] = translation;
+    // Adding a term by hand means the user wants it, so lift any prior block.
+    _allBlockedTerms[comicKey]?.remove(source);
+    _persistBlockedTerms();
     appdata.implicitData[_comicGlossaryKey] = all;
     appdata.writeImplicitData();
     notifyListeners();
     return true;
   }
 
-  /// Removes one glossary entry for a comic.
-  void removeGlossaryEntry(String cid, String sourceKey, String source) {
+  /// Removes one glossary entry for a comic. When [block] is true the source
+  /// term is also added to the comic's block list so it will not be re-learned
+  /// on later pages (a plain delete would just reappear next time the model
+  /// reports it).
+  void removeGlossaryEntry(
+    String cid,
+    String sourceKey,
+    String source, {
+    bool block = false,
+  }) {
     var comicKey = '$cid@$sourceKey';
     var glossary = _allGlossaries[comicKey];
-    if (glossary == null || glossary.remove(source) == null) return;
-    appdata.implicitData[_comicGlossaryKey] = _allGlossaries;
+    var removed = glossary != null && glossary.remove(source) != null;
+    if (removed) {
+      appdata.implicitData[_comicGlossaryKey] = _allGlossaries;
+    }
+    if (block) {
+      _addBlockedTerm(comicKey, source);
+    }
+    if (removed || block) {
+      appdata.writeImplicitData();
+      notifyListeners();
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Per-comic blocked terms
+  // ---------------------------------------------------------------------
+
+  /// Source terms the user banned from a comic's glossary. Kept separate from
+  /// the glossary so a deleted-and-blocked name is not silently re-learned the
+  /// next time the model reports it.
+  static const _blockedTermsKey = 'imageTranslationBlockedTerms';
+  Map<String, Set<String>>? _blockedTerms;
+
+  Map<String, Set<String>> get _allBlockedTerms {
+    if (_blockedTerms == null) {
+      var stored = appdata.implicitData[_blockedTermsKey];
+      _blockedTerms = <String, Set<String>>{};
+      if (stored is Map) {
+        stored.forEach((k, v) {
+          if (v is List) {
+            _blockedTerms![k.toString()] = v.map((e) => e.toString()).toSet();
+          }
+        });
+      }
+    }
+    return _blockedTerms!;
+  }
+
+  void _addBlockedTerm(String comicKey, String source) {
+    if (source.isEmpty) return;
+    var set = _allBlockedTerms.putIfAbsent(comicKey, () => <String>{});
+    set.add(source);
+    _persistBlockedTerms();
+  }
+
+  void _persistBlockedTerms() {
+    appdata.implicitData[_blockedTermsKey] = _allBlockedTerms.map(
+      (k, v) => MapEntry(k, v.toList()),
+    );
+  }
+
+  /// The blocked source terms of a comic, for the glossary editor.
+  List<String> blockedTermsOf(String cid, String sourceKey) {
+    return _allBlockedTerms['$cid@$sourceKey']?.toList() ?? const [];
+  }
+
+  /// Lifts the block on a term so it can be learned/added again.
+  void unblockTerm(String cid, String sourceKey, String source) {
+    var comicKey = '$cid@$sourceKey';
+    var set = _allBlockedTerms[comicKey];
+    if (set == null || !set.remove(source)) return;
+    _persistBlockedTerms();
     appdata.writeImplicitData();
     notifyListeners();
+  }
+
+  bool _isBlocked(String comicKey, String source) {
+    return _allBlockedTerms[comicKey]?.contains(source) ?? false;
   }
 
   void _mergeGlossary(String comicKey, Map<String, String> discovered) {
@@ -614,6 +689,9 @@ class ImageTranslationService with ChangeNotifier {
       // Validate here too: the parse-time filter is the primary guard, but a
       // future caller of _mergeGlossary must not be able to insert bloat.
       if (!LlmTranslator.isValidGlossaryTerm(source, translation)) return;
+      // Blocked terms must never be re-learned, even if the model keeps
+      // reporting them.
+      if (_isBlocked(comicKey, source)) return;
       if (!glossary.containsKey(source)) {
         glossary[source] = translation;
         changed = true;
