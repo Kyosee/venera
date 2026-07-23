@@ -336,6 +336,162 @@ class ImageTranslationService with ChangeNotifier {
     return _TranslateOutcome.translated;
   }
 
+  /// Translates a group of pages with ONE shared LLM request — used only by
+  /// the background pre-translation manager (the reader keeps its per-page
+  /// queue in [schedule]/[_process]). Pages already rendered, served from the
+  /// text cache, or found to hold no translatable text need no request; the
+  /// rest have their recognized bubbles concatenated into a single
+  /// [LlmTranslator.translateBatch] call, so the model sees cross-page context
+  /// and the comic spends one request per group instead of one per page.
+  ///
+  /// OCR, rendering and both cache levels stay per-page (only the translation
+  /// request is grouped), so a partially finished group resumes cleanly. If the
+  /// shared request fails, every page that needed it is reported failed for
+  /// this run (to retry later) while pages resolved from cache still succeed.
+  ///
+  /// Returns a success flag per input page, aligned with [pages]; it only
+  /// throws [PipelineCanceled] when [shouldCancel] fires between pages.
+  Future<List<bool>> translatePageGroup(
+    List<({String cacheKey, Uint8List imageBytes})> pages,
+    String comicKey, {
+    bool Function()? shouldCancel,
+  }) async {
+    var success = List.filled(pages.length, false);
+    if (pages.isEmpty) return success;
+    var pipeline = _pipeline ??= PageTranslationPipeline();
+    var sourceLang = _effectiveSourceFor(comicKey);
+
+    // Final regions per page once known; null = a fresh-OCR page still awaiting
+    // the LLM (composed in stage 2) or a page that failed and is skipped.
+    var regionsOf = List<List<TranslatedRegion>?>.filled(pages.length, null);
+    // Freshly OCR'd pages awaiting translation; null = resolved from cache,
+    // already rendered, or failed during OCR.
+    var pendingOcr = List<PageOcr?>.filled(pages.length, null);
+    // Text cache is (re)written only for freshly OCR'd pages, matching
+    // [_translateToCache]; cache-sourced regions are never rewritten.
+    var freshOcr = List<bool>.filled(pages.length, false);
+    // Pages needing no further work (rendered-cache hit or OCR failure).
+    var settled = List<bool>.filled(pages.length, false);
+
+    // Stage 1 — resolve each page as far as possible without the LLM.
+    for (var i = 0; i < pages.length; i++) {
+      if (shouldCancel?.call() ?? false) throw const PipelineCanceled();
+      var p = pages[i];
+      try {
+        if (await CacheManager().findCache(p.cacheKey) != null) {
+          _completed.add(p.cacheKey);
+          success[i] = true;
+          settled[i] = true;
+          continue;
+        }
+        var cached = await _loadTextCache(p.cacheKey);
+        if (cached != null) {
+          regionsOf[i] = cached;
+          continue;
+        }
+        pendingOcr[i] = await pipeline.ocrPage(
+          p.imageBytes,
+          sourceLang: sourceLang,
+          targetLang: targetLang,
+        );
+        freshOcr[i] = true;
+      } catch (e, s) {
+        Log.warning('Image Translation', 'Batch OCR failed: $e\n$s');
+        settled[i] = true; // failed; success[i] stays false
+      }
+    }
+
+    // Stage 2 — one request for the whole group's pending bubbles. Language
+    // votes and glossary updates fold across the group, then results are
+    // sliced back to each page.
+    var votes = <String, int>{};
+    for (var po in pendingOcr) {
+      po?.languageVotes.forEach((k, v) => votes[k] = (votes[k] ?? 0) + v);
+    }
+    _updateLanguageLock(comicKey, votes);
+
+    var texts = <String>[];
+    var sliceAt = List<int>.filled(pages.length, 0);
+    for (var i = 0; i < pages.length; i++) {
+      var po = pendingOcr[i];
+      if (po == null) continue;
+      sliceAt[i] = texts.length;
+      texts.addAll(po.pending.map((b) => b.text));
+    }
+
+    var batchOk = true;
+    var translated = const <String>[];
+    if (texts.isNotEmpty) {
+      if (shouldCancel?.call() ?? false) throw const PipelineCanceled();
+      try {
+        var result = await LlmTranslator.translateBatch(
+          texts,
+          targetLang,
+          glossary: _glossaryFor(comicKey),
+        );
+        _mergeGlossary(comicKey, result.glossary);
+        translated = result.texts;
+      } catch (e, s) {
+        Log.warning('Image Translation', 'Batch translate failed: $e\n$s');
+        batchOk = false;
+      }
+    }
+
+    for (var i = 0; i < pages.length; i++) {
+      var po = pendingOcr[i];
+      if (po == null) continue;
+      if (!batchOk && po.pending.isNotEmpty) {
+        settled[i] = true; // request failed; retry this page on a later run
+        continue;
+      }
+      var slice = po.pending.isEmpty || !batchOk
+          ? const <String>[]
+          : translated.sublist(
+              sliceAt[i].clamp(0, translated.length),
+              (sliceAt[i] + po.pending.length).clamp(0, translated.length),
+            );
+      regionsOf[i] = [
+        ...po.ready,
+        ...pipeline.regionsFromTranslation(po.pending, slice),
+      ];
+    }
+
+    // Stage 3 — render + cache each resolved page.
+    for (var i = 0; i < pages.length; i++) {
+      if (settled[i]) continue;
+      var regions = regionsOf[i];
+      if (regions == null) continue;
+      if (shouldCancel?.call() ?? false) throw const PipelineCanceled();
+      var p = pages[i];
+      try {
+        if (freshOcr[i]) {
+          await CacheManager().writeCache(
+            _textKeyOf(p.cacheKey),
+            utf8.encode(jsonEncode([for (var r in regions) r.toJson()])),
+            _textCacheDuration,
+          );
+        }
+        if (regions.isEmpty) {
+          _noContent.add(p.cacheKey);
+          success[i] = true; // no translatable text still counts as handled
+          continue;
+        }
+        var rendered = await pipeline.renderPage(p.imageBytes, regions);
+        await CacheManager().writeCache(
+          p.cacheKey,
+          rendered,
+          _imageCacheDuration,
+        );
+        _completed.add(p.cacheKey);
+        success[i] = true;
+      } catch (e, s) {
+        Log.warning('Image Translation', 'Batch render failed: $e\n$s');
+        // success[i] stays false
+      }
+    }
+    return success;
+  }
+
   /// Releases pipeline/model memory when no reader is scheduling and the
   /// pre-translation manager has finished a batch. Safe to call any time.
   void releaseIfIdle() {

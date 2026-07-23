@@ -7,6 +7,7 @@ import 'package:venera/foundation/background_keepalive.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/image_translation/translation_service.dart';
+import 'package:venera/foundation/image_translation/translation_types.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/network/images.dart';
@@ -347,9 +348,49 @@ class PreTranslationTaskManager with ChangeNotifier {
     // Resume across restart: pages already cached are skipped without any
     // network fetch or inference.
     var startIndex = chapter.done + chapter.failed;
-    for (var i = startIndex; i < pageKeys.length; i++) {
+    var groupSize = _batchPages;
+    for (var i = startIndex; i < pageKeys.length; i += groupSize) {
       if (_canceledIds.contains(task.id)) return;
       await _waitWhilePaused(task);
+      if (_canceledIds.contains(task.id)) return;
+      var end = (i + groupSize).clamp(0, pageKeys.length);
+      await _runGroup(task, chapter, pageKeys, i, end);
+      _refreshKeepAlive(task);
+      _saveActiveThrottled();
+      notifyListeners();
+    }
+  }
+
+  /// How many pages' bubbles to merge into one LLM request. 1 (default) keeps
+  /// the historic per-page path; larger gives the model cross-page context and
+  /// cuts request count. Clamped to a sane range so a bad stored value can't
+  /// break the loop or overflow the model's context.
+  int get _batchPages {
+    var raw = appdata.settings['imageTranslationPreBatchPages'];
+    var n = raw is int ? raw : int.tryParse('$raw') ?? 1;
+    return n.clamp(1, 20);
+  }
+
+  /// Translates pages [start, end) of a chapter. For a single page this is the
+  /// original per-page path (one page = one request); for several it fetches
+  /// each page's bytes then hands the group to [translatePageGroup] so their
+  /// bubbles share one request. Pages already rendered are skipped up front.
+  Future<void> _runGroup(
+    PreTranslationTask task,
+    PreTranslationChapter chapter,
+    List<String> pageKeys,
+    int start,
+    int end,
+  ) async {
+    var service = ImageTranslationService.instance;
+    var pending = <({String cacheKey, Uint8List imageBytes})>[];
+    var cached = 0;
+    var fetchFailed = 0;
+    for (var i = start; i < end; i++) {
+      // Cancel before the group is counted: leave the chapter counters at the
+      // group's start boundary so a resume redoes the whole group. Every page
+      // is idempotent (rendered ones skip via hasRenderedPage), so nothing is
+      // double-counted or skipped.
       if (_canceledIds.contains(task.id)) return;
       var imageKey = pageKeys[i];
       var cacheKey = ImageTranslationService.cacheKeyFor(
@@ -359,25 +400,44 @@ class PreTranslationTaskManager with ChangeNotifier {
         chapter.eid,
       );
       try {
-        var alreadyDone = await ImageTranslationService.instance
-            .hasRenderedPage(cacheKey);
-        if (!alreadyDone) {
-          var bytes = await _fetchPageBytes(task, chapter.eid, imageKey);
-          await ImageTranslationService.instance.translateOne(
-            cacheKey,
-            task.comicKey,
-            bytes,
-          );
+        if (await service.hasRenderedPage(cacheKey)) {
+          cached++;
+          continue;
         }
-        chapter.done++;
+        var bytes = await _fetchPageBytes(task, chapter.eid, imageKey);
+        pending.add((cacheKey: cacheKey, imageBytes: bytes));
       } catch (e, s) {
         Log.warning('Pre-translation', 'Page failed: $e\n$s');
-        chapter.failed++;
+        fetchFailed++;
       }
-      _refreshKeepAlive(task);
-      _saveActiveThrottled();
-      notifyListeners();
     }
+    var done = cached;
+    var failed = fetchFailed;
+    if (pending.isNotEmpty) {
+      try {
+        var results = await service.translatePageGroup(
+          pending,
+          task.comicKey,
+          shouldCancel: () => _canceledIds.contains(task.id),
+        );
+        for (var ok in results) {
+          ok ? done++ : failed++;
+        }
+      } on PipelineCanceled {
+        // Canceled mid-request: abandon this group's counts entirely. Pages
+        // rendered before the cancel are cached and get counted (once) when the
+        // group is redone on resume.
+        return;
+      } catch (e, s) {
+        Log.warning('Pre-translation', 'Group failed: $e\n$s');
+        failed += pending.length;
+      }
+    }
+    // Apply the whole contiguous group's counts at once, so done+failed always
+    // marks a contiguous processed prefix — the invariant the resume cursor
+    // (startIndex = done + failed) relies on.
+    chapter.done += done;
+    chapter.failed += failed;
   }
 
   /// Resolves the ordered image keys of a chapter, from the local library when

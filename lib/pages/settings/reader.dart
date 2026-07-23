@@ -998,6 +998,16 @@ class _ReaderSettingsState extends State<ReaderSettings> {
                 widget.onChanged?.call("imageTranslationTarget");
               },
             ),
+            _SliderSetting(
+              title: "Pages per pre-translation request".tl,
+              settingsIndex: "imageTranslationPreBatchPages",
+              interval: 1,
+              min: 1,
+              max: 20,
+              onChanged: () {
+                widget.onChanged?.call("imageTranslationPreBatchPages");
+              },
+            ),
             _CallbackSetting(
               title: "Translation models".tl,
               subtitle: TranslationModels.isReadyFor(

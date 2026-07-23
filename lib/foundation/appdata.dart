@@ -431,6 +431,10 @@ class Settings with ChangeNotifier {
     'imageTranslationLlmUrl': '',
     'imageTranslationLlmKey': '',
     'imageTranslationLlmModel': '',
+    // 预翻译时把多少页的气泡合并成一次 LLM 请求。1=逐页（默认）；更大值让模型
+    // 一次看到更多上下文，译名/语气更连贯并减少请求数，代价是首批结果更晚出、
+    // 单次请求更大。仅作用于后台预翻译，阅读器内即时翻译始终逐页。
+    'imageTranslationPreBatchPages': 1,
   };
 
   operator [](String key) {

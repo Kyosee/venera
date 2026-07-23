@@ -25,6 +25,26 @@ class PageAnalysis {
   final Map<String, String> newGlossary;
 }
 
+/// Result of the OCR-only stage ([PageTranslationPipeline.ocrPage]): everything
+/// known about a page before the LLM is called. Split out so a batch caller can
+/// OCR several pages, send their [pending] blocks in ONE translation request,
+/// then fold the results back per page. [ready] holds regions that need no LLM
+/// (an already-target-language block converted zh→zh-TW).
+class PageOcr {
+  PageOcr(this.ready, this.pending, this.languageVotes);
+
+  /// Regions already finalized without translation (e.g. zh→zh-TW conversion).
+  final List<TranslatedRegion> ready;
+
+  /// Blocks awaiting LLM translation, in order. Empty means the page needs no
+  /// request; combined with an empty [ready] it means nothing translatable.
+  final List<OcrBlock> pending;
+
+  final Map<String, int> languageVotes;
+
+  bool get isEmpty => ready.isEmpty && pending.isEmpty;
+}
+
 /// Per-page translation orchestrator. Runs on the main isolate but does no
 /// heavy work itself: image decoding goes through the engine, detection/OCR
 /// run inside the worker isolate, and translation is one request to the
@@ -40,6 +60,35 @@ class PageTranslationPipeline {
     required String targetLang,
     Map<String, String> glossary = const {},
   }) async {
+    var ocr = await ocrPage(
+      imageBytes,
+      sourceLang: sourceLang,
+      targetLang: targetLang,
+    );
+    if (ocr.pending.isEmpty) {
+      return PageAnalysis(ocr.ready, ocr.languageVotes, const {});
+    }
+    var result = await LlmTranslator.translateBatch(
+      ocr.pending.map((b) => b.text).toList(),
+      targetLang,
+      glossary: glossary,
+    );
+    var regions = [
+      ...ocr.ready,
+      ...regionsFromTranslation(ocr.pending, result.texts),
+    ];
+    return PageAnalysis(regions, ocr.languageVotes, result.glossary);
+  }
+
+  /// OCR-only stage: decode, recognize, vote on language and apply the
+  /// no-LLM zh→zh-TW conversion, returning the blocks still awaiting the model.
+  /// Shared by [analyzePage] (reader, one page) and the batch pre-translation
+  /// path (several pages, one request).
+  Future<PageOcr> ocrPage(
+    Uint8List imageBytes, {
+    required String sourceLang,
+    required String targetLang,
+  }) async {
     var image = await _decode(imageBytes);
     var paths = TranslationModels.workerPaths();
     var blocks = await TranslationWorker.instance.ocrPage(
@@ -53,11 +102,11 @@ class PageTranslationPipeline {
       votes[block.language] = (votes[block.language] ?? 0) + 1;
     }
     if (blocks.isEmpty) {
-      return PageAnalysis(const [], votes, const {});
+      return PageOcr(const [], const [], votes);
     }
 
     var targetBase = targetLang == 'zh-TW' ? 'zh' : targetLang;
-    var regions = <TranslatedRegion>[];
+    var ready = <TranslatedRegion>[];
     var pending = <OcrBlock>[];
     for (var block in blocks) {
       if (block.language == targetBase) {
@@ -66,29 +115,30 @@ class PageTranslationPipeline {
         if (targetLang == 'zh-TW' && block.language == 'zh') {
           var converted = OpenCC.simplifiedToTraditional(block.text);
           if (converted != block.text) {
-            regions.add(_region(block, converted));
+            ready.add(_region(block, converted));
           }
         }
         continue;
       }
       pending.add(block);
     }
+    return PageOcr(ready, pending, votes);
+  }
 
-    var newGlossary = <String, String>{};
-    if (pending.isNotEmpty) {
-      var result = await LlmTranslator.translateBatch(
-        pending.map((b) => b.text).toList(),
-        targetLang,
-        glossary: glossary,
-      );
-      newGlossary = result.glossary;
-      for (var i = 0; i < pending.length; i++) {
-        var text = result.texts[i].trim();
-        if (text.isEmpty || text == pending[i].text) continue;
-        regions.add(_region(pending[i], text));
-      }
+  /// Turns [pending] blocks and their aligned [texts] into render-ready
+  /// regions, dropping empties and no-ops. [texts] must align with [pending]
+  /// (extra entries are ignored, missing ones treated as empty).
+  List<TranslatedRegion> regionsFromTranslation(
+    List<OcrBlock> pending,
+    List<String> texts,
+  ) {
+    var regions = <TranslatedRegion>[];
+    for (var i = 0; i < pending.length; i++) {
+      var text = (i < texts.length ? texts[i] : '').trim();
+      if (text.isEmpty || text == pending[i].text) continue;
+      regions.add(_region(pending[i], text));
     }
-    return PageAnalysis(regions, votes, newGlossary);
+    return regions;
   }
 
   /// Renders [regions] over the page. Split from [analyzePage] so a page
