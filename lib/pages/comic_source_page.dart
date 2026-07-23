@@ -311,14 +311,57 @@ class ComicSourcePage extends StatelessWidget {
     return pending.length;
   }
 
-  /// [compareSemVer] guarded against malformed version strings. A bad version
-  /// in any catalog must not abort the whole merged check.
+  /// True if [candidate] is a strictly newer version than [current].
+  ///
+  /// A strict superset of [compareSemVer]: it keeps that comparison (including
+  /// its "hotfix" 4th-segment semantics) and only ADDS detections it misses —
+  /// it never turns a detected update into a hidden one. [compareSemVer] only
+  /// understands exactly three bare numeric parts, so it silently reported "not
+  /// newer" for a real update declared with a leading "v", fewer than three
+  /// parts, or a numeric 4th revision (e.g. "1.2.3.1" > "1.2.3"). That hid the
+  /// update from the batch check even though a manual re-download installed it
+  /// fine (#147). Erring toward "an update exists" is safe: applying one just
+  /// re-downloads the script, so a false positive re-installs the same version
+  /// harmlessly, whereas a false negative loses the update entirely.
   static bool _isNewer(String candidate, String current) {
     try {
-      return compareSemVer(candidate, current);
+      if (compareSemVer(candidate, current)) {
+        return true;
+      }
     } catch (_) {
-      return false;
+      // Malformed for the strict parser; fall through to the tolerant compare.
     }
+    return _tolerantVersionCompare(candidate, current) > 0;
+  }
+
+  /// Numeric-segment version comparison that tolerates a leading "v", differing
+  /// segment counts, and non-numeric segments. Returns >0 if [a] > [b], <0 if
+  /// [a] < [b], 0 if equal. Non-numeric segments are treated as 0 so a
+  /// pre-release suffix ("-beta") never falsely reads as newer.
+  static int _tolerantVersionCompare(String a, String b) {
+    final pa = _versionSegments(a);
+    final pb = _versionSegments(b);
+    final len = pa.length > pb.length ? pa.length : pb.length;
+    for (var i = 0; i < len; i++) {
+      final x = i < pa.length ? pa[i] : 0;
+      final y = i < pb.length ? pb[i] : 0;
+      if (x != y) {
+        return x > y ? 1 : -1;
+      }
+    }
+    return 0;
+  }
+
+  static List<int> _versionSegments(String v) {
+    v = v.trim();
+    if (v.startsWith('v') || v.startsWith('V')) {
+      v = v.substring(1);
+    }
+    return v
+        .split(RegExp(r'[.\-+]'))
+        .where((e) => e.isNotEmpty)
+        .map((e) => int.tryParse(e) ?? 0)
+        .toList();
   }
 
   @override
