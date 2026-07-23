@@ -14,6 +14,7 @@ import 'package:venera/utils/translations.dart';
 import '../foundation/global_state.dart';
 import 'package:venera/foundation/history.dart';
 import 'package:venera/foundation/log.dart';
+import 'package:venera/pages/tasks_page.dart';
 import 'package:venera/utils/ext.dart';
 
 /// Above this row count, the followed folder is loaded in a background isolate
@@ -92,47 +93,55 @@ class _FollowUpdatesWidgetState
           ),
           borderRadius: BorderRadius.circular(8),
         ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: () {
-            context.to(() => FollowUpdatesPage());
-          },
-          child: SizedBox(
-            height: 56,
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Follow Updates'.tl,
-                    style: ts.s18,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () {
+                context.to(() => FollowUpdatesPage());
+              },
+              child: SizedBox(
+                height: 56,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Follow Updates'.tl,
+                        style: ts.s18,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    if (updatesText != null)
+                      Container(
+                        constraints: const BoxConstraints(maxWidth: 180),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.primaryContainer,
+                        ),
+                        child: Text(
+                          updatesText,
+                          style: ts.s16,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    const SizedBox(width: 8),
+                    const Icon(Icons.arrow_right),
+                  ],
                 ),
-                const SizedBox(width: 12),
-                if (updatesText != null)
-                  Container(
-                    constraints: const BoxConstraints(maxWidth: 180),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
-                      color: Theme.of(context).colorScheme.primaryContainer,
-                    ),
-                    child: Text(
-                      updatesText,
-                      style: ts.s16,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                const SizedBox(width: 8),
-                const Icon(Icons.arrow_right),
-              ],
+              ).paddingHorizontal(16),
             ),
-          ).paddingHorizontal(16),
+            const FollowUpdateProgressBar(embedded: true),
+          ],
         ),
       ),
     );
@@ -140,6 +149,143 @@ class _FollowUpdatesWidgetState
 
   @override
   Object? get key => 'FollowUpdatesWidget';
+}
+
+/// A thin progress bar shown while a follow-update check is running. It listens
+/// to [FollowUpdateTaskManager] and renders nothing when no task is active.
+/// Tapping it opens the tasks page with the running task's card expanded.
+///
+/// When [embedded] is true it drops its own border/margin so it can sit inside
+/// an existing panel (e.g. the home follow-updates card).
+class FollowUpdateProgressBar extends StatefulWidget {
+  const FollowUpdateProgressBar({super.key, this.embedded = false});
+
+  final bool embedded;
+
+  @override
+  State<FollowUpdateProgressBar> createState() =>
+      _FollowUpdateProgressBarState();
+}
+
+class _FollowUpdateProgressBarState extends State<FollowUpdateProgressBar> {
+  @override
+  void initState() {
+    super.initState();
+    FollowUpdateTaskManager.instance.addListener(_onChanged);
+  }
+
+  @override
+  void dispose() {
+    FollowUpdateTaskManager.instance.removeListener(_onChanged);
+    super.dispose();
+  }
+
+  void _onChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  FollowUpdateTask? get _runningTask => FollowUpdateTaskManager
+      .instance
+      .currentTasks
+      .where((t) => t.isRunning)
+      .firstOrNull;
+
+  @override
+  Widget build(BuildContext context) {
+    final task = _runningTask;
+    if (task == null) {
+      return const SizedBox.shrink();
+    }
+    final indeterminate = task.total == 0;
+    final percent = indeterminate
+        ? null
+        : "${(task.progress * 100).clamp(0, 100).toStringAsFixed(0)}%";
+    final inner = InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () {
+        context.to(() => TasksPage(initialExpandedTaskId: task.id));
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    "Checking for updates...".tl,
+                    style: ts.s14,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  "@checked/@total".tlParams({
+                    'checked': task.checked,
+                    'total': task.total,
+                  }),
+                  style: ts.s12.withColor(
+                    Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                if (percent != null) ...[
+                  const SizedBox(width: 8),
+                  Text(percent, style: ts.s12),
+                ],
+                const Icon(Icons.chevron_right, size: 18),
+              ],
+            ),
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: indeterminate ? null : task.progress,
+                minHeight: 4,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    // Embedded inside a host panel (home widget): render without its own
+    // border/margin so it reads as one panel with the follow-updates entry.
+    // A hairline divider separates it from the entry above it.
+    if (widget.embedded) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Divider(
+            height: 0.6,
+            thickness: 0.6,
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
+          inner,
+        ],
+      );
+    }
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      decoration: BoxDecoration(
+        border: Border.all(
+          color: Theme.of(context).colorScheme.outlineVariant,
+          width: 0.6,
+        ),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: inner,
+    );
+  }
 }
 
 class FollowUpdatesPage extends StatefulWidget {
@@ -347,24 +493,30 @@ class _FollowUpdatesPageState extends AutomaticGlobalState<FollowUpdatesPage> {
         ),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
-          children: [
-            Icon(Icons.stars_outlined),
-            const SizedBox(width: 12),
-            Expanded(child: Text(folder!, style: ts.s14)),
-            TextButton(
-              onPressed: showSelector,
-              child: Text("Change Folder".tl),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                Icon(Icons.stars_outlined),
+                const SizedBox(width: 12),
+                Expanded(child: Text(folder!, style: ts.s14)),
+                TextButton(
+                  onPressed: showSelector,
+                  child: Text("Change Folder".tl),
+                ),
+                const SizedBox(width: 8),
+                FilledButton.tonal(
+                  onPressed: checkNow,
+                  child: Text("Check Now".tl),
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            FilledButton.tonal(
-              onPressed: checkNow,
-              child: Text("Check Now".tl),
-            ),
-          ],
-        ),
+          ),
+          const FollowUpdateProgressBar(embedded: true),
+        ],
       ),
     );
   }

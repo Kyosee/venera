@@ -17,7 +17,11 @@ import 'package:venera/utils/io.dart';
 import 'package:venera/utils/translations.dart';
 
 class TasksPage extends StatefulWidget {
-  const TasksPage({super.key});
+  const TasksPage({super.key, this.initialExpandedTaskId});
+
+  /// When set, the matching running task card is initially expanded (used when
+  /// arriving from the follow-update progress bar).
+  final String? initialExpandedTaskId;
 
   @override
   State<TasksPage> createState() => _TasksPageState();
@@ -220,7 +224,10 @@ class _TasksPageState extends State<TasksPage> with SingleTickerProviderStateMix
         (task) => buildDataSyncTaskCard(task, expanded: false),
       ),
       ...followUpdateManager.currentTasks.map(
-        (task) => buildFollowUpdateTaskCard(task, expanded: false),
+        (task) => buildFollowUpdateTaskCard(
+          task,
+          expanded: task.id == widget.initialExpandedTaskId,
+        ),
       ),
       ...historyRefreshManager.currentTasks.map(
         (task) => buildHistoryRefreshTaskCard(task, expanded: false),
