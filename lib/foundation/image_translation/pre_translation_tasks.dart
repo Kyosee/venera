@@ -11,7 +11,7 @@ import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/network/images.dart';
 
-enum PreTranslationTaskStatus { running, completed, canceled, failed }
+enum PreTranslationTaskStatus { running, paused, completed, canceled, failed }
 
 /// One chapter queued for background pre-translation.
 class PreTranslationChapter {
@@ -204,6 +204,28 @@ class PreTranslationTaskManager with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Pauses a running pre-translation job. The worker loop checks this state
+  /// between pages and waits until [resume] is called or the job is canceled.
+  void pause(String id) {
+    var task = currentTasks.where((t) => t.id == id).firstOrNull;
+    if (task == null || !task.isRunning) return;
+    task.status = PreTranslationTaskStatus.paused;
+    _saveActive();
+    notifyListeners();
+  }
+
+  /// Resumes a paused pre-translation job.
+  void resume(String id) {
+    var task = currentTasks.where((t) => t.id == id).firstOrNull;
+    if (task == null || task.status != PreTranslationTaskStatus.paused) return;
+    task.status = PreTranslationTaskStatus.running;
+    _saveActive();
+    notifyListeners();
+    if (!_runningIds.contains(id)) {
+      unawaited(_run(task));
+    }
+  }
+
   void _refreshKeepAlive(PreTranslationTask task) {
     BackgroundKeepAlive.instance.update(
       BackgroundKeepAlive.tagPreTranslate,
@@ -223,6 +245,8 @@ class PreTranslationTaskManager with ChangeNotifier {
     _refreshKeepAlive(task);
     try {
       for (var chapter in task.chapters) {
+        if (_canceledIds.contains(task.id)) break;
+        await _waitWhilePaused(task);
         if (_canceledIds.contains(task.id)) break;
         await _runChapter(task, chapter);
       }
@@ -248,6 +272,17 @@ class PreTranslationTaskManager with ChangeNotifier {
     }
   }
 
+  /// Suspends the loop while [task] is paused, returning as soon as it resumes
+  /// or gets canceled. This keeps the running isolate alive without doing work.
+  Future<void> _waitWhilePaused(PreTranslationTask task) async {
+    while (task.status == PreTranslationTaskStatus.paused) {
+      if (_canceledIds.contains(task.id)) return;
+      // Poll every second. Resume() flips the status and the next iteration
+      // exits immediately.
+      await Future.delayed(const Duration(seconds: 1));
+    }
+  }
+
   Future<void> _runChapter(
     PreTranslationTask task,
     PreTranslationChapter chapter,
@@ -269,6 +304,8 @@ class PreTranslationTaskManager with ChangeNotifier {
     // network fetch or inference.
     var startIndex = chapter.done + chapter.failed;
     for (var i = startIndex; i < pageKeys.length; i++) {
+      if (_canceledIds.contains(task.id)) return;
+      await _waitWhilePaused(task);
       if (_canceledIds.contains(task.id)) return;
       var imageKey = pageKeys[i];
       var cacheKey = ImageTranslationService.cacheKeyFor(

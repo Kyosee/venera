@@ -240,6 +240,9 @@ class _TasksPageState extends State<TasksPage> with SingleTickerProviderStateMix
       ...exportManager.currentTasks.map(
         (task) => buildExportTaskCard(task, expanded: false),
       ),
+      ...preTranslationManager.currentTasks.map(
+        (task) => buildPreTranslateTaskCard(task, expanded: false),
+      ),
       for (var component in TranslationModels.all)
         if (modelStore.stateOf(component).downloading)
           buildModelDownloadCard(component),
@@ -343,6 +346,12 @@ class _TasksPageState extends State<TasksPage> with SingleTickerProviderStateMix
         (task) => MapEntry(
           task.finishedAt ?? task.createdAt,
           buildExportTaskCard(task, expanded: false),
+        ),
+      ),
+      ...preTranslationManager.historyTasks.map(
+        (task) => MapEntry(
+          task.finishedAt ?? task.createdAt,
+          buildPreTranslateTaskCard(task, expanded: false),
         ),
       ),
     ];
@@ -540,9 +549,36 @@ class _TasksPageState extends State<TasksPage> with SingleTickerProviderStateMix
   String preTranslateStatusText(PreTranslationTask task) {
     return switch (task.status) {
       PreTranslationTaskStatus.running => "Running".tl,
+      PreTranslationTaskStatus.paused => "Paused".tl,
       PreTranslationTaskStatus.completed => "Completed".tl,
       PreTranslationTaskStatus.canceled => "Canceled".tl,
       PreTranslationTaskStatus.failed => "Failed".tl,
+    };
+  }
+
+  Widget _buildPreTranslateTrailing(PreTranslationTask task) {
+    return switch (task.status) {
+      PreTranslationTaskStatus.running => TextButton(
+          onPressed: () => preTranslationManager.pause(task.id),
+          child: Text("Pause".tl),
+        ),
+      PreTranslationTaskStatus.paused => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextButton(
+              onPressed: () => preTranslationManager.resume(task.id),
+              child: Text("Resume".tl),
+            ),
+            TextButton(
+              onPressed: () => preTranslationManager.cancel(task.id),
+              child: Text("Cancel".tl),
+            ),
+          ],
+        ),
+      _ => TextButton(
+          onPressed: () => preTranslationManager.cancel(task.id),
+          child: Text("Cancel".tl),
+        ),
     };
   }
 
@@ -578,12 +614,7 @@ class _TasksPageState extends State<TasksPage> with SingleTickerProviderStateMix
           task.createdAt,
           task.finishedAt,
         ),
-        trailing: task.isRunning
-            ? TextButton(
-                onPressed: () => preTranslateManager.cancel(task.id),
-                child: Text("Cancel".tl),
-              )
-            : null,
+        trailing: _buildPreTranslateTrailing(task),
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
