@@ -87,6 +87,19 @@ void _drawRegion(ui.Canvas canvas, TranslatedRegion region) {
     ui.Paint()..color = background,
   );
 
+  // A tall, narrow bubble holding CJK text reads better set vertically
+  // (right-to-left columns), the way the original manga lettering runs;
+  // horizontal wrapping in such a box cramps every line to a few characters.
+  if (_prefersVertical(region.text, rect)) {
+    _drawVerticalText(
+      canvas,
+      region.text,
+      ui.Color(region.textColor),
+      rect,
+    );
+    return;
+  }
+
   var painter = _fitText(
     region.text,
     ui.Color(region.textColor),
@@ -99,6 +112,107 @@ void _drawRegion(ui.Canvas canvas, TranslatedRegion region) {
   );
   painter.paint(canvas, offset);
   painter.dispose();
+}
+
+/// Whether [text] should be laid out vertically inside [rect]: the region is
+/// clearly taller than wide and the text is dominated by CJK characters (the
+/// only scripts that read naturally in vertical columns).
+bool _prefersVertical(String text, ui.Rect rect) {
+  if (rect.height < rect.width * 1.6) return false;
+  var cjk = 0, total = 0;
+  for (var r in text.runes) {
+    if (r <= 0x20) continue;
+    total++;
+    if ((r >= 0x4E00 && r <= 0x9FFF) ||
+        (r >= 0x3400 && r <= 0x4DBF) ||
+        (r >= 0x3040 && r <= 0x30FF) ||
+        (r >= 0xAC00 && r <= 0xD7AF)) {
+      cjk++;
+    }
+  }
+  if (total < 2) return false;
+  return cjk / total >= 0.7;
+}
+
+/// Draws [text] as vertical right-to-left columns fitted to [rect]. Punctuation
+/// keeps its glyph; the layout simply stacks one character per line down a
+/// column, wrapping to a new column to the left when the current one is full.
+void _drawVerticalText(
+  ui.Canvas canvas,
+  String text,
+  ui.Color color,
+  ui.Rect rect,
+) {
+  var chars = text.runes
+      .map((r) => String.fromCharCode(r))
+      .where((c) => c.trim().isNotEmpty)
+      .toList();
+  if (chars.isEmpty) return;
+
+  var maxWidth = rect.width - 4;
+  var maxHeight = rect.height - 4;
+
+  TextPainter glyph(String c, double fontSize) {
+    var painter = TextPainter(
+      text: TextSpan(
+        text: c,
+        style: TextStyle(
+          color: color,
+          fontSize: fontSize,
+          height: 1.0,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    );
+    painter.layout();
+    return painter;
+  }
+
+  // Shrink the glyph size until every column fits the height and the required
+  // column count fits the width.
+  var upper = math.max(10.0, math.min(42.0, maxWidth * 0.9));
+  const lower = 7.0;
+  var size = upper;
+  var chosen = lower;
+  var perColumn = 1;
+  var columns = chars.length;
+  while (size >= lower) {
+    var cellH = size * 1.15;
+    var cellW = size * 1.15;
+    perColumn = math.max(1, (maxHeight / cellH).floor());
+    columns = (chars.length / perColumn).ceil();
+    if (columns * cellW <= maxWidth) {
+      chosen = size;
+      break;
+    }
+    chosen = size;
+    size -= 1.5;
+  }
+
+  var cellH = chosen * 1.15;
+  var cellW = chosen * 1.15;
+  perColumn = math.max(1, (maxHeight / cellH).floor());
+  columns = (chars.length / perColumn).ceil();
+
+  var blockW = columns * cellW;
+  var blockH = math.min(maxHeight, perColumn * cellH);
+  // Center the block; columns run right-to-left.
+  var startRight = rect.left + (rect.width + blockW) / 2;
+  var top = rect.top + (rect.height - blockH) / 2;
+
+  for (var col = 0; col < columns; col++) {
+    var colCenterX = startRight - (col + 0.5) * cellW;
+    for (var row = 0; row < perColumn; row++) {
+      var index = col * perColumn + row;
+      if (index >= chars.length) break;
+      var painter = glyph(chars[index], chosen);
+      var dx = colCenterX - painter.width / 2;
+      var dy = top + row * cellH + (cellH - painter.height) / 2;
+      painter.paint(canvas, ui.Offset(dx, dy));
+      painter.dispose();
+    }
+  }
 }
 
 /// Finds the largest font size whose wrapped layout fits the region.
