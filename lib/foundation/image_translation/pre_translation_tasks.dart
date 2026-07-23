@@ -189,6 +189,37 @@ class PreTranslationTaskManager with ChangeNotifier {
         .firstOrNull;
   }
 
+  /// Best-known progress of a chapter for a comic, looking first at a running
+  /// job and then at the most recent finished job. Lets the chapter picker show
+  /// a "translated" / progress marker even after the app restarts or the task
+  /// moved to history, so already-done chapters are obvious and not re-queued
+  /// blindly.
+  PreTranslationChapter? chapterProgressFor(
+    String cid,
+    String sourceKey,
+    String eid,
+  ) {
+    var comicKey = '$cid@$sourceKey';
+    // A running/paused job shows live progress for the chapter.
+    for (var task in currentTasks) {
+      if (task.comicKey != comicKey) continue;
+      var chapter = task.chapters.where((c) => c.eid == eid).firstOrNull;
+      if (chapter != null && chapter.total > 0) return chapter;
+    }
+    // Otherwise only report a finished chapter (all pages accounted for) so a
+    // canceled/failed run does not masquerade as in-progress after restart.
+    for (var task in historyTasks) {
+      if (task.comicKey != comicKey) continue;
+      var chapter = task.chapters.where((c) => c.eid == eid).firstOrNull;
+      if (chapter != null &&
+          chapter.total > 0 &&
+          chapter.done + chapter.failed >= chapter.total) {
+        return chapter;
+      }
+    }
+    return null;
+  }
+
   void cancel(String id) {
     _canceledIds.add(id);
     var task = currentTasks.where((t) => t.id == id).firstOrNull;

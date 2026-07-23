@@ -1603,13 +1603,12 @@ class _SelectPreTranslateChapterState
   }
 
   PreTranslationChapter? _chapterProgress(int index) {
-    var task = PreTranslationTaskManager.instance.runningTaskFor(
+    var eid = widget.entries[index].$1;
+    return PreTranslationTaskManager.instance.chapterProgressFor(
       widget.cid,
       widget.sourceKey,
+      eid,
     );
-    if (task == null) return null;
-    var eid = widget.entries[index].$1;
-    return task.chapters.where((c) => c.eid == eid).firstOrNull;
   }
 
   @override
@@ -1631,25 +1630,44 @@ class _SelectPreTranslateChapterState
                 var title = widget.entries[i].$2;
                 Widget? progress;
                 if (chapter != null && chapter.total > 0) {
-                  var pct = ((chapter.done + chapter.failed) / chapter.total)
-                      .clamp(0.0, 1.0);
-                  progress = SizedBox(
-                    width: 120,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
+                  var isCompleted = chapter.done + chapter.failed >= chapter.total;
+                  if (isCompleted) {
+                    progress = Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          '${chapter.done}/${chapter.total}',
-                          style: ts.s12.withColor(
-                            context.colorScheme.onSurfaceVariant,
-                          ),
+                        Icon(
+                          Icons.check_circle_outline,
+                          size: 16,
+                          color: context.colorScheme.primary,
                         ),
-                        const SizedBox(height: 2),
-                        LinearProgressIndicator(value: pct),
+                        const SizedBox(width: 4),
+                        Text(
+                          "Translated".tl,
+                          style: ts.s12.withColor(context.colorScheme.primary),
+                        ),
                       ],
-                    ),
-                  );
+                    );
+                  } else {
+                    var pct = ((chapter.done + chapter.failed) / chapter.total)
+                        .clamp(0.0, 1.0);
+                    progress = SizedBox(
+                      width: 120,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '${chapter.done}/${chapter.total}',
+                            style: ts.s12.withColor(
+                              context.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          LinearProgressIndicator(value: pct),
+                        ],
+                      ),
+                    );
+                  }
                 } else if (chapter != null) {
                   progress = SizedBox(
                     width: 120,
