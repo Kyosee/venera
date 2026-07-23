@@ -1100,11 +1100,12 @@
     "Failed: @count": "失败：@count",
     "Pages: @done/@total": "页数：@done/@total",
     "Re-translate": "重新翻译",
+    "Re-translate selected": "重新翻译所选",
     "Re-translate this comic?": "重新翻译这部漫画？",
-    "This clears all cached translations and the learned glossary for this comic, then translates again.": "将清除该漫画的所有翻译缓存及已学习的术语表，然后重新翻译。",
-    "Translation cache cleared": "已清除翻译缓存",
-    "Clear translation cache": "清除翻译缓存",
-    "Removes all cached translated pages. Language and glossary learned per comic are kept.": "清除所有已缓存的翻译页面。各漫画已学习的语言与术语表会保留。"
+    "This clears all translations and the learned glossary for this comic, then translates again.": "将清除该漫画的所有翻译及已学习的术语表，然后重新翻译。",
+    "Select chapters to re-translate first": "请先勾选要重新翻译的章节",
+    "Re-translate selected chapters?": "重新翻译所选章节？",
+    "This clears the translations of the @count selected chapters, then translates them again.": "将清除所选 @count 个章节的翻译，然后重新翻译。"
   },
   "zh_TW": {
     "Translation engine": "翻譯引擎",
@@ -2207,10 +2208,11 @@
     "Failed: @count": "失敗：@count",
     "Pages: @done/@total": "頁數：@done/@total",
     "Re-translate": "重新翻譯",
+    "Re-translate selected": "重新翻譯所選",
     "Re-translate this comic?": "重新翻譯這部漫畫？",
-    "This clears all cached translations and the learned glossary for this comic, then translates again.": "將清除該漫畫的所有翻譯快取及已學習的術語表，然後重新翻譯。",
-    "Translation cache cleared": "已清除翻譯快取",
-    "Clear translation cache": "清除翻譯快取",
-    "Removes all cached translated pages. Language and glossary learned per comic are kept.": "清除所有已快取的翻譯頁面。各漫畫已學習的語言與術語表會保留。"
+    "This clears all translations and the learned glossary for this comic, then translates again.": "將清除該漫畫的所有翻譯及已學習的術語表，然後重新翻譯。",
+    "Select chapters to re-translate first": "請先勾選要重新翻譯的章節",
+    "Re-translate selected chapters?": "重新翻譯所選章節？",
+    "This clears the translations of the @count selected chapters, then translates them again.": "將清除所選 @count 個章節的翻譯，然後重新翻譯。"
   }
 }

@@ -1028,6 +1028,9 @@ class _ReaderSettingsState extends State<ReaderSettings> {
               callback: () async {
                 var removed = await ImageTranslationService.instance
                     .clearAllTranslationCache();
+                // Also drop the pre-translation status the chapter picker reads
+                // from, so cleared results don't leave stale "translated" ticks.
+                PreTranslationTaskManager.instance.clearAllChapterStatus();
                 if (context.mounted) {
                   context.showMessage(
                     message: "Translation results cleared".tl,

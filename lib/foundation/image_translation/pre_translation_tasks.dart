@@ -90,11 +90,22 @@ class PreTranslationTask {
   int get done => chapters.fold(0, (sum, c) => sum + c.done);
   int get failed => chapters.fold(0, (sum, c) => sum + c.failed);
 
-  /// Progress is only meaningful once at least one chapter's page count is
-  /// known; before that it reads as indeterminate (0).
+  /// Overall progress across the whole job, weighted by chapters rather than
+  /// pages. Each chapter contributes an equal 1/N slice; a chapter whose page
+  /// count is not resolved yet (total == 0) counts as 0% until it starts, and a
+  /// fully processed chapter counts as 100%. This keeps the percentage
+  /// representative of the entire comic (all selected chapters), and monotonic,
+  /// instead of tracking only the page counts of chapters that have already
+  /// begun — which made the earlier page-based ratio jump around as new
+  /// chapters resolved their totals.
   double get progress {
-    var t = total;
-    return t == 0 ? 0 : (done + failed) / t;
+    if (chapters.isEmpty) return 0;
+    var sum = 0.0;
+    for (var c in chapters) {
+      if (c.total <= 0) continue;
+      sum += ((c.done + c.failed) / c.total).clamp(0.0, 1.0);
+    }
+    return sum / chapters.length;
   }
 
   Map<String, dynamic> toJson() => {
@@ -583,6 +594,68 @@ class PreTranslationTaskManager with ChangeNotifier {
 
   void clearHistory() {
     historyTasks.clear();
+    _saveHistory();
+    notifyListeners();
+  }
+
+  /// Resets the pre-translation status the chapter picker reads from, so that
+  /// after the user clears all translation results the "translated" ticks and
+  /// progress markers go away too. Finished/canceled/failed jobs (history) are
+  /// dropped entirely; a still-running job keeps running but its counters are
+  /// zeroed so its chapters re-count from scratch against the now-empty cache.
+  void clearAllChapterStatus() {
+    historyTasks.clear();
+    for (var task in currentTasks) {
+      for (var c in task.chapters) {
+        c.done = 0;
+        c.failed = 0;
+        c.total = 0;
+      }
+    }
+    _saveActive();
+    _saveHistory();
+    notifyListeners();
+  }
+
+  /// Resets the recorded pre-translation status of specific chapters of a comic
+  /// (used by the picker's selection-based re-translate). Zeroes their counters
+  /// in both history and any running job so the picker stops showing them as
+  /// "translated" and a fresh run re-counts them from scratch against the now
+  /// cleared cache.
+  void resetChapterStatus(String cid, String sourceKey, Set<String> eids) {
+    if (eids.isEmpty) return;
+    var comicKey = '$cid@$sourceKey';
+    for (var task in [...historyTasks, ...currentTasks]) {
+      if (task.comicKey != comicKey) continue;
+      for (var c in task.chapters) {
+        if (eids.contains(c.eid)) {
+          c.done = 0;
+          c.failed = 0;
+          c.total = 0;
+        }
+      }
+    }
+    _saveActive();
+    _saveHistory();
+    notifyListeners();
+  }
+
+  /// Resets the recorded pre-translation status of every chapter of one comic
+  /// (used by the detail page's whole-comic re-translate). Drops that comic's
+  /// finished history entries and zeroes any running job's counters so the
+  /// picker's "translated" ticks for it clear, leaving other comics untouched.
+  void resetComicStatus(String cid, String sourceKey) {
+    var comicKey = '$cid@$sourceKey';
+    historyTasks.removeWhere((t) => t.comicKey == comicKey);
+    for (var task in currentTasks) {
+      if (task.comicKey != comicKey) continue;
+      for (var c in task.chapters) {
+        c.done = 0;
+        c.failed = 0;
+        c.total = 0;
+      }
+    }
+    _saveActive();
     _saveHistory();
     notifyListeners();
   }

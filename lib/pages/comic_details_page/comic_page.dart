@@ -1624,22 +1624,44 @@ class _SelectPreTranslateChapterState
     );
   }
 
-  /// Clears this comic's cached translations and learned glossary, then starts
-  /// fresh — the same "re-translate" action as the detail page, for when
-  /// cached results came out wrong.
+  /// Resets the translations of the chapters the user checked and translates
+  /// them again. Only the selected chapters' stored text + rendered pages are
+  /// dropped (the learned glossary is kept, so other chapters stay consistent),
+  /// their pre-translation status is cleared so the ticks go away, and a fresh
+  /// job is queued for exactly those chapters. Nothing checked = a prompt, since
+  /// re-translation is intentionally opt-in per chapter.
   void _reTranslate() {
+    if (selected.isEmpty) {
+      App.rootContext.showMessage(
+        message: "Select chapters to re-translate first".tl,
+      );
+      return;
+    }
+    var picked = List<int>.from(selected)..sort();
     showConfirmDialog(
       context: context,
-      title: "Re-translate this comic?".tl,
+      title: "Re-translate selected chapters?".tl,
       content:
-          "This clears all cached translations and the learned glossary for this comic, then translates again."
-              .tl,
+          "This clears the translations of the @count selected chapters, then translates them again."
+              .tlParams({'count': picked.length}),
       onConfirm: () async {
-        await ImageTranslationService.instance.retranslate(
-          widget.cid,
-          widget.sourceKey,
-        );
-        App.rootContext.showMessage(message: "Translation cache cleared".tl);
+        var service = ImageTranslationService.instance;
+        var eids = <String>{};
+        for (var i in picked) {
+          var eid = widget.entries[i].$1;
+          eids.add(eid);
+          await service.retranslate(
+            widget.cid,
+            widget.sourceKey,
+            eid: eid,
+          );
+        }
+        PreTranslationTaskManager.instance
+            .resetChapterStatus(widget.cid, widget.sourceKey, eids);
+        widget.finishSelect(picked);
+        if (mounted) {
+          context.pop();
+        }
       },
     );
   }
@@ -1756,7 +1778,7 @@ class _SelectPreTranslateChapterState
               ),
               MenuEntry(
                 icon: Icons.refresh_rounded,
-                text: "Re-translate".tl,
+                text: "Re-translate selected".tl,
                 onClick: _reTranslate,
               ),
             ],
@@ -1810,10 +1832,15 @@ class _SelectPreTranslateChapterState
                 Expanded(
                   child: TextButton(
                     onPressed: () {
-                      widget.finishSelect(
-                        [for (int i = 0; i < widget.entries.length; i++) i],
-                      );
-                      context.pop();
+                      setState(() {
+                        var all = [
+                          for (int i = 0; i < widget.entries.length; i++) i,
+                        ];
+                        // Toggle: a full selection clears, otherwise select all.
+                        // Ticking boxes never starts translation — only "Start"
+                        // does.
+                        selected = selected.length == all.length ? [] : all;
+                      });
                     },
                     child: Text("Select All".tl),
                   ),

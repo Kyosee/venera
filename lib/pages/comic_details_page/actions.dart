@@ -193,23 +193,28 @@ abstract mixin class _ComicPageActions {
     );
   }
 
-  /// Clears every cached translation (both levels) and the learned glossary for
-  /// this comic, so subsequent reading / pre-translation is produced fresh.
-  /// Reached by long-pressing the pre-translate button; used when translations
-  /// came out wrong and need to be redone.
+  /// Clears every translation (both stored text and rendered images) and the
+  /// learned glossary for this comic, so subsequent reading / pre-translation is
+  /// produced fresh. Reached by long-pressing the pre-translate button; used
+  /// when translations came out wrong and need to be redone.
   void reTranslate() {
     showConfirmDialog(
       context: App.rootContext,
       title: "Re-translate this comic?".tl,
       content:
-          "This clears all cached translations and the learned glossary for this comic, then translates again."
+          "This clears all translations and the learned glossary for this comic, then translates again."
               .tl,
       onConfirm: () async {
         await ImageTranslationService.instance.retranslate(
           comic.id,
           comic.sourceKey,
         );
-        App.rootContext.showMessage(message: "Translation cache cleared".tl);
+        // This comic's status is stale now; drop its ticks too.
+        PreTranslationTaskManager.instance.resetComicStatus(
+          comic.id,
+          comic.sourceKey,
+        );
+        App.rootContext.showMessage(message: "Translation results cleared".tl);
         // Offer to pre-translate again right away; the user can also just
         // reopen the reader, which translates on demand.
         if (ImageTranslationService.isReady) {
