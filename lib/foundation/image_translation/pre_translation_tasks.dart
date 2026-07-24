@@ -450,17 +450,26 @@ class PreTranslationTaskManager with ChangeNotifier {
     void launch(int groupIndex) {
       late Future<void> f;
       f = () async {
-        var range = ranges[groupIndex];
-        var result = await _processGroup(
-          task,
-          chapter,
-          pageKeys,
-          range.start,
-          range.end,
-        );
-        // A canceled/paused-out group returns null; skip committing it so
-        // counts stay at the group boundary and a resume redoes it.
-        if (result != null) commit(groupIndex, result);
+        try {
+          var range = ranges[groupIndex];
+          var result = await _processGroup(
+            task,
+            chapter,
+            pageKeys,
+            range.start,
+            range.end,
+          );
+          // A canceled/paused-out group returns null; skip committing it so
+          // counts stay at the group boundary and a resume redoes it.
+          if (result != null) commit(groupIndex, result);
+        } catch (e, s) {
+          // Never let a group future complete with an error: with groups
+          // overlapping, an errored future would make `Future.any` rethrow and
+          // abandon the other in-flight groups (and a second error would become
+          // an unhandled async error). An uncommitted group simply stays at the
+          // prefix boundary and is redone on resume.
+          Log.error('Pre-translation', 'Group task failed: $e', s);
+        }
       }()
           .whenComplete(() => active.remove(f));
       active.add(f);
