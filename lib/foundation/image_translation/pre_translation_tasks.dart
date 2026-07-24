@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/background_keepalive.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/comic_type.dart';
+import 'package:venera/foundation/image_translation/rate_limiter.dart';
 import 'package:venera/foundation/image_translation/translation_service.dart';
 import 'package:venera/foundation/image_translation/translation_types.dart';
 import 'package:venera/foundation/local.dart';
@@ -675,22 +677,29 @@ class PreTranslationTaskManager with ChangeNotifier {
     if (imageKey.startsWith('file://')) {
       return await File(imageKey.substring(7)).readAsBytes();
     }
-    Uint8List? bytes;
-    await for (var event in ImageDownloader.loadComicImage(
-      imageKey,
-      task.sourceKey,
-      task.cid,
-      eid,
-    )) {
-      if (event.imageBytes != null) {
-        bytes = event.imageBytes;
-        break;
+    await _ImageRateLimit.gate.acquire(task.sourceKey);
+    try {
+      Uint8List? bytes;
+      await for (var event in ImageDownloader.loadComicImage(
+        imageKey,
+        task.sourceKey,
+        task.cid,
+        eid,
+        onRateLimited: (_) =>
+            _ImageRateLimit.aimd.onRateLimited(task.sourceKey),
+      )) {
+        if (event.imageBytes != null) {
+          bytes = event.imageBytes;
+          break;
+        }
       }
+      if (bytes == null) {
+        throw 'Empty image data';
+      }
+      return bytes;
+    } finally {
+      _ImageRateLimit.gate.release(task.sourceKey);
     }
-    if (bytes == null) {
-      throw 'Empty image data';
-    }
-    return bytes;
   }
 
   void _moveToHistory(PreTranslationTask task) {
@@ -852,4 +861,17 @@ class PreTranslationTaskManager with ChangeNotifier {
     _saveHistory();
     notifyListeners();
   }
+}
+
+/// Per-source image-fetch concurrency for pre-translation. The effective limit
+/// is min(user setting, AIMD estimate); AIMD halves on a 429/503 from the image
+/// host and grows back on success, so a rate-limiting host is backed off
+/// automatically without the user tuning anything.
+class _ImageRateLimit {
+  static final aimd = AimdController(min: 1, max: 6);
+  static final gate = ConcurrencyGate((bucket) {
+    var raw = appdata.settings['imageTranslationImageConcurrency'];
+    var userMax = (raw is int ? raw : int.tryParse('$raw') ?? 3).clamp(1, 6);
+    return math.min(userMax, aimd.limitFor(bucket));
+  });
 }

@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:venera/foundation/cache_manager.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
+import 'package:venera/foundation/image_translation/rate_limiter.dart';
 import 'package:venera/foundation/js_engine.dart';
 import 'package:venera/foundation/consts.dart';
 import 'package:venera/utils/image.dart';
@@ -111,14 +112,15 @@ abstract class ImageDownloader {
     String imageKey,
     String? sourceKey,
     String cid,
-    String eid,
-  ) {
+    String eid, {
+    void Function(Duration? retryAfter)? onRateLimited,
+  }) {
     final cacheKey = "$imageKey@$sourceKey@$cid@$eid";
     if (_loadingImages.containsKey(cacheKey)) {
       return _loadingImages[cacheKey]!.stream;
     }
     final stream = _StreamWrapper<ImageDownloadProgress>(
-      _loadComicImage(imageKey, sourceKey, cid, eid),
+      _loadComicImage(imageKey, sourceKey, cid, eid, false, onRateLimited),
       (wrapper) {
         _loadingImages.remove(cacheKey);
       },
@@ -143,6 +145,7 @@ abstract class ImageDownloader {
     String cid,
     String eid, [
     bool forDownload = false,
+    void Function(Duration? retryAfter)? onRateLimited,
   ]) async* {
     final cacheKey = "$imageKey@$sourceKey@$cid@$eid";
     final cache = await CacheManager().findCache(cacheKey);
@@ -174,6 +177,7 @@ abstract class ImageDownloader {
           {};
     }
     var retryLimit = 5;
+    var netRetries = 3;
     while (true) {
       try {
         configs['headers'] ??= {'user-agent': webUA};
@@ -256,6 +260,30 @@ abstract class ImageDownloader {
         );
         return;
       } catch (e) {
+        var status = e is DioException ? e.response?.statusCode : null;
+        var cls = status != null
+            ? classifyStatus(status)
+            : HttpErrorClass.transient;
+        // 429/503/网络抖动/5xx：退避后重试同一请求（源脚本无 onLoadFailed 时，
+        // 这是图片唯一的重试机会）。
+        if ((cls == HttpErrorClass.rateLimited ||
+                cls == HttpErrorClass.transient) &&
+            netRetries > 0) {
+          netRetries--;
+          Duration? ra;
+          if (cls == HttpErrorClass.rateLimited) {
+            ra = e is DioException
+                ? parseRetryAfter(e.response?.headers.value('retry-after'))
+                : null;
+            onRateLimited?.call(ra);
+          }
+          await Future.delayed(backoff(2 - netRetries, retryAfter: ra));
+          continue;
+        }
+        // 4xx（非 429）：请求本身有问题，重试无益，快速失败。
+        if (cls == HttpErrorClass.clientError) {
+          rethrow;
+        }
         if (retryLimit < 0 || onLoadFailed == null) {
           rethrow;
         }
