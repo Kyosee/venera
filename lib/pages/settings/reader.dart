@@ -271,93 +271,6 @@ class _ReaderSettingsState extends State<ReaderSettings> {
     );
   }
 
-  /// Whether the on-device engine is selected. The engine setting is a
-  /// per-device choice; when 'local' the API endpoint rows are hidden and the
-  /// on-device model rows shown instead.
-  bool get _engineIsLocal =>
-      appdata.settings['imageTranslationEngine'] == 'local' &&
-      TranslationEngine.isLocalRuntimeAvailable;
-
-  /// Subtitle for the on-device model row: the active model's name, or a
-  /// prompt to download one.
-  String _localModelSubtitle() {
-    var id = appdata.settings['imageTranslationLocalModel'] as String?;
-    var model = LocalLlmModels.active(id);
-    if (model != null) {
-      return model.displayName;
-    }
-    if (LocalLlmModels.anyInstalled()) {
-      return "Choose a downloaded model".tl;
-    }
-    return "No model downloaded".tl;
-  }
-
-  /// Runs a sample line through the on-device model so the user can confirm it
-  /// loads and generates on THIS device — the key signal for whether the
-  /// hardware can run local translation at all, without needing OCR models or
-  /// opening a comic.
-  void _testLocalTranslation() async {
-    var model = LocalLlmModels.active(
-      appdata.settings['imageTranslationLocalModel'] as String?,
-    );
-    if (model == null) {
-      context.showMessage(message: "Download a model first".tl);
-      return;
-    }
-    var controller = showLoadingDialog(
-      context,
-      message: "Testing translation".tl,
-      allowCancel: false,
-    );
-    String? result;
-    String? error;
-    try {
-      var target =
-          appdata.settings['imageTranslationTarget'] as String? ?? 'zh';
-      var res = await LocalLlmWorker.instance.translateBatch(
-        const ['こんにちは', 'ありがとう'],
-        target,
-        modelPath: model.filePath,
-        template: model.template,
-        contextSize: model.contextSize,
-      );
-      result = res.texts.where((t) => t.isNotEmpty).join(' / ');
-      if (result.isEmpty) {
-        error = "The model returned an empty response".tl;
-        result = null;
-      }
-    } catch (e) {
-      error = e.toString();
-    } finally {
-      // Free the ~1GB model right after the one-off test so it does not sit
-      // resident in memory while the user keeps browsing settings.
-      LocalLlmWorker.instance.release();
-    }
-    controller.close();
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      builder: (context) => ContentDialog(
-        title: error == null
-            ? "Translation succeeded".tl
-            : "Translation failed".tl,
-        content: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Text(
-            error ?? "こんにちは / ありがとう →\n$result",
-            style: ts.s14,
-          ),
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => context.pop(),
-            child: Text("OK".tl),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _onShowChapterCommentsChanged() {
     // When showChapterComments is turned off, also turn off showChapterCommentsAtEnd
     bool? showChapterComments;
@@ -1073,99 +986,47 @@ class _ReaderSettingsState extends State<ReaderSettings> {
                 ),
                 enabled: false,
               ),
-            // Which back-end does the actual translating: the user's online
-            // API (default) or an on-device model. Per-device, not synced.
-            // The on-device option is only offered where its native runtime is
-            // built into the app (see TranslationEngine.isLocalRuntimeAvailable)
-            // — otherwise picking it would let the user download a model and
-            // then fail at translate time.
-            SelectSetting(
-              title: "Translation engine".tl,
-              settingKey: "imageTranslationEngine",
-              optionTranslation: {
-                "api": "Online API".tl,
-                if (TranslationEngine.isLocalRuntimeAvailable)
-                  "local": "On-device model".tl,
-              },
-              onChanged: () {
-                setState(() {});
-                widget.onChanged?.call("imageTranslationEngine");
-              },
+            _CallbackSetting(
+              title: "LLM API URL".tl,
+              subtitle: (appdata.settings['imageTranslationLlmUrl'] as String)
+                      .isEmpty
+                  ? "Not configured".tl
+                  : appdata.settings['imageTranslationLlmUrl'],
+              actionTitle: "Edit".tl,
+              callback: () => _editLlmField(
+                "LLM API URL".tl,
+                'imageTranslationLlmUrl',
+                hint: 'https://example.com/v1',
+              ),
             ),
-            if (!TranslationEngine.isLocalRuntimeAvailable)
-              ListTile(
-                title: Text("On-device model".tl),
-                subtitle: Text(
-                  "On-device translation isn't available in this build yet".tl,
-                ),
-                enabled: false,
+            _CallbackSetting(
+              title: "LLM API Key".tl,
+              subtitle: (appdata.settings['imageTranslationLlmKey'] as String)
+                      .isEmpty
+                  ? "Not configured".tl
+                  : '••••••',
+              actionTitle: "Edit".tl,
+              callback: () => _editLlmField(
+                "LLM API Key".tl,
+                'imageTranslationLlmKey',
               ),
-            if (!_engineIsLocal) ...[
-              _CallbackSetting(
-                title: "LLM API URL".tl,
-                subtitle: (appdata.settings['imageTranslationLlmUrl'] as String)
-                        .isEmpty
-                    ? "Not configured".tl
-                    : appdata.settings['imageTranslationLlmUrl'],
-                actionTitle: "Edit".tl,
-                callback: () => _editLlmField(
-                  "LLM API URL".tl,
-                  'imageTranslationLlmUrl',
-                  hint: 'https://example.com/v1',
-                ),
-              ),
-              _CallbackSetting(
-                title: "LLM API Key".tl,
-                subtitle: (appdata.settings['imageTranslationLlmKey'] as String)
-                        .isEmpty
-                    ? "Not configured".tl
-                    : '••••••',
-                actionTitle: "Edit".tl,
-                callback: () => _editLlmField(
-                  "LLM API Key".tl,
-                  'imageTranslationLlmKey',
-                ),
-              ),
-              _CallbackSetting(
-                title: "LLM Model".tl,
-                subtitle:
-                    (appdata.settings['imageTranslationLlmModel'] as String)
-                        .isEmpty
-                    ? "Not configured".tl
-                    : appdata.settings['imageTranslationLlmModel'],
-                actionTitle: "Select".tl,
-                callback: _chooseLlmModel,
-              ),
-              _CallbackSetting(
-                title: "Test translation".tl,
-                subtitle: "Check the endpoint with a sample line".tl,
-                actionTitle: "Test".tl,
-                callback: _testTranslation,
-              ),
-            ],
-            // On-device model management is shown for BOTH engines (when the
-            // native runtime exists): a user can download and pick a model
-            // before switching the engine to it, so downloading and enabling
-            // stay decoupled (you don't have to run the local engine — with no
-            // model installed — just to fetch one).
-            if (TranslationEngine.isLocalRuntimeAvailable) ...[
-              _CallbackSetting(
-                title: "On-device model".tl,
-                subtitle: _localModelSubtitle(),
-                actionTitle: "Manage".tl,
-                callback: () async {
-                  await context.to(() => const LocalLlmModelsPage());
-                  if (mounted) setState(() {});
-                },
-              ),
-              if (_engineIsLocal)
-                _CallbackSetting(
-                  title: "Test translation".tl,
-                  subtitle: "Run a sample line through the on-device model".tl,
-                  actionTitle: "Test".tl,
-                  callback: _testLocalTranslation,
-                ),
-            ],
+            ),
+            _CallbackSetting(
+              title: "LLM Model".tl,
+              subtitle:
+                  (appdata.settings['imageTranslationLlmModel'] as String)
+                      .isEmpty
+                  ? "Not configured".tl
+                  : appdata.settings['imageTranslationLlmModel'],
+              actionTitle: "Select".tl,
+              callback: _chooseLlmModel,
+            ),
+            _CallbackSetting(
+              title: "Test translation".tl,
+              subtitle: "Check the endpoint with a sample line".tl,
+              actionTitle: "Test".tl,
+              callback: _testTranslation,
+            ),
             SelectSetting(
               title: "Source language".tl,
               settingKey: "imageTranslationSource",
