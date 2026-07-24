@@ -260,12 +260,36 @@ abstract class ImageDownloader {
         );
         return;
       } catch (e) {
+        // The source's own recovery hook takes priority over the generic
+        // net-retry below: onLoadFailed is how a source re-signs / refreshes an
+        // expired image URL, which typically surfaces as a 403/401 (a
+        // clientError). Letting the classifier fast-fail those before the hook
+        // ran would silently break every source that relies on URL refresh, so
+        // the hook gets first crack at ANY error — the original behavior.
+        if (retryLimit >= 0 && onLoadFailed != null) {
+          var newConfig = await onLoadFailed();
+          (configs['onLoadFailed'] as JSInvokable).free();
+          onLoadFailed = null;
+          if (newConfig == null) {
+            rethrow;
+          }
+          configs = newConfig;
+          retryLimit--;
+          continue;
+        }
+        // A hook exists but its retry budget is spent: rethrow, matching the
+        // original behavior. (Falling through to net-retry here would re-free
+        // and re-wrap the hook's JSInvokable across loops.)
+        if (onLoadFailed != null) {
+          rethrow;
+        }
+        // No source-provided recovery: retry transient/rate-limited errors a
+        // bounded number of times with backoff (429/503/网络抖动/5xx). This is
+        // the only retry chance for sources without an onLoadFailed hook.
         var status = e is DioException ? e.response?.statusCode : null;
         var cls = status != null
             ? classifyStatus(status)
             : HttpErrorClass.transient;
-        // 429/503/网络抖动/5xx：退避后重试同一请求（源脚本无 onLoadFailed 时，
-        // 这是图片唯一的重试机会）。
         if ((cls == HttpErrorClass.rateLimited ||
                 cls == HttpErrorClass.transient) &&
             netRetries > 0) {
@@ -280,21 +304,8 @@ abstract class ImageDownloader {
           await Future.delayed(backoff(2 - netRetries, retryAfter: ra));
           continue;
         }
-        // 4xx（非 429）：请求本身有问题，重试无益，快速失败。
-        if (cls == HttpErrorClass.clientError) {
-          rethrow;
-        }
-        if (retryLimit < 0 || onLoadFailed == null) {
-          rethrow;
-        }
-        var newConfig = await onLoadFailed();
-        (configs['onLoadFailed'] as JSInvokable).free();
-        onLoadFailed = null;
-        if (newConfig == null) {
-          rethrow;
-        }
-        configs = newConfig;
-        retryLimit--;
+        // 4xx（非 429）或重试次数耗尽：重试无益，快速失败。
+        rethrow;
       } finally {
         if (onLoadFailed != null) {
           (configs['onLoadFailed'] as JSInvokable).free();
