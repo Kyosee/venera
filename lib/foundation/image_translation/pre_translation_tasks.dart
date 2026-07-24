@@ -7,6 +7,7 @@ import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/background_keepalive.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/comic_type.dart';
+import 'package:venera/foundation/image_translation/ordered_group_committer.dart';
 import 'package:venera/foundation/image_translation/rate_limiter.dart';
 import 'package:venera/foundation/image_translation/translation_service.dart';
 import 'package:venera/foundation/image_translation/translation_types.dart';
@@ -412,16 +413,78 @@ class PreTranslationTaskManager with ChangeNotifier {
     // network fetch or inference.
     var startIndex = chapter.done + chapter.failed;
     var groupSize = _batchPages;
+
+    // Build the contiguous list of group [start,end) ranges to process.
+    var ranges = <({int start, int end})>[];
     for (var i = startIndex; i < pageKeys.length; i += groupSize) {
-      if (_canceledIds.contains(task.id)) return;
-      await _waitWhilePaused(task);
-      if (_canceledIds.contains(task.id)) return;
-      var end = (i + groupSize).clamp(0, pageKeys.length);
-      await _runGroup(task, chapter, pageKeys, i, end);
+      ranges.add((start: i, end: (i + groupSize).clamp(0, pageKeys.length)));
+    }
+    if (ranges.isEmpty) return;
+
+    // Overlap groups so a group's image fetch + OCR can proceed while a prior
+    // group waits on the LLM. Groups may finish out of order, but their counts
+    // are applied via the committer in strict group order, preserving the
+    // resume invariant that done+failed is always a contiguous prefix. The
+    // committer starts at group 0 = the first range processed here (counts for
+    // pages before startIndex are already in chapter.done/failed).
+    var committer = OrderedGroupCommitter(0);
+    var overlap = _pipelineConcurrency;
+    var next = 0;
+    // Self-removing set: each launched future removes itself on completion, so
+    // after `await Future.any(active)` the finished group is already gone and
+    // the window slides forward by one. Earlier-registered listeners fire
+    // first, so removal happens before Future.any's await returns.
+    var active = <Future<void>>{};
+
+    void commit(int groupIndex, GroupResult result) {
+      for (var r in committer.record(groupIndex, result)) {
+        chapter.done += r.done;
+        chapter.failed += r.failed;
+        chapter.failedPages.addAll(r.failedPages);
+      }
       _refreshKeepAlive(task);
       _saveActiveThrottled();
       notifyListeners();
     }
+
+    void launch(int groupIndex) {
+      late Future<void> f;
+      f = () async {
+        var range = ranges[groupIndex];
+        var result = await _processGroup(
+          task,
+          chapter,
+          pageKeys,
+          range.start,
+          range.end,
+        );
+        // A canceled/paused-out group returns null; skip committing it so
+        // counts stay at the group boundary and a resume redoes it.
+        if (result != null) commit(groupIndex, result);
+      }()
+          .whenComplete(() => active.remove(f));
+      active.add(f);
+    }
+
+    while (next < ranges.length) {
+      if (_canceledIds.contains(task.id)) break;
+      await _waitWhilePaused(task);
+      if (_canceledIds.contains(task.id)) break;
+      launch(next++);
+      if (active.length >= overlap) {
+        await Future.any(active);
+      }
+    }
+    await Future.wait(active);
+  }
+
+  /// How many pre-translation groups may be in flight at once. Bounded by the
+  /// LLM concurrency setting (the pipeline's scarcest shared resource); the
+  /// per-source image gate and OCR worker pool further shape actual parallelism.
+  int get _pipelineConcurrency {
+    var raw = appdata.settings['imageTranslationLlmConcurrency'];
+    var n = raw is int ? raw : int.tryParse('$raw') ?? 2;
+    return n.clamp(1, 4);
   }
 
   /// Re-runs only the pages that failed, across every chapter that has any.
@@ -558,7 +621,7 @@ class PreTranslationTaskManager with ChangeNotifier {
   /// original per-page path (one page = one request); for several it fetches
   /// each page's bytes then hands the group to [translatePageGroup] so their
   /// bubbles share one request. Pages already rendered are skipped up front.
-  Future<void> _runGroup(
+  Future<GroupResult?> _processGroup(
     PreTranslationTask task,
     PreTranslationChapter chapter,
     List<String> pageKeys,
@@ -570,15 +633,16 @@ class PreTranslationTaskManager with ChangeNotifier {
     var done = 0;
     var failed = 0;
     // Page indices that failed this group, recorded so a later retry pass can
-    // re-run exactly these. Collected locally and merged into the chapter only
-    // at the atomic commit below, mirroring the done/failed counters.
+    // re-run exactly these. Collected locally and returned as a GroupResult so
+    // the caller's committer merges them into the chapter in strict group
+    // order (never mutating the chapter directly from here).
     var failedIndices = <int>{};
     for (var i = start; i < end; i++) {
-      // Cancel before the group is counted: leave the chapter counters at the
-      // group's start boundary so a resume redoes the whole group. Every page
-      // is idempotent (rendered ones skip via hasRenderedPage), so nothing is
-      // double-counted or skipped.
-      if (_canceledIds.contains(task.id)) return;
+      // Cancel before the group is counted: return null so the caller leaves
+      // the chapter counters at the group's start boundary and a resume redoes
+      // the whole group. Every page is idempotent (rendered ones skip via
+      // hasRenderedPage), so nothing is double-counted or skipped.
+      if (_canceledIds.contains(task.id)) return null;
       var imageKey = pageKeys[i];
       var cacheKey = ImageTranslationService.cacheKeyFor(
         imageKey,
@@ -617,10 +681,10 @@ class PreTranslationTaskManager with ChangeNotifier {
           }
         }
       } on PipelineCanceled {
-        // Canceled mid-request: abandon this group's counts entirely. Pages
-        // rendered before the cancel are cached and get counted (once) when the
-        // group is redone on resume.
-        return;
+        // Canceled mid-request: abandon this group's counts entirely (return
+        // null). Pages rendered before the cancel are cached and get counted
+        // (once) when the group is redone on resume.
+        return null;
       } catch (e, s) {
         Log.warning('Pre-translation', 'Group failed: $e\n$s');
         for (var p in pending) {
@@ -629,12 +693,11 @@ class PreTranslationTaskManager with ChangeNotifier {
         }
       }
     }
-    // Apply the whole contiguous group's counts at once, so done+failed always
-    // marks a contiguous processed prefix — the invariant the resume cursor
-    // (startIndex = done + failed) relies on.
-    chapter.done += done;
-    chapter.failed += failed;
-    chapter.failedPages.addAll(failedIndices);
+    // Return the whole contiguous group's counts so the caller applies them
+    // atomically and in order, keeping done+failed a contiguous processed
+    // prefix — the invariant the resume cursor (startIndex = done + failed)
+    // relies on.
+    return GroupResult(done, failed, failedIndices);
   }
 
   /// Resolves the ordered image keys of a chapter, from the local library when
