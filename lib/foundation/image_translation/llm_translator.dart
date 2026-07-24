@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:uuid/uuid.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/network/app_dio.dart';
@@ -17,6 +18,162 @@ class LlmTranslationResult {
   final Map<String, String> glossary;
 }
 
+/// One user-configured OpenAI-compatible LLM service: a stable [id], a
+/// display [name], and the endpoint/credential/model triple that used to be
+/// the app's single global config. Users keep several of these and pick which
+/// one is active, so they can switch between vendors (or a paid account and a
+/// LAN gateway) without re-typing settings each time.
+class LlmProvider {
+  LlmProvider({
+    required this.id,
+    required this.name,
+    required this.url,
+    required this.key,
+    required this.model,
+  });
+
+  final String id;
+  final String name;
+  final String url;
+  final String key;
+  final String model;
+
+  LlmProvider copyWith({
+    String? name,
+    String? url,
+    String? key,
+    String? model,
+  }) {
+    return LlmProvider(
+      id: id,
+      name: name ?? this.name,
+      url: url ?? this.url,
+      key: key ?? this.key,
+      model: model ?? this.model,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'url': url,
+        'key': key,
+        'model': model,
+      };
+
+  static LlmProvider? fromJson(dynamic json) {
+    if (json is! Map) return null;
+    var id = json['id'];
+    if (id is! String || id.isEmpty) return null;
+    return LlmProvider(
+      id: id,
+      name: (json['name'] as String?)?.trim() ?? '',
+      url: (json['url'] as String?)?.trim() ?? '',
+      key: (json['key'] as String?)?.trim() ?? '',
+      model: (json['model'] as String?)?.trim() ?? '',
+    );
+  }
+}
+
+/// Reads and writes the user's list of LLM providers and which one is active.
+///
+/// The list is stored in settings (and synced across devices as a whole), so
+/// this is the single source of truth the translator reads from. All mutating
+/// helpers persist via [appdata.saveData] and notify listeners so open
+/// settings pages refresh.
+abstract class LlmProviderStore {
+  static const _listKey = 'imageTranslationProviders';
+  static const _activeKey = 'imageTranslationActiveProviderId';
+
+  static List<LlmProvider> get providers {
+    var raw = appdata.settings[_listKey];
+    if (raw is! List) return const [];
+    var result = <LlmProvider>[];
+    for (var item in raw) {
+      var provider = LlmProvider.fromJson(item);
+      if (provider != null) result.add(provider);
+    }
+    return result;
+  }
+
+  static String get activeId =>
+      (appdata.settings[_activeKey] as String? ?? '').trim();
+
+  /// The active provider, or the first configured one as a fallback so a list
+  /// that lost its active pointer still translates. Null when the list is empty.
+  static LlmProvider? get active {
+    var all = providers;
+    if (all.isEmpty) return null;
+    var id = activeId;
+    for (var p in all) {
+      if (p.id == id) return p;
+    }
+    return all.first;
+  }
+
+  static void _persist(List<LlmProvider> list) {
+    appdata.settings[_listKey] = [for (var p in list) p.toJson()];
+  }
+
+  /// Adds [provider] and returns it. Becomes active if none was set.
+  static void add(LlmProvider provider) {
+    var list = providers..add(provider);
+    _persist(list);
+    if (active == null || activeId.isEmpty) {
+      appdata.settings[_activeKey] = provider.id;
+    }
+    appdata.saveData();
+  }
+
+  static void update(LlmProvider provider) {
+    var list = providers;
+    var index = list.indexWhere((p) => p.id == provider.id);
+    if (index == -1) return;
+    list[index] = provider;
+    _persist(list);
+    appdata.saveData();
+  }
+
+  static void remove(String id) {
+    var list = providers..removeWhere((p) => p.id == id);
+    _persist(list);
+    // Reassign the active pointer if the removed provider was selected.
+    if (activeId == id) {
+      appdata.settings[_activeKey] = list.isEmpty ? '' : list.first.id;
+    }
+    appdata.saveData();
+  }
+
+  static void setActive(String id) {
+    appdata.settings[_activeKey] = id;
+    appdata.saveData();
+  }
+
+  /// One-time migration from the legacy single-config keys
+  /// (imageTranslationLlmUrl/Key/Model) to the provider list. Runs at startup;
+  /// only fires when no providers exist yet and a legacy URL is present. The
+  /// legacy keys are left untouched so an older app version can still read them.
+  static void migrateLegacyIfNeeded() {
+    if (providers.isNotEmpty) return;
+    var url = (appdata.settings['imageTranslationLlmUrl'] as String? ?? '')
+        .trim();
+    if (url.isEmpty) return;
+    var provider = LlmProvider(
+      id: const Uuid().v4(),
+      name: 'LLM',
+      url: url,
+      key: (appdata.settings['imageTranslationLlmKey'] as String? ?? '').trim(),
+      model:
+          (appdata.settings['imageTranslationLlmModel'] as String? ?? '').trim(),
+    );
+    _persist([provider]);
+    appdata.settings[_activeKey] = provider.id;
+    // sync:false — this runs during init before the sync layer is ready, and
+    // a migration is not a user edit that should trigger an upload.
+    appdata.saveData(false);
+  }
+}
+
 /// Translates recognized bubble texts through a user-configured
 /// OpenAI-compatible chat endpoint.
 ///
@@ -25,14 +182,11 @@ class LlmTranslationResult {
 /// it at. All bubbles of a page go out as ONE request, together with the
 /// comic's running glossary so names stay consistent across pages/chapters.
 abstract class LlmTranslator {
-  static String get _rawUrl =>
-      (appdata.settings['imageTranslationLlmUrl'] as String? ?? '').trim();
+  static String get _rawUrl => (LlmProviderStore.active?.url ?? '').trim();
 
-  static String get _apiKey =>
-      (appdata.settings['imageTranslationLlmKey'] as String? ?? '').trim();
+  static String get _apiKey => (LlmProviderStore.active?.key ?? '').trim();
 
-  static String get _model =>
-      (appdata.settings['imageTranslationLlmModel'] as String? ?? '').trim();
+  static String get _model => (LlmProviderStore.active?.model ?? '').trim();
 
   /// A key is optional on purpose: local gateways (ollama, lm-studio,
   /// one-api instances on LAN) often run without authentication.
@@ -55,10 +209,12 @@ abstract class LlmTranslator {
     return '$url/chat/completions';
   }
 
-  /// Base URL with any trailing '/chat/completions' and slashes stripped, so
-  /// sibling endpoints (e.g. '/models') can be derived from it.
-  static String get _baseUrl {
-    var url = _rawUrl;
+  /// Strips trailing slashes and a trailing '/chat/completions' from [rawUrl]
+  /// so sibling endpoints (e.g. '/models') can be derived from any accepted
+  /// URL shape. Shared by the active-provider getter and the ad-hoc fetch used
+  /// while editing a not-yet-active provider.
+  static String baseUrlOf(String rawUrl) {
+    var url = rawUrl.trim();
     while (url.endsWith('/')) {
       url = url.substring(0, url.length - 1);
     }
@@ -71,22 +227,29 @@ abstract class LlmTranslator {
   /// Fetches the model id list from the endpoint's `/models` (OpenAI-style).
   /// Returns the ids; throws with a readable message on failure so the UI can
   /// fall back to manual entry.
-  static Future<List<String>> fetchModels() async {
-    if (_rawUrl.isEmpty) {
+  ///
+  /// [url]/[key] default to the active provider's, but the provider-editing UI
+  /// passes the values being edited so the model list matches the provider the
+  /// user is configuring, not whichever one is currently active.
+  static Future<List<String>> fetchModels({String? url, String? key}) async {
+    var rawUrl = (url ?? _rawUrl).trim();
+    var apiKey = (key ?? _apiKey).trim();
+    if (rawUrl.isEmpty) {
       throw Exception('LLM API URL not configured');
     }
+    var baseUrl = baseUrlOf(rawUrl);
     var dio = AppDio(
       BaseOptions(
         connectTimeout: const Duration(seconds: 15),
         receiveTimeout: const Duration(seconds: 30),
         headers: {
-          if (_apiKey.isNotEmpty) 'Authorization': 'Bearer $_apiKey',
+          if (apiKey.isNotEmpty) 'Authorization': 'Bearer $apiKey',
         },
         validateStatus: (status) => status != null && status < 500,
       ),
     );
     try {
-      var response = await dio.get('$_baseUrl/models');
+      var response = await dio.get('$baseUrl/models');
       if (response.statusCode != 200) {
         throw Exception(
           'Endpoint returned ${response.statusCode}: '

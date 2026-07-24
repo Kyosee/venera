@@ -49,113 +49,21 @@ class _ReaderSettingsState extends State<ReaderSettings> {
         readerMode == 'galleryRightToLeft';
   }
 
-  /// Edits one of the user's own LLM endpoint fields (URL / key / model).
-  void _editLlmField(String title, String settingKey, {String? hint}) {
-    showInputDialog(
-      context: context,
-      title: title,
-      hintText: hint,
-      initialValue: appdata.settings[settingKey] as String? ?? '',
-      onConfirm: (value) {
-        setState(() {
-          appdata.settings[settingKey] = value.trim();
-        });
-        appdata.saveData();
-        widget.onChanged?.call(settingKey);
-        return null;
-      },
-    );
-  }
-
-  void _setLlmModel(String value) {
-    setState(() {
-      appdata.settings['imageTranslationLlmModel'] = value.trim();
-    });
-    appdata.saveData();
-    widget.onChanged?.call('imageTranslationLlmModel');
-  }
-
-  /// Lets the user pick the model: fetch the endpoint's `/models` list and
-  /// choose one, or type it by hand. Both paths write the same setting.
-  void _chooseLlmModel() async {
-    if (LlmTranslator.baseUrlConfigured) {
-      // Try to fetch the list first; fall back to manual entry on any failure
-      // so a gateway without a /models endpoint is never a dead end.
-      var controller = showLoadingDialog(
-        context,
-        message: "Loading".tl,
-        allowCancel: false,
-      );
-      List<String>? models;
-      String? error;
-      try {
-        models = await LlmTranslator.fetchModels();
-      } catch (e) {
-        error = e.toString();
-      }
-      controller.close();
-      if (!mounted) return;
-      if (models != null && models.isNotEmpty) {
-        _showModelPicker(models);
-        return;
-      }
-      if (error != null) {
-        context.showMessage(
-          message: "Failed to fetch model list".tl,
-        );
-      }
+  /// Summary line for the LLM-providers entry: the active provider's name (or
+  /// its URL when unnamed), how many others are configured, or "Not configured".
+  String _activeProviderSubtitle() {
+    var active = LlmProviderStore.active;
+    if (active == null) {
+      return "Not configured".tl;
     }
-    _editLlmField("LLM Model".tl, 'imageTranslationLlmModel');
-  }
-
-  void _showModelPicker(List<String> models) {
-    var current = appdata.settings['imageTranslationLlmModel'] as String? ?? '';
-    showDialog(
-      context: App.rootContext,
-      builder: (context) {
-        return ContentDialog(
-          title: "Select model".tl,
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 360),
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      for (var model in models)
-                        ListTile(
-                          title: Text(model),
-                          trailing: model == current
-                              ? Icon(
-                                  Icons.check,
-                                  color: context.colorScheme.primary,
-                                )
-                              : null,
-                          onTap: () {
-                            context.pop();
-                            _setLlmModel(model);
-                          },
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                context.pop();
-                _editLlmField("LLM Model".tl, 'imageTranslationLlmModel');
-              },
-              child: Text("Enter manually".tl),
-            ),
-          ],
-        );
-      },
-    );
+    var label = active.name.isNotEmpty
+        ? active.name
+        : (active.url.isNotEmpty ? active.url : "Unnamed provider".tl);
+    var count = LlmProviderStore.providers.length;
+    if (count > 1) {
+      label += " (${"@count configured".tlParams({'count': count})})";
+    }
+    return label;
   }
 
   /// A plain-language explainer of what AI translation does, how to set it up,
@@ -189,7 +97,7 @@ class _ReaderSettingsState extends State<ReaderSettings> {
               ),
               section(
                 "One-time setup".tl,
-                "1. Fill in the LLM API URL, API Key, and Model — any OpenAI-compatible service works.\n2. Tap Test translation to confirm it replies.\n3. Open Translation models and download the models for your source language (needed for on-device text recognition)."
+                "1. Open LLM providers and add one with its API URL, API Key, and Model — any OpenAI-compatible service works. Add several and switch between them anytime.\n2. Tap Test translation to confirm it replies.\n3. Open Translation models and download the models for your source language (needed for on-device text recognition)."
                     .tl,
               ),
               section(
@@ -987,39 +895,13 @@ class _ReaderSettingsState extends State<ReaderSettings> {
                 enabled: false,
               ),
             _CallbackSetting(
-              title: "LLM API URL".tl,
-              subtitle: (appdata.settings['imageTranslationLlmUrl'] as String)
-                      .isEmpty
-                  ? "Not configured".tl
-                  : appdata.settings['imageTranslationLlmUrl'],
-              actionTitle: "Edit".tl,
-              callback: () => _editLlmField(
-                "LLM API URL".tl,
-                'imageTranslationLlmUrl',
-                hint: 'https://example.com/v1',
-              ),
-            ),
-            _CallbackSetting(
-              title: "LLM API Key".tl,
-              subtitle: (appdata.settings['imageTranslationLlmKey'] as String)
-                      .isEmpty
-                  ? "Not configured".tl
-                  : '••••••',
-              actionTitle: "Edit".tl,
-              callback: () => _editLlmField(
-                "LLM API Key".tl,
-                'imageTranslationLlmKey',
-              ),
-            ),
-            _CallbackSetting(
-              title: "LLM Model".tl,
-              subtitle:
-                  (appdata.settings['imageTranslationLlmModel'] as String)
-                      .isEmpty
-                  ? "Not configured".tl
-                  : appdata.settings['imageTranslationLlmModel'],
-              actionTitle: "Select".tl,
-              callback: _chooseLlmModel,
+              title: "LLM providers".tl,
+              subtitle: _activeProviderSubtitle(),
+              actionTitle: "Manage".tl,
+              callback: () async {
+                await context.to(() => const LlmProvidersPage());
+                if (mounted) setState(() {});
+              },
             ),
             _CallbackSetting(
               title: "Test translation".tl,

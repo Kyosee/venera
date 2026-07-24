@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import 'package:venera/foundation/app.dart';
+import 'package:venera/foundation/image_translation/llm_translator.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/source_platform.dart';
 import 'package:venera/utils/data_sync.dart';
@@ -142,12 +143,6 @@ class Appdata with Init {
     // into night mode with no way out but toggling the switch. The follow-
     // system toggle and the color/intensity preferences still sync.
     "readerNightMode",
-    // The model id is device-local: different devices may point the same
-    // endpoint at different models, or run local gateways with their own
-    // model names. The endpoint URL and key DO sync (the user opted to share
-    // one LLM account across their devices) — note they ride the backup in
-    // plaintext, same as any other synced setting.
-    "imageTranslationLlmModel",
   ];
 
   /// Sync data from another device.
@@ -293,6 +288,7 @@ class Appdata with Init {
       implicitDataFile.deleteIgnoreError();
     }
     _initSourceTypeRegistry();
+    LlmProviderStore.migrateLegacyIfNeeded();
   }
 }
 
@@ -429,9 +425,16 @@ class Settings with ChangeNotifier {
     'imageTranslationHfEndpoint':
         'https://huggingface.co', // model download endpoint (mirrorable)
     // 用户自己的 OpenAI 兼容端点；App 不预置任何站点或密钥。
+    // 旧版为单套配置的三个扁平键，现已迁移进下方 providers 列表，仅作迁移来源
+    // 保留（不再被翻译器读取）。
     'imageTranslationLlmUrl': '',
     'imageTranslationLlmKey': '',
     'imageTranslationLlmModel': '',
+    // 多服务商：每项 {id, name, url, key, model}，用户可配置多套并自选当前。
+    // 整份列表随备份同步（用户主动选择在多设备间共享账号配置）；含明文 key，
+    // 与旧的 url/key 单键同为明文。activeId 指向当前生效的服务商。
+    'imageTranslationProviders': <dynamic>[],
+    'imageTranslationActiveProviderId': '',
     // 预翻译时把多少页的气泡合并成一次 LLM 请求。1=逐页（默认）；更大值让模型
     // 一次看到更多上下文，译名/语气更连贯并减少请求数，代价是首批结果更晚出、
     // 单次请求更大。仅作用于后台预翻译，阅读器内即时翻译始终逐页。

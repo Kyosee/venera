@@ -62,7 +62,7 @@ updateRepoOwner, updateRepoName, updateUsePrivateRepo, updateRepoToken
 - 上述字段在导入时跳过，保留本机值
 - 用户可通过 `disableSyncFields` 自定义额外不同步字段（逗号分隔）
 - 新增设备特定字段时，必须同时加入 APP 和 Web 的 _disableSync 列表
-- 图片翻译的 LLM 端点 URL 与密钥（`imageTranslationLlmUrl` / `imageTranslationLlmKey`）会同步（用户选择跨设备共用一个 LLM 账户），随备份以明文保存；仅模型 id（`imageTranslationLlmModel`）为设备本地，在 _disableSync 中
+- 图片翻译的 LLM 服务商列表（`imageTranslationProviders`，每项含 name/url/key/model）与当前选中项（`imageTranslationActiveProviderId`）整份同步（用户选择跨设备共用账户配置），随备份以明文保存 key。旧的单套配置键（`imageTranslationLlmUrl` / `imageTranslationLlmKey` / `imageTranslationLlmModel`）已迁移进列表，仅作旧版迁移来源保留
 
 ### 3.2 implicitData 同步规则
 
