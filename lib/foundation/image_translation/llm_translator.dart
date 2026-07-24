@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:uuid/uuid.dart';
 import 'package:venera/foundation/appdata.dart';
+import 'package:venera/foundation/image_translation/rate_limiter.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/network/app_dio.dart';
 
@@ -182,6 +184,18 @@ abstract class LlmProviderStore {
 /// it at. All bubbles of a page go out as ONE request, together with the
 /// comic's running glossary so names stay consistent across pages/chapters.
 abstract class LlmTranslator {
+  /// Shared, per-provider concurrency limiter. Both the reader's inline
+  /// translation and background pre-translation call [translateBatch], so they
+  /// share this gate — neither path can overrun the endpoint on its own. The
+  /// effective limit is min(user setting, AIMD estimate); AIMD backs off on a
+  /// 429/503 and recovers on success.
+  static final _aimd = AimdController(min: 1, max: 4);
+  static final _gate = ConcurrencyGate((bucket) {
+    var raw = appdata.settings['imageTranslationLlmConcurrency'];
+    var userMax = (raw is int ? raw : int.tryParse('$raw') ?? 2).clamp(1, 4);
+    return math.min(userMax, _aimd.limitFor(bucket));
+  });
+
   static String get _rawUrl => (LlmProviderStore.active?.url ?? '').trim();
 
   static String get _apiKey => (LlmProviderStore.active?.key ?? '').trim();
@@ -352,40 +366,72 @@ abstract class LlmTranslator {
         validateStatus: (status) => status != null && status < 500,
       ),
     );
-    Object? lastError;
-    for (var attempt = 0; attempt < 2; attempt++) {
-      try {
-        var response = await dio.post(
-          _endpoint,
-          data: {
-            'model': _model,
-            // No sampling params: some endpoints only accept their model's
-            // fixed values (e.g. "only 1 is allowed") and reject the request
-            // outright; the server-side default works everywhere.
-            'messages': [
-              {'role': 'system', 'content': systemPrompt},
-              {'role': 'user', 'content': payload},
-            ],
-          },
-        );
-        if (response.statusCode != 200) {
-          throw Exception(
-            'LLM endpoint returned ${response.statusCode}: '
-            '${_briefBody(response.data)}',
+    var bucket = LlmProviderStore.active?.id ?? 'default';
+    await _gate.acquire(bucket);
+    try {
+      const maxAttempts = 6;
+      Object? lastError;
+      for (var attempt = 0; attempt < maxAttempts; attempt++) {
+        HttpErrorClass? cls;
+        Duration? retryAfter;
+        try {
+          var response = await dio.post(
+            _endpoint,
+            data: {
+              'model': _model,
+              // No sampling params: some endpoints only accept their model's
+              // fixed values (e.g. "only 1 is allowed") and reject the request
+              // outright; the server-side default works everywhere.
+              'messages': [
+                {'role': 'system', 'content': systemPrompt},
+                {'role': 'user', 'content': payload},
+              ],
+            },
           );
+          var status = response.statusCode ?? 0;
+          if (status == 200) {
+            var content = response
+                .data['choices']?[0]?['message']?['content'] as String?;
+            if (content == null || content.isEmpty) {
+              throw Exception('LLM response has no content');
+            }
+            _aimd.onSuccess(bucket);
+            return _parse(content, texts.length);
+          }
+          lastError = Exception(
+            'LLM endpoint returned $status: ${_briefBody(response.data)}',
+          );
+          cls = classifyStatus(status);
+          retryAfter = parseRetryAfter(response.headers.value('retry-after'));
+        } on DioException catch (e) {
+          lastError = e;
+          var status = e.response?.statusCode;
+          cls = status != null
+              ? classifyStatus(status)
+              : HttpErrorClass.transient;
+          retryAfter =
+              parseRetryAfter(e.response?.headers.value('retry-after'));
+          Log.warning('Image Translation', 'LLM request failed: $e');
+        } catch (e) {
+          // Parse/other unexpected error: allow a couple of retries.
+          lastError = e;
+          cls = HttpErrorClass.transient;
+          Log.warning('Image Translation', 'LLM request failed: $e');
         }
-        var content =
-            response.data['choices']?[0]?['message']?['content'] as String?;
-        if (content == null || content.isEmpty) {
-          throw Exception('LLM response has no content');
+        // Decide retry vs fail OUTSIDE the try, so a fast-fail doesn't get
+        // swallowed by the catch above.
+        if (cls == HttpErrorClass.clientError || cls == HttpErrorClass.fatal) {
+          break; // bad model/auth: retrying won't help
         }
-        return _parse(content, texts.length);
-      } catch (e) {
-        lastError = e;
-        Log.warning('Image Translation', 'LLM request failed: $e');
+        if (cls == HttpErrorClass.rateLimited) {
+          _aimd.onRateLimited(bucket);
+        }
+        await Future.delayed(backoff(attempt, retryAfter: retryAfter));
       }
+      throw Exception('LLM translation failed: $lastError');
+    } finally {
+      _gate.release(bucket);
     }
-    throw Exception('LLM translation failed: $lastError');
   }
 
   /// Parses the model output into aligned translations plus reported names.
