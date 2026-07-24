@@ -953,6 +953,27 @@ class _ReaderSettingsState extends State<ReaderSettings> {
                 widget.onChanged?.call("imageTranslationPreBatchPages");
               },
             ),
+            _SliderSetting(
+              title: "OCR parallelism (0 = auto)".tl,
+              settingsIndex: "imageTranslationOcrWorkers",
+              interval: 1,
+              min: 0,
+              max: 6,
+            ),
+            _SliderSetting(
+              title: "Image download concurrency".tl,
+              settingsIndex: "imageTranslationImageConcurrency",
+              interval: 1,
+              min: 1,
+              max: 6,
+            ),
+            _SliderSetting(
+              title: "Translation request concurrency".tl,
+              settingsIndex: "imageTranslationLlmConcurrency",
+              interval: 1,
+              min: 1,
+              max: 4,
+            ),
             _CallbackSetting(
               title: "Translation models".tl,
               subtitle: TranslationModels.isReadyFor(

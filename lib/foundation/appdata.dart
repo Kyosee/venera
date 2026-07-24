@@ -439,6 +439,14 @@ class Settings with ChangeNotifier {
     // 一次看到更多上下文，译名/语气更连贯并减少请求数，代价是首批结果更晚出、
     // 单次请求更大。仅作用于后台预翻译，阅读器内即时翻译始终逐页。
     'imageTranslationPreBatchPages': 1,
+    // OCR 推理并行的 worker 数。0=自动（桌面 min(核数/2,3)、移动 min(核数/2,2)）；
+    // >0 时固定该数量（clamp 1..6）。更多 worker=更快但更吃内存(每个载入模型)。
+    'imageTranslationOcrWorkers': 0,
+    // 预翻译抓取原图的每源并发上限（clamp 1..6）。遇 429/503 时 AIMD 自动降并发。
+    'imageTranslationImageConcurrency': 3,
+    // 预翻译 LLM 翻译请求的并发上限（clamp 1..4），叠加 AIMD 退避。阅读器内即时
+    // 翻译与预翻译共用同一按服务商分桶的限流器。
+    'imageTranslationLlmConcurrency': 2,
   };
 
   operator [](String key) {
