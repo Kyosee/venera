@@ -87,17 +87,32 @@ class ReaderImageProvider
         ImageTranslationService.instance.markTranslated(translationKey!);
         return await translatedFile.readAsBytes();
       }
-      // Show the original for now; when the background translation lands the
-      // reader is notified, this provider's cache entry is evicted and the
-      // next resolve picks up the translated file above.
-      ImageTranslationService.instance.schedule(
-        translationKey!,
-        '$cid@$sourceKey',
-        imageBytes,
-        () {
-          ImageTranslationService.evictImage(this);
-        },
-      );
+      if (ImageTranslationService.isReady) {
+        // Models are usable: show the original for now and translate in the
+        // background. When it lands the reader is notified, this provider's
+        // cache entry is evicted and the next resolve picks up the translated
+        // file above.
+        ImageTranslationService.instance.schedule(
+          translationKey!,
+          '$cid@$sourceKey',
+          imageBytes,
+          () {
+            ImageTranslationService.evictImage(this);
+          },
+        );
+      } else {
+        // No models installed (e.g. a device that received translations over
+        // WebDAV): render straight from a synced stored result if there is one.
+        // Nothing is translated here — a page with no stored result just shows
+        // the original.
+        var rendered = await ImageTranslationService.instance.renderStoredPage(
+          translationKey!,
+          imageBytes,
+        );
+        if (rendered != null) {
+          return rendered;
+        }
+      }
     }
     if (appdata.settings['enableCustomImageProcessing']) {
       var script = appdata.settings['customImageProcessing'].toString();

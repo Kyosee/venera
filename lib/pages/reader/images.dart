@@ -2139,8 +2139,15 @@ ImageProvider _createImageProviderFromKey(
       : reader.widget.chapters?.ids.elementAtOrNull(chapter - 1) ?? '0';
   String? translationKey;
   var translated = false;
+  // Gate on the per-comic switch alone (which syncs over WebDAV), not on
+  // isReady: a device without translation models can still render a translated
+  // page from a stored result that synced across (see renderStoredPage). When
+  // models ARE present, missing pages get translated on demand as before.
   if (!reader.showOriginalPages &&
-      ImageTranslationService.enabledFor(reader.cid, reader.type.sourceKey)) {
+      ImageTranslationService.isEnabledForComic(
+        reader.cid,
+        reader.type.sourceKey,
+      )) {
     translationKey = ImageTranslationService.cacheKeyFor(
       imageKey,
       reader.type.comicSource?.key,

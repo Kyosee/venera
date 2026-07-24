@@ -284,6 +284,43 @@ class ImageTranslationService with ChangeNotifier {
     return await CacheManager().findCache(cacheKey) != null;
   }
 
+  /// Renders a page purely from an already-stored text result — no OCR, no LLM,
+  /// no models. This is what lets a device that received another device's
+  /// translations over WebDAV show them even without any translation models
+  /// installed: the durable [TranslationStore] rows synced across, and the
+  /// renderer only needs the page bytes + regions + the app font.
+  ///
+  /// Returns the rendered PNG bytes when a stored result produced a visible
+  /// page (and caches it), or null when there is no stored result for this page
+  /// or the stored result is empty (the page has no translatable text) — in
+  /// both null cases the caller should show the original image. Never triggers
+  /// a translation; a page missing from the store stays untranslated here.
+  Future<Uint8List?> renderStoredPage(
+    String cacheKey,
+    Uint8List imageBytes,
+  ) async {
+    var cached = await CacheManager().findCache(cacheKey);
+    if (cached != null) {
+      _completed.add(cacheKey);
+      return await cached.readAsBytes();
+    }
+    var regions = TranslationStore().get(cacheKey);
+    if (regions == null) {
+      // Never translated on any device that synced here; show the original.
+      return null;
+    }
+    if (regions.isEmpty) {
+      // Stored "no translatable text" result; nothing to render.
+      _noContent.add(cacheKey);
+      return null;
+    }
+    var pipeline = _pipeline ??= PageTranslationPipeline();
+    var rendered = await pipeline.renderPage(imageBytes, regions);
+    await CacheManager().writeCache(cacheKey, rendered, _imageCacheDuration);
+    _completed.add(cacheKey);
+    return rendered;
+  }
+
   /// Translates one page synchronously (awaitable), writing both cache levels,
   /// and returns whether a translated page was produced. Unlike [schedule]
   /// this does not go through the reader's bounded/LRU queue — the
