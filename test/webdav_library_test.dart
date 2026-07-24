@@ -41,5 +41,14 @@ void main() {
       expect(WebdavLibrary.titleOf('/comics/One%20Piece/'), 'One Piece');
       expect(WebdavLibrary.titleOf('/comics/Naruto'), 'Naruto');
     });
+
+    test('falls back to the raw name when it is not valid percent-encoding',
+        () {
+      // A literal '%' in a title (e.g. a migrated "50% OFF" folder) is not
+      // valid percent-encoding; decoding must not throw (issue: crash on
+      // detail load) — the raw segment is used instead.
+      expect(WebdavLibrary.titleOf('/comics/50% OFF/'), '50% OFF');
+      expect(WebdavLibrary.titleOf('/comics/100%/'), '100%');
+    });
   });
 }

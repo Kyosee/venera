@@ -380,9 +380,17 @@ class WebdavLibrary {
     if (p.endsWith('/')) p = p.substring(0, p.length - 1);
     final slash = p.lastIndexOf('/');
     final name = slash < 0 ? p : p.substring(slash + 1);
-    return Uri.decodeComponent(name).isEmpty
-        ? name
-        : Uri.decodeComponent(name);
+    // A folder name is percent-decoded for display, but a literal '%' in the
+    // title (e.g. "50% OFF") is not valid percent-encoding and makes
+    // decodeComponent throw, which used to crash detail loading. Fall back to
+    // the raw name whenever it can't be decoded.
+    String decoded;
+    try {
+      decoded = Uri.decodeComponent(name);
+    } catch (_) {
+      return name;
+    }
+    return decoded.isEmpty ? name : decoded;
   }
 
   /// Probes the current (or supplied) config by listing its root.
