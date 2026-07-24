@@ -544,7 +544,28 @@ abstract mixin class _ComicPageActions {
           showSourceMigrationDialog(context, _toFavoriteItem());
         },
       ),
+      // Only offered for a comic whose images are actually on disk: migration
+      // uploads the local pages, so a not-yet-downloaded online comic has
+      // nothing to send. The multi-select list page has the batch entry.
+      if (_localDownloadedComic() != null)
+        MenuEntry(
+          icon: Icons.cloud_upload_outlined,
+          text: "Migrate to WebDAV source".tl,
+          onClick: () {
+            startWebdavMigrationFlow([_localDownloadedComic()!]);
+          },
+        ),
     ]);
+  }
+
+  /// The on-disk [LocalComic] for this page's comic when its images are fully
+  /// downloaded, else null. Drives the WebDAV-migration menu entry's visibility.
+  LocalComic? _localDownloadedComic() {
+    var local = LocalManager().find(comic.id, comic.comicType);
+    if (local == null || local.status != LocalComicStatus.downloaded) {
+      return null;
+    }
+    return local;
   }
 
   /// Long-press menu on the translate button: the fast path (tap) starts a
