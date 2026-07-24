@@ -22,7 +22,8 @@ class PreTranslationChapter {
     this.total = 0,
     this.done = 0,
     this.failed = 0,
-  });
+    Set<int>? failedPages,
+  }) : failedPages = failedPages ?? <int>{};
 
   /// Source chapter id (the eid passed to loadComicPages / image keys). For a
   /// comic without chapters this is '0'.
@@ -34,12 +35,23 @@ class PreTranslationChapter {
   int done;
   int failed;
 
+  /// Indices (into the resolved page-key list) of the pages that failed this
+  /// run, so a retry can re-run exactly those and leave the succeeded pages
+  /// alone. Kept in lockstep with [failed]: a page enters here when it fails
+  /// and leaves when a retry succeeds, so `failedPages.length == failed` for a
+  /// chapter recorded by the current version. Persisted so a retry survives a
+  /// restart. Older persisted tasks lack it (empty set) — a retry then falls
+  /// back to re-scanning the whole chapter, which is cheap because rendered
+  /// pages skip via hasRenderedPage.
+  final Set<int> failedPages;
+
   Map<String, dynamic> toJson() => {
     'eid': eid,
     'title': title,
     'total': total,
     'done': done,
     'failed': failed,
+    'failedPages': failedPages.toList(),
   };
 
   factory PreTranslationChapter.fromJson(Map<String, dynamic> json) {
@@ -49,6 +61,10 @@ class PreTranslationChapter {
       total: json['total'] ?? 0,
       done: json['done'] ?? 0,
       failed: json['failed'] ?? 0,
+      failedPages: (json['failedPages'] as List? ?? [])
+          .map((e) => e is int ? e : int.tryParse('$e'))
+          .whereType<int>()
+          .toSet(),
     );
   }
 }
@@ -89,6 +105,9 @@ class PreTranslationTask {
   int get total => chapters.fold(0, (sum, c) => sum + c.total);
   int get done => chapters.fold(0, (sum, c) => sum + c.done);
   int get failed => chapters.fold(0, (sum, c) => sum + c.failed);
+
+  /// Whether any chapter has failed pages that could be retried.
+  bool get hasFailures => chapters.any((c) => c.failed > 0);
 
   /// Overall progress across the whole job, weighted by chapters rather than
   /// pages. Each chapter contributes an equal 1/N slice; a chapter whose page
@@ -282,6 +301,29 @@ class PreTranslationTaskManager with ChangeNotifier {
     }
   }
 
+  /// Manually re-runs the failed pages of a job. Works on a running job (the
+  /// running loop's own auto-retry already covers it, so this is mainly for a
+  /// finished one) or a finished/failed job in history: the job is moved back
+  /// to the active list, set running, and re-driven — [_run]'s forward loop
+  /// no-ops on already-processed chapters, then [_retryFailedPasses] re-runs
+  /// just the failed pages. Succeeded pages are never re-requested (they skip
+  /// via hasRenderedPage). Does nothing if the job has no failures.
+  void retryFailed(String id) {
+    var task = currentTasks.where((t) => t.id == id).firstOrNull ??
+        historyTasks.where((t) => t.id == id).firstOrNull;
+    if (task == null || !task.hasFailures) return;
+    if (_runningIds.contains(task.id)) return;
+    if (historyTasks.remove(task)) {
+      currentTasks.insert(0, task);
+    }
+    task.status = PreTranslationTaskStatus.running;
+    task.finishedAt = null;
+    _canceledIds.remove(task.id);
+    _saveActive();
+    notifyListeners();
+    unawaited(_run(task));
+  }
+
   void _refreshKeepAlive(PreTranslationTask task) {
     BackgroundKeepAlive.instance.update(
       BackgroundKeepAlive.tagPreTranslate,
@@ -305,6 +347,14 @@ class PreTranslationTaskManager with ChangeNotifier {
         await _waitWhilePaused(task);
         if (_canceledIds.contains(task.id)) break;
         await _runChapter(task, chapter);
+      }
+      // Auto-retry the failed pages once: a transient error (network blip, rate
+      // limit) on the first pass is common, and one automatic sweep clears most
+      // of them without the user noticing. Only the pages that actually failed
+      // are re-run; succeeded pages are untouched.
+      if (!_canceledIds.contains(task.id) &&
+          task.status == PreTranslationTaskStatus.running) {
+        await _retryFailedPasses(task);
       }
       if (task.status == PreTranslationTaskStatus.running) {
         task.status = task.failed > 0 && task.done == 0
@@ -372,6 +422,126 @@ class PreTranslationTaskManager with ChangeNotifier {
     }
   }
 
+  /// Re-runs only the pages that failed, across every chapter that has any.
+  /// A success moves a page from failed→done (the chapter's failed count drops
+  /// and its index leaves [PreTranslationChapter.failedPages]); a page that
+  /// fails again stays recorded. Because this only shifts counts between failed
+  /// and done — never changing done+failed — the forward resume cursor
+  /// (startIndex = done + failed) stays valid.
+  ///
+  /// Called once automatically at the end of [_run], and again on each manual
+  /// [retryFailed]. Chapters recorded before this feature existed have failures
+  /// but no indices; those are re-scanned wholesale by zeroing their counters
+  /// so the forward path redoes them (rendered pages skip cheaply).
+  Future<void> _retryFailedPasses(PreTranslationTask task) async {
+    var groupSize = _batchPages;
+    for (var chapter in task.chapters) {
+      if (_canceledIds.contains(task.id)) return;
+      if (chapter.failed <= 0) continue;
+
+      // Legacy task with failures but no recorded indices: reset the chapter so
+      // the forward loop re-scans it. Cheap — already-rendered pages skip.
+      if (chapter.failedPages.isEmpty) {
+        chapter.done = 0;
+        chapter.failed = 0;
+        chapter.total = 0;
+        await _runChapter(task, chapter);
+        continue;
+      }
+
+      List<String> pageKeys;
+      try {
+        pageKeys = await _resolvePageKeys(task, chapter);
+      } catch (e, s) {
+        Log.error('Pre-translation', 'Retry failed to list pages: $e', s);
+        continue;
+      }
+
+      // Only indices still in range and still marked failed. Sorted so grouping
+      // is deterministic.
+      var targets = chapter.failedPages
+          .where((i) => i >= 0 && i < pageKeys.length)
+          .toList()
+        ..sort();
+      for (var g = 0; g < targets.length; g += groupSize) {
+        if (_canceledIds.contains(task.id)) return;
+        await _waitWhilePaused(task);
+        if (_canceledIds.contains(task.id)) return;
+        var slice = targets.sublist(
+          g,
+          (g + groupSize).clamp(0, targets.length),
+        );
+        await _retryGroup(task, chapter, pageKeys, slice);
+        _refreshKeepAlive(task);
+        _saveActiveThrottled();
+        notifyListeners();
+      }
+    }
+  }
+
+  /// Re-translates the specific page [indices] of a chapter (a retry slice).
+  /// Unlike [_runGroup] this operates on an explicit, possibly non-contiguous
+  /// set and moves counts failed→done instead of appending to a prefix, so
+  /// done+failed is preserved.
+  Future<void> _retryGroup(
+    PreTranslationTask task,
+    PreTranslationChapter chapter,
+    List<String> pageKeys,
+    List<int> indices,
+  ) async {
+    var service = ImageTranslationService.instance;
+    var pending = <({int index, String cacheKey, Uint8List imageBytes})>[];
+    for (var i in indices) {
+      if (_canceledIds.contains(task.id)) return;
+      var imageKey = pageKeys[i];
+      var cacheKey = ImageTranslationService.cacheKeyFor(
+        imageKey,
+        task.sourceKey,
+        task.cid,
+        chapter.eid,
+      );
+      try {
+        if (await service.hasRenderedPage(cacheKey)) {
+          _markRetrySuccess(chapter, i);
+          continue;
+        }
+        var bytes = await _fetchPageBytes(task, chapter.eid, imageKey);
+        pending.add((index: i, cacheKey: cacheKey, imageBytes: bytes));
+      } catch (e, s) {
+        Log.warning('Pre-translation', 'Retry page failed: $e\n$s');
+        // Still failed; leave it recorded.
+      }
+    }
+    if (pending.isEmpty) return;
+    try {
+      var results = await service.translatePageGroup(
+        pending
+            .map((p) => (cacheKey: p.cacheKey, imageBytes: p.imageBytes))
+            .toList(),
+        task.comicKey,
+        shouldCancel: () => _canceledIds.contains(task.id),
+      );
+      for (var j = 0; j < pending.length; j++) {
+        if (results[j]) {
+          _markRetrySuccess(chapter, pending[j].index);
+        }
+      }
+    } on PipelineCanceled {
+      return;
+    } catch (e, s) {
+      Log.warning('Pre-translation', 'Retry group failed: $e\n$s');
+      // Whole group still failed; leave every index recorded.
+    }
+  }
+
+  /// Moves one page from failed→done after a successful retry, keeping
+  /// done+failed (and thus the forward resume cursor) invariant.
+  void _markRetrySuccess(PreTranslationChapter chapter, int index) {
+    if (!chapter.failedPages.remove(index)) return;
+    chapter.done++;
+    if (chapter.failed > 0) chapter.failed--;
+  }
+
   /// How many pages' bubbles to merge into one LLM request. 1 (default) keeps
   /// the historic per-page path; larger gives the model cross-page context and
   /// cuts request count. Clamped to a sane range so a bad stored value can't
@@ -394,9 +564,13 @@ class PreTranslationTaskManager with ChangeNotifier {
     int end,
   ) async {
     var service = ImageTranslationService.instance;
-    var pending = <({String cacheKey, Uint8List imageBytes})>[];
-    var cached = 0;
-    var fetchFailed = 0;
+    var pending = <({int index, String cacheKey, Uint8List imageBytes})>[];
+    var done = 0;
+    var failed = 0;
+    // Page indices that failed this group, recorded so a later retry pass can
+    // re-run exactly these. Collected locally and merged into the chapter only
+    // at the atomic commit below, mirroring the done/failed counters.
+    var failedIndices = <int>{};
     for (var i = start; i < end; i++) {
       // Cancel before the group is counted: leave the chapter counters at the
       // group's start boundary so a resume redoes the whole group. Every page
@@ -412,27 +586,33 @@ class PreTranslationTaskManager with ChangeNotifier {
       );
       try {
         if (await service.hasRenderedPage(cacheKey)) {
-          cached++;
+          done++;
           continue;
         }
         var bytes = await _fetchPageBytes(task, chapter.eid, imageKey);
-        pending.add((cacheKey: cacheKey, imageBytes: bytes));
+        pending.add((index: i, cacheKey: cacheKey, imageBytes: bytes));
       } catch (e, s) {
         Log.warning('Pre-translation', 'Page failed: $e\n$s');
-        fetchFailed++;
+        failed++;
+        failedIndices.add(i);
       }
     }
-    var done = cached;
-    var failed = fetchFailed;
     if (pending.isNotEmpty) {
       try {
         var results = await service.translatePageGroup(
-          pending,
+          pending
+              .map((p) => (cacheKey: p.cacheKey, imageBytes: p.imageBytes))
+              .toList(),
           task.comicKey,
           shouldCancel: () => _canceledIds.contains(task.id),
         );
-        for (var ok in results) {
-          ok ? done++ : failed++;
+        for (var j = 0; j < pending.length; j++) {
+          if (results[j]) {
+            done++;
+          } else {
+            failed++;
+            failedIndices.add(pending[j].index);
+          }
         }
       } on PipelineCanceled {
         // Canceled mid-request: abandon this group's counts entirely. Pages
@@ -441,7 +621,10 @@ class PreTranslationTaskManager with ChangeNotifier {
         return;
       } catch (e, s) {
         Log.warning('Pre-translation', 'Group failed: $e\n$s');
-        failed += pending.length;
+        for (var p in pending) {
+          failed++;
+          failedIndices.add(p.index);
+        }
       }
     }
     // Apply the whole contiguous group's counts at once, so done+failed always
@@ -449,6 +632,7 @@ class PreTranslationTaskManager with ChangeNotifier {
     // (startIndex = done + failed) relies on.
     chapter.done += done;
     chapter.failed += failed;
+    chapter.failedPages.addAll(failedIndices);
   }
 
   /// Resolves the ordered image keys of a chapter, from the local library when
@@ -610,6 +794,7 @@ class PreTranslationTaskManager with ChangeNotifier {
         c.done = 0;
         c.failed = 0;
         c.total = 0;
+        c.failedPages.clear();
       }
     }
     _saveActive();
@@ -632,6 +817,7 @@ class PreTranslationTaskManager with ChangeNotifier {
           c.done = 0;
           c.failed = 0;
           c.total = 0;
+          c.failedPages.clear();
         }
       }
     }
@@ -653,6 +839,7 @@ class PreTranslationTaskManager with ChangeNotifier {
         c.done = 0;
         c.failed = 0;
         c.total = 0;
+        c.failedPages.clear();
       }
     }
     _saveActive();

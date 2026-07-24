@@ -600,7 +600,15 @@ class _TasksPageState extends State<TasksPage> with SingleTickerProviderStateMix
           ],
         );
       default:
-        // Finished/canceled/failed jobs live in history; no actions.
+        // Finished/canceled/failed jobs live in history. Offer a retry when
+        // some pages failed — it re-runs only those, not the whole job.
+        if (task.hasFailures) {
+          return IconButton(
+            tooltip: "Retry failed pages".tl,
+            icon: const Icon(Icons.refresh),
+            onPressed: () => preTranslationManager.retryFailed(task.id),
+          );
+        }
         return null;
     }
   }
