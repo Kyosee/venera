@@ -176,9 +176,18 @@ abstract mixin class _ComicPageActions {
       );
     }
 
-    // A chapter-less comic needs no picker: translate its single page set.
+    // A chapter-less comic has no picker to open, but pre-translation still
+    // spends one LLM request per page, so confirm before starting instead of
+    // kicking it off the moment the button is tapped.
     if (chapters == null) {
-      startJob([0]);
+      showConfirmDialog(
+        context: App.rootContext,
+        title: "Start pre-translation?".tl,
+        content:
+            "Each page is roughly one LLM request; on a paid endpoint this may cost money."
+                .tl,
+        onConfirm: () => startJob([0]),
+      );
       return;
     }
     App.rootContext.to(
