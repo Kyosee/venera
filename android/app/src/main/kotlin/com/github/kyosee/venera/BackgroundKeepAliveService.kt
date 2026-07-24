@@ -147,8 +147,11 @@ class BackgroundKeepAliveService : Service() {
     private fun composeNotification(tag: String, status: String): Notification {
         val resume = Intent(this, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        routeFor(tag)?.let { resume.putExtra(MainActivity.EXTRA_NOTIFICATION_ROUTE, it) }
+        // requestCode 按 tag 区分：多类通知共用 requestCode 会让 FLAG_UPDATE_CURRENT
+        // 把彼此的 route extra 互相覆盖，点哪条都跳到同一个页面。
         val openApp = PendingIntent.getActivity(
-            this, 0, resume,
+            this, notificationId(tag), resume,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val body = status.ifBlank { getString(R.string.background_notification_default) }
@@ -162,6 +165,13 @@ class BackgroundKeepAliveService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .build()
+    }
+
+    /** 点击本类通知时应跳转到的 Flutter 路由；未知 tag 返回 null（回到应用即可）。 */
+    private fun routeFor(tag: String): String? = when (tag) {
+        TAG_FOLLOW_UPDATE -> ROUTE_FOLLOW_UPDATES
+        TAG_IMPORT, TAG_EXPORT, TAG_COMIC_IMPORT, TAG_SYNC, TAG_PRE_TRANSLATE -> ROUTE_TASKS
+        else -> null
     }
 
     private fun titleFor(tag: String): String {
@@ -216,6 +226,12 @@ class BackgroundKeepAliveService : Service() {
         const val TAG_EXPORT = "export"
         const val TAG_COMIC_IMPORT = "comic_import"
         const val TAG_SYNC = "sync"
+        const val TAG_PRE_TRANSLATE = "pre_translate"
+
+        // 点击通知时携带给 MainActivity 的 Flutter 路由。追更单独落到追更列表页，
+        // 其余各类后台任务统一落到任务页。
+        private const val ROUTE_FOLLOW_UPDATES = "follow_updates"
+        private const val ROUTE_TASKS = "tasks"
 
         private fun notificationId(tag: String): Int = when (tag) {
             TAG_FOLLOW_UPDATE -> BASE_NOTE_ID + 1
@@ -223,6 +239,7 @@ class BackgroundKeepAliveService : Service() {
             TAG_EXPORT -> BASE_NOTE_ID + 3
             TAG_COMIC_IMPORT -> BASE_NOTE_ID + 4
             TAG_SYNC -> BASE_NOTE_ID + 5
+            TAG_PRE_TRANSLATE -> BASE_NOTE_ID + 6
             else -> BASE_NOTE_ID + (tag.hashCode() and 0x3F) + 8
         }
 

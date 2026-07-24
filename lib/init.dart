@@ -19,6 +19,7 @@ import 'package:venera/pages/comic_source_page.dart';
 import 'package:venera/pages/follow_updates_page.dart';
 import 'package:venera/pages/settings/settings_page.dart';
 import 'package:venera/utils/app_links.dart';
+import 'package:venera/utils/handle_notification_route.dart';
 import 'package:venera/utils/handle_text_share.dart';
 import 'package:venera/utils/opencc.dart';
 import 'package:venera/utils/sync_protocol.dart';
@@ -195,6 +196,7 @@ Future<void> _initRhttp() async {
 void initAndroidExtras() {
   handleLinks();
   handleTextShare();
+  handleNotificationRoute();
 }
 
 Future<void> trySetHighRefreshRate() async {

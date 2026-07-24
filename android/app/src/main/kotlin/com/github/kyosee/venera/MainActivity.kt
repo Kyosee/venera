@@ -50,6 +50,12 @@ class MainActivity : FlutterFragmentActivity() {
 
     private var textShareHandler: ((String) -> Unit)? = null
 
+    // 点击后台任务通知带来的目标路由。冷启动时 Flutter 尚未订阅事件通道，先入队，
+    // 待 onListen 时一次性回放（与 sharedTexts/textShareHandler 同一套缓冲模式）。
+    private val pendingRoutes = ArrayList<String>()
+
+    private var notificationRouteHandler: ((String) -> Unit)? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -60,6 +66,7 @@ class MainActivity : FlutterFragmentActivity() {
                     handleSharedText(text)
             }
         }
+        handleNotificationRoute(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -70,6 +77,20 @@ class MainActivity : FlutterFragmentActivity() {
                 if (text != null)
                     handleSharedText(text)
             }
+        }
+        handleNotificationRoute(intent)
+    }
+
+    // 从通知点击带来的 Intent 中取出目标路由并交给 Flutter。已订阅则直接分发，
+    // 否则入队等 onListen 回放。消费后清掉 extra，避免 activity 复用旧 Intent 重投。
+    private fun handleNotificationRoute(intent: Intent?) {
+        val route = intent?.getStringExtra(EXTRA_NOTIFICATION_ROUTE) ?: return
+        intent.removeExtra(EXTRA_NOTIFICATION_ROUTE)
+        val handler = notificationRouteHandler
+        if (handler != null) {
+            handler.invoke(route)
+        } else {
+            pendingRoutes.add(route)
         }
     }
 
@@ -371,6 +392,29 @@ class MainActivity : FlutterFragmentActivity() {
                     textShareHandler = null
                 }
             })
+
+        // 通知点击路由：原生把点击的目标路由送到这里，Flutter 侧据此导航到对应页面。
+        // 冷启动时通知的 Intent 先于 Flutter 订阅到达，故先入队、onListen 时回放。
+        val notificationRouteChannel =
+            EventChannel(flutterEngine.dartExecutor.binaryMessenger, "venera/notification_route")
+        notificationRouteChannel.setStreamHandler(
+            object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
+                    notificationRouteHandler = { route ->
+                        events.success(route)
+                    }
+                    if (pendingRoutes.isNotEmpty()) {
+                        for (route in pendingRoutes) {
+                            events.success(route)
+                        }
+                        pendingRoutes.clear()
+                    }
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    notificationRouteHandler = null
+                }
+            })
     }
 
     private fun getProxy(): String {
@@ -657,6 +701,12 @@ class MainActivity : FlutterFragmentActivity() {
                 }
             }.start()
         }
+    }
+
+    companion object {
+        // 后台任务通知点击后，附在 Intent 里的目标 Flutter 路由键。原生各前台服务
+        // （追更/同步/导入/导出/下载）写入，MainActivity 取出后经事件通道转给 Flutter。
+        const val EXTRA_NOTIFICATION_ROUTE = "venera_notification_route"
     }
 }
 

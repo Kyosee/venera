@@ -62,6 +62,7 @@ class DownloadKeepAliveService : Service() {
     private fun composeNotification(status: String): Notification {
         val resume = Intent(this, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            .putExtra(MainActivity.EXTRA_NOTIFICATION_ROUTE, ROUTE_DOWNLOADING)
         val openApp = PendingIntent.getActivity(
             this, 0, resume,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
@@ -112,6 +113,9 @@ class DownloadKeepAliveService : Service() {
         private const val DONE_NOTE_ID = 1102
         private const val DONE_CHANNEL_ID = "download.done"
 
+        // 点击下载通知（进度/完成）时携带给 MainActivity 的路由，转交 Flutter 后打开下载页。
+        private const val ROUTE_DOWNLOADING = "downloading"
+
         /** 拉起服务，或在已运行时刷新通知文案。幂等。 */
         fun launch(context: Context, status: String) {
             val intent = Intent(context, DownloadKeepAliveService::class.java)
@@ -142,6 +146,7 @@ class DownloadKeepAliveService : Service() {
             }
             val resume = Intent(context, MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .putExtra(MainActivity.EXTRA_NOTIFICATION_ROUTE, ROUTE_DOWNLOADING)
             val openApp = PendingIntent.getActivity(
                 context, 1, resume,
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
