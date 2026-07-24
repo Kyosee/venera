@@ -2,9 +2,12 @@ import 'dart:async';
 import 'dart:isolate';
 import 'dart:math' as math;
 
+import 'package:venera/foundation/app.dart';
+import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/image_translation/hf_tokenizer.dart';
 import 'package:venera/foundation/image_translation/ort_ffi.dart';
 import 'package:venera/foundation/image_translation/translation_types.dart';
+import 'package:venera/foundation/image_translation/worker_pool_selection.dart';
 import 'package:venera/utils/io.dart';
 
 /// Model file paths handed to the worker with each request; the worker has no
@@ -72,17 +75,90 @@ class _WorkerResponse {
 /// Handle to the translation worker isolate. All heavy work — preprocessing,
 /// ONNX inference (via the FFI binding), decoding loops — runs inside the
 /// worker, so nothing here can jank the UI.
+/// Pool of OCR worker isolates. All heavy work — preprocessing, ONNX inference,
+/// decoding — runs inside a worker, so nothing here janks the UI. Concurrent
+/// [ocrPage] calls fan out across workers instead of queuing on one, so the
+/// reader's two in-flight pages and the pre-translation pipeline's overlapped
+/// groups get real parallelism on multi-core devices.
 class TranslationWorker {
   TranslationWorker._();
 
   static final instance = TranslationWorker._();
 
+  final _workers = <_IsolateWorker>[];
+
+  /// Pool size: settings value when >0 (clamped 1..6), else auto by platform.
+  int get _poolSize {
+    var setting = appdata.settings['imageTranslationOcrWorkers'];
+    var n = setting is int ? setting : int.tryParse('$setting') ?? 0;
+    if (n > 0) return n.clamp(1, 6);
+    var auto = Platform.numberOfProcessors ~/ 2;
+    var cap = App.isDesktop ? 3 : 2;
+    return auto.clamp(1, cap);
+  }
+
+  Future<List<OcrBlock>> ocrPage(
+    RgbaImage image, {
+    required String sourceLang,
+    required WorkerModelPaths paths,
+  }) {
+    var poolSize = _poolSize;
+    // Keep total ONNX intra-op threads ~= cores: dividing by the pool size
+    // avoids oversubscribing the CPU (which would make more workers slower).
+    var intraThreads = (Platform.numberOfProcessors ~/ poolSize).clamp(1, 4);
+    var worker = _pickWorker(poolSize);
+    return worker.ocrPage(
+      image,
+      sourceLang: sourceLang,
+      paths: paths,
+      intraThreads: intraThreads,
+    );
+  }
+
+  _IsolateWorker _pickWorker(int poolSize) {
+    // Prefer an idle existing worker — avoids spawning (and re-loading models
+    // into) a new isolate when load is low.
+    for (var w in _workers) {
+      if (w.pendingCount == 0) return w;
+    }
+    // Under capacity and all busy: add a worker for more parallelism.
+    if (_workers.length < poolSize) {
+      var worker = _IsolateWorker();
+      _workers.add(worker);
+      return worker;
+    }
+    // At capacity: dispatch to the least-busy worker.
+    var idx = pickLeastBusyIndex([for (var w in _workers) w.pendingCount]);
+    return _workers[idx];
+  }
+
+  /// Frees model memory in every worker (sessions re-create lazily).
+  void release() {
+    for (var w in _workers) {
+      w.release();
+    }
+  }
+
+  /// Kills all worker isolates; they restart lazily on the next request.
+  void dispose() {
+    for (var w in _workers) {
+      w.dispose();
+    }
+    _workers.clear();
+  }
+}
+
+/// A single OCR worker isolate. Owns its ONNX sessions (lazily loaded on first
+/// request, so an unused worker costs no model memory).
+class _IsolateWorker {
   Isolate? _isolate;
   SendPort? _sendPort;
   Future<void>? _starting;
-  final _receivePort = <ReceivePort>[];
+  ReceivePort? _receivePort;
   final _pending = <int, Completer<Object?>>{};
   int _nextId = 0;
+
+  int get pendingCount => _pending.length;
 
   Future<void> _ensureStarted() async {
     if (_sendPort != null) return;
@@ -90,7 +166,7 @@ class TranslationWorker {
     var completer = Completer<void>();
     _starting = completer.future;
     var port = ReceivePort();
-    _receivePort.add(port);
+    _receivePort = port;
     port.listen((message) {
       if (message is SendPort) {
         _sendPort = message;
@@ -129,13 +205,12 @@ class TranslationWorker {
     return await completer.future as T;
   }
 
-  /// Detects and recognizes all text blocks of a page.
   Future<List<OcrBlock>> ocrPage(
     RgbaImage image, {
     required String sourceLang,
     required WorkerModelPaths paths,
+    required int intraThreads,
   }) {
-    var intraThreads = (Platform.numberOfProcessors ~/ 2).clamp(1, 4);
     return _request<List<OcrBlock>>(
       (id) => _OcrPageRequest(
         id,
@@ -149,22 +224,17 @@ class TranslationWorker {
     );
   }
 
-  /// Frees model memory inside the worker (sessions are re-created lazily).
   void release() {
     _sendPort?.send(const _ReleaseRequest());
   }
 
-  /// Kills the worker isolate entirely. Pending requests complete with an
-  /// error; the worker restarts lazily on the next request.
   void dispose() {
     _isolate?.kill(priority: Isolate.immediate);
     _isolate = null;
     _sendPort = null;
     _starting = null;
-    for (var port in _receivePort) {
-      port.close();
-    }
-    _receivePort.clear();
+    _receivePort?.close();
+    _receivePort = null;
     for (var pending in _pending.values) {
       pending.completeError(Exception('Translation worker disposed'));
     }
